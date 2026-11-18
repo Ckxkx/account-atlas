@@ -667,3 +667,9 @@ html[data-theme=light] .tabbar{background:linear-gradient(180deg,rgba(255,255,25
   backdrop-filter:blur(3px) saturate(2.4) brightness(1.04) contrast(.96);-webkit-backdrop-filter:blur(3px) saturate(2.4) brightness(1.04) contrast(.96)}
 html[data-theme=light] .tab-thumb{background:radial-gradient(120% 90% at 50% 0%,rgba(255,255,255,.55),rgba(255,255,255,.12) 80%);backdrop-filter:blur(2px) saturate(1.8);-webkit-backdrop-filter:blur(2px) saturate(1.8)}
 html[data-theme=light] .tabbar{box-shadow:0 16px 36px -14px rgba(0,0,0,.25),0 1px 4px rgba(0,0,0,.06),inset 0 1px 1px rgba(255,255,255,.95),inset 0 -1px 1px rgba(255,255,255,.5),inset 0 0 0 .5px rgba(0,0,0,.07),inset 0 0 10px rgba(255,255,255,.12)}
+/* v5.6 Safari-style proportions: wide, slim, low */
+.tabbar{--tw:calc((min(100vw - 56px, 420px) - 8px) / 3);padding:4px;bottom:max(12px, calc(env(safe-area-inset-bottom) - 2px))}
+.tab-thumb{top:4px;bottom:4px;left:4px}
+.tabbar button{padding:0;height:44px;justify-content:center}
+.tabbar button svg{width:24px;height:24px}
+@media (max-width:340px){.tabbar{--tw:calc((100vw - 40px - 8px) / 3)}}
