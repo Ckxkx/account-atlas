@@ -212,7 +212,9 @@
     }
     return `<div class="${cls}" aria-hidden="true">${tiles.join('')}</div>`;
   }
-  const handle = a => a.handle ? `<em class="hd">${esc(a.handle)}</em>` : '';
+  const maskHandle = h => [...h].slice(0, 1).join('') + '•••';
+  // the map hides usernames too while 隐藏号码 is on
+  const handle = (a, priv) => a.handle ? `<em class="hd">${esc(priv && ui.privacy ? maskHandle(a.handle) : a.handle)}</em>` : '';
   const caps = ids => ids.map(idById).filter(Boolean).map(i => `<span class="cap" style="--c:${i.color}"><i></i>${esc(i.label || display(i))}</span>`).join('');
 
   // ---------- toast (notification banner) ----------
@@ -953,7 +955,7 @@
       box.innerHTML = `<svg class="threads" viewBox="0 0 ${W} ${H}" style="width:${W}px;height:${H}px" aria-hidden="true">${paths.join('')}</svg>
         ${pos.map((p, k) => (k === 0 || k === brk) ? `<span class="mgroup" style="top:${p.y - 31 - 24}px;width:${L}px">${p.i.type === 'phone' ? ICON.phone + '手机号' : ICON.email + '邮箱'}</span>` : '').join('')}
         ${pos.map(p => { const c = accountsOf(p.i.id).length; return `<button class="mcard" data-map-identity="${p.i.id}" style="top:${p.y - 31}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${ICON[p.i.type]}<b>${c}</b></span><span class="mv">${esc(p.i.label || display(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
-        ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}${handle(a)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
+        ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}${handle(a, 1)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
       apply();
       if (!drawn) { drawn = true; $$('.threads path', box).forEach((p, k) => { const len = p.getTotalLength(); p.animate([{ strokeDasharray: len, strokeDashoffset: len }, { strokeDasharray: len, strokeDashoffset: 0 }], { duration: 700, delay: 60 + Math.min(k, 20) * 18, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }); }); }
     }
