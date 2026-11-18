@@ -427,10 +427,13 @@
     if (m) (b.id === 'themeBtn' ? b : b.querySelector('svg')).animate(m[0], { duration: m[1], easing: ease });
     if (b.id === 'menuBtn') b.querySelectorAll('circle').forEach((c, k) => c.animate([{ transform: 'none' }, { transform: 'translateY(-3.5px)', offset: .4 }, { transform: 'none' }], { duration: 420, delay: k * 60, easing: ease }));
   }
+  // inside the iOS app shell (ios/main.swift) the page talks to native for the status bar and file export
+  const native = window.webkit?.messageHandlers?.atlas || null;
   function paintTheme() {
     const light = document.documentElement.dataset.theme === 'light';
     $('meta[name="theme-color"]').content = light ? '#f2f2f7' : '#000000';
     const b = $('#themeBtn'); if (b) b.setAttribute('aria-label', light ? '切换到深色' : '切换到浅色');
+    native?.postMessage({ theme: light ? 'light' : 'dark' });
   }
 
   // ---------- tabs ----------
@@ -894,6 +897,7 @@
 
   // ---------- import / export ----------
   function exportData() {
+    if (native) { native.postMessage({ file: `账号备份-${new Date().toISOString().slice(0, 10)}.json`, text: JSON.stringify({ app: 'atlas', version: 1, exportedAt: new Date().toISOString(), identities: state.identities, accounts: state.accounts }, null, 2) }); return; }
     const blob = new Blob([JSON.stringify({ app: 'atlas', version: 1, exportedAt: new Date().toISOString(), identities: state.identities, accounts: state.accounts }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `账号备份-${new Date().toISOString().slice(0, 10)}.json`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1500); toast('备份已导出');

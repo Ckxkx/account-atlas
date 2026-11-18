@@ -1,0 +1,38 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/ios.yml']
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unsigned IPA
+        run: |
+          set -euo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          APP=build/Payload/Atlas.app
+          mkdir -p "$APP/www"
+          xcrun -sdk iphoneos swiftc -parse-as-library -O -target arm64-apple-ios15.0 -sdk "$SDK" ios/main.swift -o "$APP/Atlas"
+          # web app, query strings stripped for file:// loading
+          cp -R index.html styles.css app.js logo.svg icon.png icon-512.png manifest.webmanifest icons "$APP/www/"
+          sed -i '' -E 's/\?v=[0-9]+//g' "$APP/www/index.html"
+          VER=$(grep -oE 'app.js\?v=[0-9]+' index.html | grep -oE '[0-9]+$')
+          sed -e "s/__VERSION__/1.0/" -e "s/__BUILD__/$VER/" ios/Info.plist > "$APP/Info.plist"
+          xcrun actool ios/Assets.xcassets --compile "$APP" --platform iphoneos --minimum-deployment-target 15.0 \
+            --app-icon AppIcon --output-partial-info-plist build/partial.plist --target-device iphone
+          /usr/libexec/PlistBuddy -c "Merge build/partial.plist" "$APP/Info.plist"
+          for k in DTPlatformName:iphoneos DTSDKName:iphoneos$(xcrun --sdk iphoneos --show-sdk-version); do
+            /usr/libexec/PlistBuddy -c "Add :${k%%:*} string ${k#*:}" "$APP/Info.plist"; done
+          plutil -convert binary1 "$APP/Info.plist"
+          echo -n 'APPL????' > "$APP/PkgInfo"
+          cd build && zip -qry "../Atlas-$VER.ipa" Payload && cd ..
+          ls -la *.ipa; file "$APP/Atlas"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Atlas-ipa
+          path: '*.ipa'
