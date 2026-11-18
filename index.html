@@ -3,136 +3,82 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#07070d" />
-  <meta name="description" content="Atlas — 记清每个邮箱和手机号注册了哪些网站与 App" />
-  <title>Atlas · 账号星图</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%238b5cf6'/><stop offset='1' stop-color='%2306b6d4'/></linearGradient></defs><circle cx='32' cy='32' r='28' fill='url(%23g)'/><circle cx='32' cy='32' r='8' fill='white'/></svg>" />
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="账号" />
+  <meta name="description" content="记清每个邮箱和手机号注册了哪些网站与 App" />
+  <title>账号 · Atlas</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='%235ac8fa'/><stop offset='1' stop-color='%23007aff'/></linearGradient></defs><rect width='64' height='64' rx='15' fill='url(%23g)'/><circle cx='32' cy='26' r='9' fill='white'/><path d='M16 50c2-9 9-13 16-13s14 4 16 13' fill='white'/></svg>" />
+  <link rel="apple-touch-icon" href="icon.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- animated aurora background -->
-  <div class="aurora" aria-hidden="true">
-    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
-    <div class="grain"></div>
-  </div>
-  <canvas id="stars" aria-hidden="true"></canvas>
-  <div class="spotlight" aria-hidden="true"></div>
-
-  <div class="app">
-    <header class="topbar reveal">
-      <div class="brand">
-        <div class="logo"><span></span></div>
-        <div>
-          <div class="brand-name">Atlas</div>
-          <div class="brand-sub">账号星图</div>
-        </div>
-      </div>
-      <button class="search-pill" id="openPalette">
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <span>搜索网站、邮箱、手机号…</span>
-        <kbd>⌘K</kbd>
+  <header class="nav" id="nav">
+    <div class="nav-bar">
+      <button class="nav-btn" id="menuBtn" aria-label="更多">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><circle cx="7.6" cy="12" r=".9" class="f"/><circle cx="12" cy="12" r=".9" class="f"/><circle cx="16.4" cy="12" r=".9" class="f"/></svg>
       </button>
-      <div class="top-actions">
-        <button class="icon-btn" id="menuBtn" title="数据">
-          <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
-        </button>
-        <div class="menu" id="menu">
-          <button data-act="export">导出备份 (JSON)</button>
-          <button data-act="import">导入备份</button>
-          <button data-act="demo">载入示例数据</button>
-          <hr />
-          <button data-act="wipe" class="danger">清空全部数据</button>
-        </div>
-      </div>
-    </header>
+      <div class="nav-title" id="navTitle">账号</div>
+      <button class="nav-btn" id="addBtn" aria-label="添加">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+    <div class="menu" id="menu" role="menu">
+      <button data-act="privacy"><span>隐藏号码</span><svg viewBox="0 0 24 24"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+      <button data-act="export"><span>导出备份</span><svg viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg></button>
+      <button data-act="import"><span>导入备份</span><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg></button>
+      <button data-act="demo"><span>载入示例</span><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
+      <div class="menu-sep"></div>
+      <button data-act="wipe" class="destructive"><span>清空全部数据</span><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+    </div>
+  </header>
 
-    <section class="hero reveal" style="--d:.08s">
-      <h1>每个账号，<span class="grad">都有迹可循。</span></h1>
-      <p>记下哪个邮箱、哪个手机号注册了哪些网站和 App。数据只保存在你的浏览器里，不上传任何服务器，也从不记录密码。</p>
-      <div class="stats">
-        <div class="stat"><b data-count="emails">0</b><span>邮箱</span></div>
-        <div class="stat"><b data-count="phones">0</b><span>手机号</span></div>
-        <div class="stat"><b data-count="accounts">0</b><span>网站 / App</span></div>
-        <div class="stat"><b data-count="links">0</b><span>绑定关系</span></div>
+  <main class="page">
+    <h1 class="large-title" id="largeTitle">账号</h1>
+    <p class="summary" id="summary"></p>
+
+    <button class="search" id="openSearch">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <span>搜索网站、邮箱或手机号</span>
+    </button>
+
+    <div class="segmented" id="tabs" role="tablist">
+      <span class="seg-thumb" id="segThumb"></span>
+      <button class="active" data-tab="identities">身份</button>
+      <button data-tab="accounts">网站与 App</button>
+      <button data-tab="graph">关系图</button>
+    </div>
+
+    <section class="view active" data-view="identities" id="identitiesView"></section>
+    <section class="view" data-view="accounts" id="accountsView"></section>
+    <section class="view" data-view="graph">
+      <div class="graph-card">
+        <canvas id="graph"></canvas>
+        <div class="graph-hint">拖动图标整理位置，轻点查看详情</div>
       </div>
     </section>
 
-    <nav class="tabs reveal" style="--d:.16s" role="tablist">
-      <div class="tab-indicator"></div>
-      <button class="tab active" data-tab="identities">身份</button>
-      <button class="tab" data-tab="accounts">网站 / App</button>
-      <button class="tab" data-tab="graph">星图</button>
-    </nav>
+    <p class="footnote">所有内容只保存在这台设备的浏览器里，不会上传，也不会记录密码。换设备时用“导出备份”。</p>
+  </main>
 
-    <main class="views reveal" style="--d:.24s">
-      <!-- identities -->
-      <section class="view active" data-view="identities">
-        <div class="view-head">
-          <div class="seg" id="idFilter">
-            <button class="active" data-f="all">全部</button>
-            <button data-f="email">邮箱</button>
-            <button data-f="phone">手机号</button>
-          </div>
-          <button class="btn primary" data-open="identity">
-            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>添加身份
-          </button>
-        </div>
-        <div class="grid" id="identityGrid"></div>
-      </section>
-
-      <!-- accounts -->
-      <section class="view" data-view="accounts">
-        <div class="view-head">
-          <div class="chips" id="catChips"></div>
-          <button class="btn primary" data-open="account">
-            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>添加网站
-          </button>
-        </div>
-        <div class="list" id="accountList"></div>
-      </section>
-
-      <!-- graph -->
-      <section class="view" data-view="graph">
-        <div class="graph-wrap">
-          <canvas id="graph"></canvas>
-          <div class="graph-tip" id="graphTip"></div>
-          <div class="graph-legend">
-            <span><i class="dot email"></i>邮箱</span>
-            <span><i class="dot phone"></i>手机号</span>
-            <span><i class="dot site"></i>网站 / App</span>
-            <em>拖动节点 · 悬停高亮 · 点击查看</em>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <footer class="foot">数据仅存于本机 localStorage · 记得定期导出备份</footer>
-  </div>
-
-  <!-- drawer -->
   <div class="scrim" id="scrim"></div>
-  <aside class="drawer" id="drawer" aria-hidden="true"></aside>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="grabber"></div><div class="sheet-inner" id="sheetInner"></div></div>
 
-  <!-- modal -->
-  <div class="modal-layer" id="modalLayer">
-    <div class="modal" id="modal"></div>
-  </div>
-
-  <!-- palette -->
-  <div class="palette-layer" id="paletteLayer">
-    <div class="palette">
-      <div class="palette-input">
+  <div class="spot-layer" id="spotLayer">
+    <div class="spot">
+      <div class="spot-field">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="paletteInput" placeholder="比如：github、qq.com、138…" autocomplete="off" />
-        <kbd>esc</kbd>
+        <input id="spotInput" placeholder="比如 github、qq.com 或号码后四位" autocomplete="off" enterkeyhint="search" />
+        <button class="spot-cancel" id="spotCancel">取消</button>
       </div>
-      <div class="palette-results" id="paletteResults"></div>
+      <div class="spot-results" id="spotResults"></div>
     </div>
   </div>
 
-  <div class="toasts" id="toasts"></div>
+  <div class="toast" id="toast"></div>
   <input type="file" id="fileInput" accept="application/json" hidden />
-
   <script src="app.js"></script>
 </body>
 </html>
