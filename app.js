@@ -438,7 +438,7 @@
     const idx = TABS.indexOf(tab), th = $('#tabThumb');
     $$('#tabbar button').forEach((b, k) => b.classList.toggle('active', k === idx));
     th.style.transform = `translateX(${idx * 100}%)`;
-    if (!calm()) th.animate([{ scale: '1 1' }, { scale: `${1 + .18 * Math.abs(idx - from)} .9`, offset: .4 }, { scale: '1 1' }], { duration: 500, easing: 'cubic-bezier(.32,.72,0,1)' });
+    if (!calm()) th.animate([{ scale: '1 1' }, { scale: `${1 + .16 * Math.abs(idx - from)} 1.14`, offset: .35 }, { scale: '.97 .96', offset: .7 }, { scale: '1 1' }], { duration: 620, easing: 'cubic-bezier(.32,.72,0,1)' });
     $$('.view').forEach(v => { const on = v.dataset.view === tab; v.classList.toggle('active', on); v.classList.toggle('from-r', on && idx > from); v.classList.toggle('from-l', on && idx < from); });
     $('#topTitle').textContent = { home: '账号', sites: '网站与 App', graph: '关系图' }[tab];
     scrollTo(0, 0);
@@ -461,11 +461,18 @@
       sheet.style.transform = '';
       requestAnimationFrame(() => { sheet.classList.add('open'); $('#scrim').classList.add('show'); });
     }
-    document.body.style.overflow = 'hidden';
+    lockScroll(true);
+  }
+  // freeze the page under a sheet so iOS can't rubber-band it out of place
+  let lockY = null;
+  function lockScroll(on) {
+    const b = document.body;
+    if (on && lockY === null) { lockY = scrollY; Object.assign(b.style, { position: 'fixed', top: -lockY + 'px', left: '0', right: '0', overflow: 'hidden' }); }
+    else if (!on && lockY !== null) { Object.assign(b.style, { position: '', top: '', left: '', right: '', overflow: '' }); scrollTo(0, lockY); lockY = null; }
   }
   function closeSheet() {
     sheet.classList.remove('open'); $('#scrim').classList.remove('show'); sheet.style.transform = '';
-    document.body.style.overflow = ''; sheetCtx = null;
+    lockScroll(false); sheetCtx = null;
   }
   function refreshSheet() {
     if (!sheetCtx) return;
@@ -473,18 +480,22 @@
     if (sheetCtx.kind === 'account') accById(sheetCtx.id) ? showAccount(sheetCtx.id) : closeSheet();
   }
   (() => {
-    let y0 = null, dy = 0;
+    let y0 = null, x0 = 0, dy = 0;
     sheet.addEventListener('touchstart', e => {
       const body = $('.sheet-body', sheet);
       if (innerWidth >= 700 || (body && body.scrollTop > 0 && !e.target.closest('.sheet-bar,.grabber'))) return;
       if (e.target.closest('input,textarea,.suggest')) return;
-      y0 = e.touches[0].clientY; dy = 0; sheet.classList.add('dragging');
+      y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0; sheet.classList.add('dragging');
     }, { passive: true });
     sheet.addEventListener('touchmove', e => {
       if (y0 === null) return;
-      dy = Math.max(0, e.touches[0].clientY - y0);
-      sheet.style.transform = `translateY(${dy}px)`;
-    }, { passive: true });
+      const raw = e.touches[0].clientY - y0;
+      if (!dy && (raw < 0 || Math.abs(e.touches[0].clientX - x0) > Math.abs(raw))) { y0 = null; sheet.classList.remove('dragging'); return; }   // scrolling up: let the list scroll
+      e.preventDefault();
+      dy = Math.max(0, raw);
+      sheet.style.transform = `translateY(${dy < 0 ? 0 : dy}px)`;
+    }, { passive: false });
+    $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: false });
     sheet.addEventListener('touchend', () => {
       if (y0 === null) return;
       sheet.classList.remove('dragging'); y0 = null;
@@ -512,8 +523,8 @@
     const accs = accountsOf(id);
     openSheet(`${closeX}
       <div class="sheet-body">
-        <div class="cine idcine" style="--c:${i.color}">
-          ${poster(accs, 4, 'backdrop')}
+        <div class="cine idcine" style="--c:${i.color};--g:${skin(i.color)}">
+          <div class="id-aura"></div>
           ${walletCard(i, 'tabindex="-1" data-static')}
         </div>
         <div class="actions">
