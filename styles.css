@@ -550,3 +550,9 @@ html[data-theme=light] .reel .blur{opacity:.11}
 html[data-theme=light] .kind-seg{background:rgba(118,118,128,.12)}
 html[data-theme=light] .kind-seg .thumb{background:#fff;box-shadow:0 3px 8px rgba(0,0,0,.12)}
 html[data-theme=light] .kind-seg button.on{color:#000}
+/* v5.1 standalone theme toggle: sun in dark mode, moon in light mode */
+.theme-btn{position:relative;overflow:hidden}
+.theme-btn svg{position:absolute;inset:0;margin:auto;transition:transform .5s var(--bounce),opacity .3s}
+.theme-btn .moon{opacity:0;transform:rotate(-90deg) scale(.5)}
+html[data-theme=light] .theme-btn .sun{opacity:0;transform:rotate(90deg) scale(.5)}
+html[data-theme=light] .theme-btn .moon{opacity:1;transform:none}

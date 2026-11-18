@@ -386,7 +386,7 @@
   function paintTheme() {
     const light = document.documentElement.dataset.theme === 'light';
     $('meta[name="theme-color"]').content = light ? '#f2f2f7' : '#000000';
-    const m = $('#menu [data-act="theme"] span'); if (m) m.textContent = light ? '深色外观' : '浅色外观';
+    const b = $('#themeBtn'); if (b) b.setAttribute('aria-label', light ? '切换到深色' : '切换到浅色');
   }
 
   // ---------- tabs ----------
@@ -839,7 +839,9 @@
       for (let k = 0; k < pos.length; k++) pos[k].y = Math.max(pos[k].y, k ? pos[k - 1].y + GAP + (k === brk ? LBL : 0) : half + (k === brk ? LBL : 0) + LBL);
       const over = pos.length ? pos[pos.length - 1].y - (H - half) : 0;
       if (over > 0) for (let k = pos.length - 1; k >= 0; k--) { pos[k].y = Math.min(pos[k].y, k === pos.length - 1 ? H - half : pos[k + 1].y - GAP - (k + 1 === brk ? LBL : 0)); pos[k].y = Math.max(pos[k].y, half + LBL + (k >= brk && brk > 0 ? GAP + LBL : 0)); }
-      return { apps, ay, pos, H, brk };
+      // the group label can push cards past the app column, so grow the box to fit them
+      const H2 = Math.max(H, pos.length ? pos[pos.length - 1].y + half : 0);
+      return { apps, ay, pos, H: H2, brk };
     }
     function render() {
       const box = $('#mapBox'); if (!box) return;
