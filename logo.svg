@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="g1" cx="22%" cy="12%" r="75%"><stop offset="0" stop-color="#1d3f8f"/><stop offset=".55" stop-color="#0b0d1c"/><stop offset="1" stop-color="#050508"/></radialGradient>
+    <radialGradient id="g2" cx="85%" cy="95%" r="55%"><stop offset="0" stop-color="#ff375f" stop-opacity=".45"/><stop offset="1" stop-color="#ff375f" stop-opacity="0"/></radialGradient>
+    <linearGradient id="cA" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#30d158"/><stop offset="1" stop-color="#0a7d5a"/></linearGradient>
+    <linearGradient id="cB" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9f0a"/><stop offset="1" stop-color="#ff375f"/></linearGradient>
+    <linearGradient id="cF" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#64d2ff"/><stop offset=".5" stop-color="#0a84ff"/><stop offset="1" stop-color="#5e5ce6"/></linearGradient>
+    <linearGradient id="sh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <filter id="ds" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="28" stdDeviation="30" flood-color="#000" flood-opacity=".55"/></filter>
+    <filter id="glow" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="14"/></filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#g1)"/>
+  <rect width="1024" height="1024" fill="url(#g2)"/>
+  <g transform="translate(512 585)">
+    <g transform="rotate(-17) translate(-40 -60)" filter="url(#ds)"><rect x="-270" y="-170" width="540" height="340" rx="58" fill="url(#cA)"/><rect x="-270" y="-170" width="540" height="340" rx="58" fill="url(#sh)"/></g>
+    <g transform="rotate(13) translate(40 -55)" filter="url(#ds)"><rect x="-270" y="-170" width="540" height="340" rx="58" fill="url(#cB)"/><rect x="-270" y="-170" width="540" height="340" rx="58" fill="url(#sh)"/></g>
+    <g transform="translate(0 40)" filter="url(#ds)">
+      <rect x="-290" y="-180" width="580" height="360" rx="62" fill="url(#cF)"/>
+      <rect x="-290" y="-180" width="580" height="360" rx="62" fill="url(#sh)"/>
+      <rect x="-289" y="-179" width="578" height="358" rx="61" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="3"/>
+      <!-- constellation -->
+      <g stroke="#fff" stroke-opacity=".75" stroke-width="7" stroke-linecap="round" fill="none">
+        <path d="M-170 70 L-40 -40 L95 20 L185 -95"/>
+        <path d="M-40 -40 L-10 105"/>
+      </g>
+      <g fill="#fff">
+        <circle cx="-170" cy="70" r="17"/><circle cx="95" cy="20" r="19"/><circle cx="-10" cy="105" r="14"/><circle cx="185" cy="-95" r="15"/>
+      </g>
+      <circle cx="-40" cy="-40" r="40" fill="#fff" filter="url(#glow)" opacity=".9"/>
+      <circle cx="-40" cy="-40" r="26" fill="#fff"/>
+    </g>
+  </g>
+</svg>
