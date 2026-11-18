@@ -688,3 +688,23 @@ html[data-theme=light] .reel .blur{opacity:.13}
 .prov-seg button.on{background:rgba(255,255,255,.16);color:var(--label,#fff)}
 html[data-theme=light] .prov-seg{background:rgba(0,0,0,.05)}
 html[data-theme=light] .prov-seg button.on{background:#fff;color:#1d1d1f;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+
+/* card order sheet */
+.ord{position:relative;display:flex;align-items:center;gap:12px;padding:10px 6px 10px 14px;min-height:62px;background:inherit;transition:transform .22s cubic-bezier(.32,.72,0,1),box-shadow .22s,border-radius .22s}
+.ord+.ord::before{content:"";position:absolute;top:0;right:0;left:74px;height:.5px;background:var(--separator);transition:opacity .15s}
+.ord-list.sorting .ord::before{opacity:0}
+.ord-list.sorting{overflow:visible}
+.ord.lift{z-index:3;transition:box-shadow .22s,border-radius .22s,scale .22s;scale:1.035;border-radius:14px;box-shadow:0 14px 34px rgba(0,0,0,.45),0 0 0 .5px var(--separator)}
+.ord-sw{flex:none;width:48px;height:32px;border-radius:7px;background:var(--g);display:grid;place-items:center;color:rgba(255,255,255,.92);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.22),0 3px 10px color-mix(in srgb,var(--c) 35%,transparent)}
+.ord-sw.sim{clip-path:polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,0 100%)}
+.ord-sw svg{width:15px;height:15px}
+.ord-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.ord-t b{font-weight:500;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ord-t small{font-size:13px;color:var(--secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ord-h{flex:none;width:44px;height:44px;display:grid;place-items:center;color:var(--secondary);touch-action:none;cursor:grab;border-radius:10px}
+.ord-h svg{width:20px;height:20px;stroke-width:2}
+.ord-h:focus-visible{outline:2px solid var(--tint);outline-offset:-4px}
+.ord.lift .ord-h{color:var(--tint);cursor:grabbing}
+html[data-theme=light] .ord.lift{box-shadow:0 14px 30px rgba(0,0,0,.16),0 0 0 .5px rgba(0,0,0,.06)}
+@media (prefers-reduced-motion:reduce){.ord,.ord.lift{transition:none}}
+.ord:first-child{border-radius:14px 14px 0 0}.ord:last-child{border-radius:0 0 14px 14px}.ord:only-child{border-radius:14px}

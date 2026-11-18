@@ -487,7 +487,7 @@
     sheet.addEventListener('touchstart', e => {
       const body = $('.sheet-body', sheet);
       if (innerWidth >= 700 || (body && body.scrollTop > 0 && !e.target.closest('.sheet-bar,.grabber'))) return;
-      if (e.target.closest('input,textarea,.suggest')) return;
+      if (e.target.closest('input,textarea,.suggest,.ord-h')) return;
       y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0; sheet.classList.add('dragging');
     }, { passive: true });
     sheet.addEventListener('touchmove', e => {
@@ -793,6 +793,80 @@
     setTimeout(() => { $('#cOk').onclick = () => { closeSheet(); fn(); }; }, 0);
   }
 
+  // ---------- card order ----------
+  function orderSheet() {
+    if (!state.identities.length) return toast('还没有邮箱或手机号');
+    const kinds = [['email', '邮箱'], ['phone', '手机号']].filter(([k]) => state.identities.some(i => i.type === k));
+    if (kinds[1] && kinds[0][0] !== ui.kind) kinds.reverse();
+    const row = i => `<div class="ord" data-oid="${i.id}">
+        <span class="ord-sw ${i.type === 'phone' ? 'sim' : ''}" style="--c:${i.color};--g:${skin(i.color)}">${ICON[i.type]}</span>
+        <span class="ord-t"><b>${esc(i.label || display(i))}</b>${i.label ? `<small>${esc(display(i))}</small>` : ''}</span>
+        <button class="ord-h" aria-label="拖动排序，可用上下方向键"><svg viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/></svg></button>
+      </div>`;
+    openSheet(`${bar('取消', '卡片顺序', '完成', 'id="saveOrder"')}
+      <div class="sheet-body">
+        <p class="hint" style="margin:2px 4px 0">按住右侧把手上下拖动。排在第一位的卡会在卡包里最先出现。</p>
+        ${kinds.map(([k, n]) => `<div class="sec-title">${n}</div><div class="group ord-list" data-kind="${k}">${state.identities.filter(i => i.type === k).map(row).join('')}</div>`).join('')}
+      </div>`, { kind: 'order' });
+    setTimeout(() => {
+      $$('.ord-list').forEach(dragList);
+      $('#saveOrder').onclick = () => {
+        const rank = new Map();
+        $$('.ord-list').forEach(l => $$('.ord', l).forEach((r, k) => rank.set(r.dataset.oid, k)));
+        const front = cur()?.id;
+        const next = state.identities.map(i => ({ ...i, order: rank.get(i.id) ?? i.order }));
+        const seq = a => a.map(i => i.id).join();
+        const changed = seq(state.identities.filter(i => rank.has(i.id)).sort((a, b) => a.type.localeCompare(b.type) || rank.get(a.id) - rank.get(b.id))) !== seq(['email', 'phone'].flatMap(t => state.identities.filter(i => i.type === t))) ;
+        closeSheet();
+        if (!changed) return;
+        snap();
+        state.identities = next.sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9));
+        save(); setKind(ui.kind, front); render(); undoToast('顺序已更新');
+      };
+    }, 0);
+  }
+  function dragList(list) {
+    const rows = () => $$('.ord', list);
+    const move = (r, to) => {   // keyboard / programmatic move with a small FLIP
+      const rs = rows(), from = rs.indexOf(r); to = Math.max(0, Math.min(rs.length - 1, to)); if (to === from) return;
+      const before = new Map(rs.map(x => [x, x.getBoundingClientRect().top]));
+      to > from ? rs[to].after(r) : rs[to].before(r);
+      if (!calm()) rows().forEach(x => { const d = before.get(x) - x.getBoundingClientRect().top; if (d) x.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.32,.72,0,1)' }); });
+    };
+    list.addEventListener('keydown', e => {
+      const h = e.target.closest('.ord-h'); if (!h || !/ArrowUp|ArrowDown/.test(e.key)) return;
+      e.preventDefault(); const r = h.closest('.ord'); move(r, rows().indexOf(r) + (e.key === 'ArrowUp' ? -1 : 1)); h.focus();
+    });
+    list.addEventListener('pointerdown', e => {
+      const h = e.target.closest('.ord-h'); if (!h || e.button > 0) return;
+      e.preventDefault();
+      const r = h.closest('.ord'), rs = rows(), from = rs.indexOf(r);
+      const step = r.offsetHeight, y0 = e.clientY;
+      let to = from;
+      h.setPointerCapture(e.pointerId);
+      list.classList.add('sorting'); r.classList.add('lift');
+      const mv = ev => {
+        const dy = Math.max(-from * step, Math.min((rs.length - 1 - from) * step, ev.clientY - y0));
+        r.style.transform = `translateY(${dy}px)`;
+        const n = Math.max(0, Math.min(rs.length - 1, from + Math.round(dy / step)));
+        if (n === to) return; to = n;
+        rs.forEach((x, k) => { if (x === r) return; const s = k > from && k <= to ? -step : k < from && k >= to ? step : 0; x.style.transform = s ? `translateY(${s}px)` : ''; });
+      };
+      const up = () => {
+        h.removeEventListener('pointermove', mv); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up);
+        // settle the lifted row into its slot, then commit the DOM order
+        r.style.transform = `translateY(${(to - from) * step}px)`;
+        r.classList.remove('lift');
+        setTimeout(() => {
+          list.classList.remove('sorting');
+          rs.forEach(x => x.style.transform = '');
+          if (to !== from) to > from ? rs[to].after(r) : rs[to].before(r);
+        }, calm() ? 0 : 220);
+      };
+      h.addEventListener('pointermove', mv); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
+    });
+  }
+
   // ---------- spotlight ----------
   let spotItems = [], spotSel = -1;
   function openSpot() { $('#spotLayer').classList.add('show'); const i = $('#spotInput'); i.value = ''; renderSpot(''); setTimeout(() => i.focus(), 60); }
@@ -855,6 +929,7 @@
       if (d.act === 'privacy') { ui.privacy = !ui.privacy; localStorage.setItem('atlas.privacy', ui.privacy ? '1' : '0'); render(); refreshSheet(); toast(ui.privacy ? '号码已隐藏' : '号码已显示'); }
       if (d.act === 'theme') setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', t);
       if (d.act === 'sync') syncSheet();
+      if (d.act === 'order') orderSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
       if (d.act === 'demo') { snap(); state = demo(); save(); setKind('email'); render(); undoToast('已载入示例'); }
@@ -1045,6 +1120,7 @@
         out[k] = [...map.values()].filter(x => !(del[x.id] >= (x.updatedAt || 0)));
       }
       for (const id of Object.keys(del)) if (out.identities.some(x => x.id === id) || out.accounts.some(x => x.id === id)) delete del[id];
+      out.identities.sort((x, y) => (x.order ?? 1e9) - (y.order ?? 1e9));
       // drop links to identities that no longer exist
       const ids = new Set(out.identities.map(i => i.id));
       out.accounts.forEach(x => { x.identityIds = x.identityIds.filter(i => ids.has(i)); });
