@@ -51,6 +51,21 @@
     ['Uber', 'uber.com', '出行', '#2b2b2b'], ['Airbnb', 'airbnb.com', '出行', '#ff385c'], ['Booking', 'booking.com', '出行', '#003580'], ['Visa', 'visa.com', '支付金融', '#1a1f71'],
   ];
   // the ones most people have, shown first in the picker
+  // apps the user typed in by hand are remembered and show up in the picker
+  const isPreset = n => PRESETS.some(p => p[0].toLowerCase() === n.toLowerCase());
+  function myApps() {
+    let saved = []; try { saved = JSON.parse(localStorage.getItem('atlas.custom') || '[]'); } catch (e) {}
+    const out = [], seen = new Set();
+    const add = t => { const k = (t[0] || '').toLowerCase(); if (!k || seen.has(k) || isPreset(t[0])) return; seen.add(k); out.push([t[0], t[1] || '', t[2] || '其他']); };
+    saved.forEach(add); (state.accounts || []).slice().reverse().forEach(a => add([a.name, a.domain, a.category]));
+    return out;
+  }
+  function rememberApp(name, domain, cat) {
+    if (!name || isPreset(name)) return;
+    let saved = []; try { saved = JSON.parse(localStorage.getItem('atlas.custom') || '[]'); } catch (e) {}
+    saved = saved.filter(t => t[0].toLowerCase() !== name.toLowerCase()); saved.unshift([name, domain || '', cat || '其他']);
+    localStorage.setItem('atlas.custom', JSON.stringify(saved.slice(0, 80)));
+  }
   const POPULAR = ['微信', 'QQ', '支付宝', '淘宝', '京东', '拼多多', '抖音', '小红书', '哔哩哔哩', '微博', '美团', '知乎', '网易云音乐', '12306', '百度网盘', 'Apple ID', 'GitHub', 'Google', 'ChatGPT', 'Steam', '豆包', 'DeepSeek', 'Telegram', 'Microsoft'];
 
   const $ = (s, el = document) => el.querySelector(s);
@@ -375,13 +390,34 @@
   }
 
   // ---------- appearance ----------
-  function setTheme(t) {
+  const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function setTheme(t, from) {
     const root = document.documentElement;
-    root.classList.add('theming');
-    if (t === 'light') root.dataset.theme = 'light'; else delete root.dataset.theme;
-    localStorage.setItem('atlas.theme', t);
-    paintTheme();
+    const apply = () => { if (t === 'light') root.dataset.theme = 'light'; else delete root.dataset.theme; localStorage.setItem('atlas.theme', t); paintTheme(); };
+    // new theme spreads out as a circle from the button that was tapped
+    if (from && document.startViewTransition && !calm()) {
+      const r = from.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      const R = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+      const vt = document.startViewTransition(apply);
+      vt.ready.then(() => root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${R}px at ${x}px ${y}px)`] }, { duration: 620, easing: 'cubic-bezier(.65,0,.35,1)', pseudoElement: '::view-transition-new(root)' })).catch(() => {});
+      return;
+    }
+    root.classList.add('theming'); apply();
     setTimeout(() => root.classList.remove('theming'), 450);
+  }
+  // small tactile motion for the round top buttons
+  const MOTION = {
+    addBtn: [[{ transform: 'none' }, { transform: 'rotate(90deg) scale(.72)', offset: .45 }, { transform: 'rotate(180deg)' }], 560],
+    openSearch: [[{ transform: 'none' }, { transform: 'rotate(-20deg) scale(1.2) translate(-1px,-1px)', offset: .4 }, { transform: 'none' }], 560],
+    themeBtn: [[{ transform: 'none' }, { transform: 'scale(.8)', offset: .35 }, { transform: 'none' }], 520]
+  };
+  function tapFx(b) {
+    if (calm()) return;
+    b.classList.remove('ping'); void b.offsetWidth; b.classList.add('ping');
+    clearTimeout(b._ping); b._ping = setTimeout(() => b.classList.remove('ping'), 650);
+    const m = MOTION[b.id], ease = 'cubic-bezier(.34,1.45,.64,1)';
+    if (m) (b.id === 'themeBtn' ? b : b.querySelector('svg')).animate(m[0], { duration: m[1], easing: ease });
+    if (b.id === 'menuBtn') b.querySelectorAll('circle').forEach((c, k) => c.animate([{ transform: 'none' }, { transform: 'translateY(-3.5px)', offset: .4 }, { transform: 'none' }], { duration: 420, delay: k * 60, easing: ease }));
   }
   function paintTheme() {
     const light = document.documentElement.dataset.theme === 'light';
@@ -598,11 +634,12 @@
       const applyPreset = p => { $('#aName').value = p[0]; $('#aDomain').value = p[1]; setCat(p[2]); $('#suggest').innerHTML = ''; hero(); };
       const suggest = () => {
         const q = $('#aName').value.trim().toLowerCase();
-        const exact = PRESETS.find(p => p[0].toLowerCase() === q);
+        const ALL = [...PRESETS, ...myApps()];
+        const exact = ALL.find(p => p[0].toLowerCase() === q);
         if (exact) { if (!$('#aDomain').value) $('#aDomain').value = exact[1]; setCat(exact[2]); hero(); }
-        const list = q && !exact ? PRESETS.filter(p => p[0].toLowerCase().includes(q) || p[1].includes(q)).slice(0, 8) : [];
-        $('#suggest').innerHTML = list.map((p, k) => `<button data-k="${PRESETS.indexOf(p)}">${favIcon({ name: p[0], domain: p[1] })}${esc(p[0])}</button>`).join('');
-        $$('#suggest button').forEach(b => b.onclick = () => applyPreset(PRESETS[b.dataset.k]));
+        const list = q && !exact ? ALL.filter(p => p[0].toLowerCase().includes(q) || p[1].includes(q)).slice(0, 8) : [];
+        $('#suggest').innerHTML = list.map((p, k) => `<button data-k="${ALL.indexOf(p)}">${favIcon({ name: p[0], domain: p[1] })}${esc(p[0])}</button>`).join('');
+        $$('#suggest button').forEach(b => b.onclick = () => applyPreset(ALL[b.dataset.k]));
       };
       $('#aName').addEventListener('input', () => { suggest(); hero(); });
       $('#aDomain').addEventListener('input', hero);
@@ -611,7 +648,7 @@
         const name = $('#aName').value.trim();
         if (!name) { const f = $('#nameField'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); $('#aName').focus(); toast('填一下名称'); return; }
         const data = { name, handle: $('#aHandle').value.trim(), domain: cleanDomain($('#aDomain').value), category: cat, identityIds: [...sel], notes: $('#aNotes').value.trim() };
-        let id;
+        let id; rememberApp(data.name, data.domain, data.category);
         if (existing) { Object.assign(existing, data); id = existing.id; } else { id = uid(); state.accounts.push({ id, createdAt: Date.now(), ...data }); }
         save(); render(); showAccount(id); toast(existing ? '已保存' : `已添加 ${name}`);
       };
@@ -622,10 +659,11 @@
   // ---------- add by picking: tap the apps you use, then say which email or number ----------
   function pickApps(presetId, query = '') {
     if (!state.identities.length) { identityForm(); toast('先添加一个邮箱或手机号'); return; }
-    const chosen = new Set(); let cat = '常用', q = query;
+    const ALL = [...PRESETS, ...myApps()], MINE = PRESETS.length;
+    const chosen = new Set(), handles = {}; let cat = '常用', q = query, open = -1;
     const have = name => state.accounts.filter(x => x.name.toLowerCase() === name.toLowerCase()).length;
     let told = false;
-    const cats = ['常用', ...CATS.filter(c => PRESETS.some(p => p[2] === c))];
+    const cats = ['常用', ...(ALL.length > MINE ? ['我添加的'] : []), ...CATS.filter(c => ALL.some(p => p[2] === c))];
     openSheet(`<div class="sheet-bar"><button data-close>取消</button><span class="t" id="pkTitle">选择网站或 App</span><button id="pkNext" disabled>下一步</button></div>
       <div class="pick-head">
         <div class="spot-field pk-field"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/></svg><input id="pkQ" placeholder="搜索，或直接输入名字" value="${esc(q)}" autocomplete="off" enterkeyhint="search"></div>
@@ -634,13 +672,48 @@
       <div class="sheet-body"><div class="pick-grid" id="pkGrid"></div></div>`, { kind: 'form' });
     const draw = () => {
       const ql = q.trim().toLowerCase();
-      let list = ql ? PRESETS.filter(p => p[0].toLowerCase().includes(ql) || p[1].includes(ql))
-        : cat === '常用' ? POPULAR.map(n => PRESETS.find(p => p[0] === n)).filter(Boolean) : PRESETS.filter(p => p[2] === cat);
+      let list = ql ? ALL.filter(p => p[0].toLowerCase().includes(ql) || p[1].includes(ql))
+        : cat === '常用' ? [...ALL.slice(MINE, MINE + 4), ...POPULAR.map(n => PRESETS.find(p => p[0] === n)).filter(Boolean)]
+        : cat === '我添加的' ? ALL.slice(MINE) : ALL.filter(p => p[2] === cat);
       $('#pkCats').style.display = ql ? 'none' : '';
-      const exact = ql && PRESETS.some(p => p[0].toLowerCase() === ql);
-      $('#pkGrid').innerHTML = list.map(p => { const k = PRESETS.indexOf(p), h = have(p[0]); return `<button class="pk ${chosen.has(k) ? 'on' : ''} ${h ? 'had' : ''}" data-pk="${k}">${favIcon({ name: p[0], domain: p[1] })}<span>${esc(p[0])}</span>${h ? `<small>已记 ${h} 个</small>` : ''}<i class="pk-tick">${ICON.check}</i></button>`; }).join('') +
+      const exact = ql && ALL.some(p => p[0].toLowerCase() === ql);
+      $('#pkGrid').innerHTML = list.map(p => { const k = ALL.indexOf(p), h = have(p[0]); return `<button class="pk ${chosen.has(k) ? 'on' : ''} ${h ? 'had' : ''}" data-pk="${k}">${favIcon({ name: p[0], domain: p[1] })}<span>${esc(p[0])}</span>${sub(k, h)}<i class="pk-tick">${ICON.check}</i></button>`; }).join('') +
         (ql && !exact ? `<button class="pk custom" data-pk-custom="${esc(q.trim())}"><span class="icon">${ICON.plus}</span><span>添加“${esc(q.trim())}”</span></button>` : '') +
         (!ql ? `<button class="pk custom" data-pk-custom=""><span class="icon">${ICON.edit}</span><span>手动添加</span></button>` : '');
+      if (open >= 0) { const t = $(`#pkGrid [data-pk="${open}"]`); t ? expand(t, false) : (open = -1); }
+    };
+    const sub = (k, h) => handles[k] ? `<small class="hd-on">@${esc(handles[k])}</small>` : h ? `<small>已记 ${h} 个</small>` : '';
+    const paintSub = (tile, k) => { const html = sub(k, have(ALL[k][0])); tile.querySelector('small')?.remove(); if (html) tile.querySelector('span:not(.icon)').insertAdjacentHTML('afterend', html); };
+    // tapping a tile opens a small drawer under its row for the username
+    const shut = (anim = true) => {
+      const x = $('#pkExp'); if (!x) return; x.removeAttribute('id');
+      $$('#pkGrid .pk.open').forEach(t => t.classList.remove('open'));
+      if (!anim) return x.remove();
+      x.animate([{ height: x.offsetHeight + 'px', opacity: 1 }, { height: '0px', opacity: 0, marginTop: '-18px' }], { duration: 260, easing: 'cubic-bezier(.4,0,.2,1)' }).onfinish = () => x.remove();
+    };
+    const expand = (tile, anim = true) => {
+      const grid = $('#pkGrid'), k = +tile.dataset.pk, p = ALL[k];
+      $('#pkExp')?.remove();
+      $$('#pkGrid .pk.open').forEach(t => t.classList.remove('open')); tile.classList.add('open');
+      const tiles = [...grid.children].filter(t => !t.classList.contains('pk-exp')), i = tiles.indexOf(tile);
+      const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
+      const end = tiles[Math.min(Math.ceil((i + 1) / cols) * cols, tiles.length) - 1];
+      const n = have(p[0]);
+      const x = document.createElement('div'); x.id = 'pkExp'; x.className = 'pk-exp';
+      x.style.setProperty('--ax', (tile.offsetLeft + tile.offsetWidth / 2) + 'px');
+      x.innerHTML = `<div class="pk-exp-in">${favIcon({ name: p[0], domain: p[1] })}<div class="pk-exp-f"><label>${esc(p[0])} 账号名</label><input id="pkHd" value="${esc(handles[k] || '')}" placeholder="${n ? `第 ${n + 1} 个账号，填用户名区分` : '用户名、昵称或 UID，选填'}" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"></div><button class="pk-exp-x" id="pkHdOk">好</button></div>`;
+      end.after(x);
+      const inp = $('#pkHd');
+      inp.oninput = () => { const v = inp.value.trim(); v ? handles[k] = v : delete handles[k]; paintSub(tile, k); };
+      const done = () => { inp.blur(); open = -1; shut(); };
+      inp.onkeydown = e => { if (e.key === 'Enter') done(); };
+      $('#pkHdOk').onclick = e => { e.stopPropagation(); done(); };
+      if (anim) {
+        const h = x.offsetHeight;
+        x.animate([{ height: '0px', opacity: 0, marginTop: '-18px' }, { height: h + 'px', opacity: 1 }], { duration: 380, easing: 'cubic-bezier(.2,.9,.25,1)' });
+        x.firstChild.animate([{ transform: 'translateY(-10px) scale(.97)' }, { transform: 'none' }], { duration: 460, easing: 'cubic-bezier(.34,1.3,.64,1)' });
+        setTimeout(() => { const body = $('.sheet-body', sheet); if (!body || !x.isConnected) return; const r = x.getBoundingClientRect(), br = body.getBoundingClientRect(); if (r.bottom > br.bottom - 8) body.scrollBy({ top: r.bottom - br.bottom + 24, behavior: 'smooth' }); }, 200);
+      }
     };
     const sync = () => {
       const n = chosen.size, b = $('#pkNext');
@@ -655,18 +728,20 @@
         const c = e.target.closest('[data-pk-custom]');
         if (c) return accountForm(null, presetId, c.dataset.pkCustom);
         const b = e.target.closest('[data-pk]'); if (!b) return;
-        const k = +b.dataset.pk, h = have(PRESETS[k][0]);
-        if (h && !chosen.has(k) && !told) { told = true; toast(`再记一个 ${PRESETS[k][0]} 账号，下一步填账号名区分`); }
-        chosen.has(k) ? chosen.delete(k) : chosen.add(k);
+        const k = +b.dataset.pk, h = have(ALL[k][0]);
+        if (chosen.has(k) && open !== k) { open = k; expand(b); return; }   // selected but closed: reopen its drawer
+        if (h && !chosen.has(k) && !told) { told = true; toast(`再记一个 ${ALL[k][0]} 账号，填个账号名区分`); }
+        if (chosen.has(k)) { chosen.delete(k); delete handles[k]; open = -1; shut(); paintSub(b, k); }
+        else { chosen.add(k); open = k; expand(b); }
         b.classList.toggle('on'); if (b.classList.contains('on')) b.animate([{ transform: 'scale(.86)' }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.34,1.45,.64,1)' });
         sync();
       };
-      $('#pkNext').onclick = () => chosen.size && pickIdentities([...chosen].map(k => PRESETS[k]), presetId, q);
+      $('#pkNext').onclick = () => { if (!chosen.size) return; const ks = [...chosen]; pickIdentities(ks.map(k => ALL[k]), presetId, q, ks.map(k => handles[k] || '')); };
       if (q) $('#pkQ').focus();
     }, 0);
   }
 
-  function pickIdentities(picks, presetId, q) {
+  function pickIdentities(picks, presetId, q, hds = []) {
     const sel = new Set(presetId && idById(presetId) ? [presetId] : cur() ? [cur().id] : []);
     const fakes = picks.map(p => ({ name: p[0], domain: p[1] }));
     openSheet(`<div class="sheet-bar"><button id="pkBack">返回</button><span class="t">用哪个注册的</span><button id="pkSave">添加</button></div>
@@ -676,7 +751,7 @@
         <div class="group" id="idPicks">${state.identities.map(i => `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(i.label || display(i))}</span>${i.label ? `<span class="cell-sub">${esc(display(i))}</span>` : ''}</span>${ICON.tick}</button>`).join('')}</div>
         <p class="hint">可以多选，比如用邮箱注册、再绑定了手机号。</p>
         <div class="sec-title">账号名</div>
-        <div class="group">${picks.map((p, k) => { const n = state.accounts.filter(x => x.name.toLowerCase() === p[0].toLowerCase()).length; return `<div class="field hd-field">${favIcon(fakes[k])}<input data-hd="${k}" placeholder="${n ? `第 ${n + 1} 个${esc(p[0])}账号，填用户名区分` : `${esc(p[0])}的用户名或昵称（选填）`}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`; }).join('')}</div>
+        <div class="group">${picks.map((p, k) => { const n = state.accounts.filter(x => x.name.toLowerCase() === p[0].toLowerCase()).length; return `<div class="field hd-field">${favIcon(fakes[k])}<input data-hd="${k}" value="${esc(hds[k] || '')}" placeholder="${n ? `第 ${n + 1} 个${esc(p[0])}账号，填用户名区分` : `${esc(p[0])}的用户名或昵称（选填）`}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`; }).join('')}</div>
         <p class="hint">同一个网站有好几个账号时，靠它区分。</p>
       </div>`, { kind: 'form' });
     setTimeout(() => {
@@ -747,16 +822,17 @@
     if (!e.target.closest('#menu,#menuBtn')) menu.classList.remove('open');
     const t = e.target.closest('button,a,[data-account],[data-identity]'); if (!t) return;
     const d = t.dataset;
+    if (t.classList.contains('round')) tapFx(t);
     if (t.id === 'menuBtn') return menu.classList.toggle('open');
-    if (t.id === 'addBtn') return !state.identities.length ? identityForm() : pickApps(ui.tab === 'home' ? cur()?.id : null);
+    if (t.id === 'addBtn') return setTimeout(() => !state.identities.length ? identityForm() : pickApps(ui.tab === 'home' ? cur()?.id : null), calm() ? 0 : 110);
     if (d.kind) return switchKind(d.kind);
     if (t.id === 'gridAdd') return pickApps(cur()?.id);
-    if (t.id === 'openSearch') return openSpot();
+    if (t.id === 'openSearch') return setTimeout(openSpot, calm() ? 0 : 110);
     if (t.id === 'spotCancel') return closeSpot();
     if (d.act) {
       menu.classList.remove('open');
       if (d.act === 'privacy') { ui.privacy = !ui.privacy; localStorage.setItem('atlas.privacy', ui.privacy ? '1' : '0'); render(); refreshSheet(); toast(ui.privacy ? '号码已隐藏' : '号码已显示'); }
-      if (d.act === 'theme') setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+      if (d.act === 'theme') setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', t);
       if (d.act === 'sync') syncSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
