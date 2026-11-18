@@ -209,13 +209,16 @@
   function renderGrid() {
     const i = state.identities[ui.active];
     const g = $('#grid');
-    $('#gridTitle').textContent = i ? `用${i.label || display(i)}的` : '全部网站与 App';
+    $('#gridTitle').textContent = i ? `${i.label || display(i)}` : '全部网站与 App';
+    $('#gridSub').textContent = i ? `用它注册或绑定的 ${accountsOf(i.id).length} 个网站与 App` : '';
     const list = i ? accountsOf(i.id) : state.accounts.slice().sort((a, b) => zh(a.name, b.name));
     // FLIP: remember where each icon was
     const before = {};
     $$('.app[data-account]', g).forEach(el => before[el.dataset.account] = el.getBoundingClientRect());
-    g.innerHTML = list.map(a => `<button class="app" data-account="${a.id}">${favIcon(a)}<span>${esc(a.name)}</span></button>`).join('') +
-      (i ? `<button class="app add" data-new="account" data-preset="${i.id}"><span class="icon">${ICON.plus}</span><span>添加</span></button>` : '') +
+    const more = list.length > 11 ? list.length - 11 : 0;
+    const shown = more ? list.slice(0, 11) : list;
+    g.innerHTML = shown.map(a => `<button class="app" data-account="${a.id}">${favIcon(a)}<span>${esc(a.name)}</span></button>`).join('') +
+      (more ? `<button class="app add" data-identity="${i ? i.id : ''}"><span class="icon more">+${more}</span><span>全部</span></button>` : i ? `<button class="app add" data-new="account" data-preset="${i.id}"><span class="icon">${ICON.plus}</span><span>添加</span></button>` : '') +
       (!list.length && !i ? '<div class="grid-empty">还没有网站，从右上角的 + 开始。</div>' : '');
     let k = 0;
     $$('.app', g).forEach(el => {
@@ -246,7 +249,7 @@
   }
   function renderTimeline() {
     const t = $('#timeline');
-    const list = state.accounts.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 6);
+    const list = state.accounts.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 5);
     if (!list.length) { t.innerHTML = '<div class="grid-empty">添加的网站会按时间出现在这里。</div>'; return; }
     const groups = [];
     list.forEach(a => { const key = new Date(a.createdAt).toDateString(); const g = groups.find(g => g.key === key); g ? g.items.push(a) : groups.push({ key, t: a.createdAt, items: [a] }); });
@@ -334,6 +337,18 @@
       if (dy > 110) closeSheet(); else sheet.style.transform = '';
     });
   })();
+
+  if (window.visualViewport) {
+    const vv = visualViewport;
+    const fit = () => {
+      if (innerWidth >= 700) { sheet.style.bottom = ''; sheet.style.maxHeight = ''; return; }
+      const kb = Math.max(0, innerHeight - vv.height - vv.offsetTop);
+      sheet.style.bottom = kb > 80 ? kb + 'px' : '';
+      sheet.style.maxHeight = kb > 80 ? (vv.height - 8) + 'px' : '';
+    };
+    vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit);
+  }
+  document.addEventListener('focusin', e => { if (e.target.closest('.sheet') && /INPUT|TEXTAREA/.test(e.target.tagName)) setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300); });
 
   const bar = (left, title, right, rightAttr = '') => `<div class="sheet-bar"><button data-sheet-left>${left}</button><span class="t">${title}</span><button ${rightAttr}>${right}</button></div>`;
   const closeX = `<div class="sheet-bar float"><button class="x" data-close aria-label="关闭">${ICON.x}</button></div>`;
@@ -437,13 +452,16 @@
     let cat = a.category;
     openSheet(`${bar('取消', existing ? '编辑' : '新网站或 App', existing ? '保存' : '添加', 'id="saveAccount"')}
       <div class="sheet-body form">
+        <div class="form-hero" id="aHero"></div>
         <div class="group">
           <div class="field" id="nameField"><label>名称</label><input id="aName" value="${esc(a.name)}" placeholder="GitHub、淘宝、微信…" autocomplete="off"></div>
           <div class="suggest" id="suggest"></div>
           <div class="field"><label>网址</label><input id="aDomain" value="${esc(a.domain)}" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="github.com（用来显示图标）"></div>
         </div>
+        <p class="hint dup" id="dupHint" hidden></p>
         <div class="sec-title">用哪个邮箱或手机号注册、绑定的</div>
-        <div class="group" id="idPicks">${state.identities.map(i => `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(display(i))}</span></span>${ICON.tick}</button>`).join('')}</div>
+        <div class="group" id="idPicks">${state.identities.map(i => `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(i.label || display(i))}</span>${i.label ? `<span class="cell-sub">${esc(display(i))}</span>` : ''}</span>${ICON.tick}</button>`).join('')}</div>
+
         <p class="hint">可以多选，比如用邮箱注册、再绑定手机号。</p>
         <div class="sec-title">分类</div>
         <div class="group"><div class="cats" id="catPicks">${CATS.map(c => `<button class="${c === cat ? 'active' : ''}" data-c="${c}">${c}</button>`).join('')}</div></div>
@@ -455,16 +473,27 @@
       const setCat = c => { cat = c; $$('#catPicks button').forEach(x => x.classList.toggle('active', x.dataset.c === c)); };
       $$('#catPicks button').forEach(b => b.onclick = () => setCat(b.dataset.c));
       $$('#idPicks .check-cell').forEach(b => b.onclick = () => { const id = b.dataset.id; sel.has(id) ? sel.delete(id) : sel.add(id); b.classList.toggle('on'); });
-      const applyPreset = p => { $('#aName').value = p[0]; $('#aDomain').value = p[1]; setCat(p[2]); $('#suggest').innerHTML = ''; };
+      const hero = () => {
+        const name = $('#aName').value.trim(), dom = cleanDomain($('#aDomain').value);
+        const key = name + '|' + dom; const h = $('#aHero'); if (h.dataset.k === key) return; h.dataset.k = key;
+        const fake = { name: name || '?', domain: dom };
+        h.style.setProperty('--pc', name ? brand(fake) : 'transparent'); h.innerHTML = `${name ? favIcon(fake, 'lg') : `<span class="icon lg" style="background:rgba(255,255,255,.08);color:var(--tertiary)">${ICON.plus}</span>`}<b>${esc(name || '新网站或 App')}</b>`;
+        const dup = name && state.accounts.find(x => x !== existing && x.name.toLowerCase() === name.toLowerCase());
+        const dh = $('#dupHint');
+        if (dup) { dh.hidden = false; dh.innerHTML = `已经记录过 ${esc(dup.name)}，<button data-account="${dup.id}">去看看</button>`; } else dh.hidden = true;
+      };
+      hero();
+      const applyPreset = p => { $('#aName').value = p[0]; $('#aDomain').value = p[1]; setCat(p[2]); $('#suggest').innerHTML = ''; hero(); };
       const suggest = () => {
         const q = $('#aName').value.trim().toLowerCase();
         const exact = PRESETS.find(p => p[0].toLowerCase() === q);
-        if (exact) { if (!$('#aDomain').value) $('#aDomain').value = exact[1]; setCat(exact[2]); }
+        if (exact) { if (!$('#aDomain').value) $('#aDomain').value = exact[1]; setCat(exact[2]); hero(); }
         const list = q && !exact ? PRESETS.filter(p => p[0].toLowerCase().includes(q) || p[1].includes(q)).slice(0, 8) : [];
         $('#suggest').innerHTML = list.map((p, k) => `<button data-k="${PRESETS.indexOf(p)}">${favIcon({ name: p[0], domain: p[1] })}${esc(p[0])}</button>`).join('');
         $$('#suggest button').forEach(b => b.onclick = () => applyPreset(PRESETS[b.dataset.k]));
       };
-      $('#aName').addEventListener('input', suggest);
+      $('#aName').addEventListener('input', () => { suggest(); hero(); });
+      $('#aDomain').addEventListener('input', hero);
       if (presetName) suggest();
       $('#saveAccount').onclick = () => {
         const name = $('#aName').value.trim();
@@ -474,7 +503,7 @@
         if (existing) { Object.assign(existing, data); id = existing.id; } else { id = uid(); state.accounts.push({ id, createdAt: Date.now(), ...data }); }
         save(); render(); showAccount(id); toast(existing ? '已保存' : `已添加 ${name}`);
       };
-      if (!existing && !presetName) $('#aName').focus();
+      if (!existing && !presetName && matchMedia('(hover:hover)').matches) $('#aName').focus({ preventScroll: true });
     }, 0);
   }
 
