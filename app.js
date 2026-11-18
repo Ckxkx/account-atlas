@@ -119,6 +119,12 @@
     return digits.length > 7 ? '••• •••• ' + digits.slice(-4) : '••••';
   }
   const cleanDomain = d => (d || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0];
+  // bundled 192px icons for every preset, so common apps are sharp and load from this site
+  const localIcon = a => {
+    const d = cleanDomain(a.domain), n = (a.name || '').toLowerCase();
+    const p = PRESETS.find(p => (d && (d === p[1] || d.endsWith('.' + p[1]))) || (!d && p[0].toLowerCase() === n));
+    return p ? `icons/${p[1]}.png` : null;
+  };
   const favSources = d => { d = cleanDomain(d); return d ? [`https://favicon.im/${d}?larger=true`, `https://${d}/apple-touch-icon.png`, `https://${d}/favicon.ico`, `https://www.google.com/s2/favicons?domain=${d}&sz=128`] : []; };
   function brand(a) {
     const d = cleanDomain(a.domain), n = (a.name || '').toLowerCase();
@@ -144,6 +150,8 @@
   };
   const idIcon = (i, size = '') => `<span class="icon ${size}" style="--c:${i.color}">${ICON[i.type]}</span>`;
   function favIcon(a, size = '') {
+    const loc = localIcon(a);
+    if (loc) return `<span class="icon fav full ${size}"><img alt="" loading="lazy" src="${loc}"></span>`;
     const src = favSources(a.domain), letter = esc((a.name || '?').trim().slice(0, 1).toUpperCase());
     const b = brand(a), style = `style="--lc1:color-mix(in srgb,${b} 78%,#fff);--lc2:${b}"`;
     if (!src.length) return `<span class="icon fav letter ${size}" ${style}>${letter}</span>`;
@@ -165,11 +173,12 @@
     for (let k = 0; k < n; k++) {
       const a = list[k % Math.max(1, list.length)];
       if (!a) { tiles.push('<b style="--pc:transparent"></b>'); continue; }
-      const src = favSources(a.domain)[0];
+      const src = localIcon(a) || favSources(a.domain)[0];
       tiles.push(`<b style="--pc:${brand(a)};position:relative">${src && k < list.length ? `<img alt="" src="${src}" onerror="this.remove()" style="position:absolute;inset:18%;width:64%;height:64%;object-fit:contain">` : ''}</b>`);
     }
     return `<div class="${cls}" aria-hidden="true">${tiles.join('')}</div>`;
   }
+  const handle = a => a.handle ? `<em class="hd">${esc(a.handle)}</em>` : '';
   const caps = ids => ids.map(idById).filter(Boolean).map(i => `<span class="cap" style="--c:${i.color}"><i></i>${esc(i.label || display(i))}</span>`).join('');
 
   // ---------- toast (notification banner) ----------
@@ -269,7 +278,7 @@
     $$('.app[data-account]', g).forEach(el => before[el.dataset.account] = el.getBoundingClientRect());
     const more = list.length > 11 ? list.length - 11 : 0;
     const shown = more ? list.slice(0, 11) : list;
-    g.innerHTML = shown.map(a => `<button class="app" data-account="${a.id}">${favIcon(a)}<span>${esc(a.name)}</span></button>`).join('') +
+    g.innerHTML = shown.map(a => `<button class="app" data-account="${a.id}">${favIcon(a)}<span>${esc(a.handle || a.name)}</span></button>`).join('') +
       (more ? `<button class="app add" data-identity="${i ? i.id : ''}"><span class="icon more">+${more}</span><span>全部</span></button>` : i ? `<button class="app add" data-new="account" data-preset="${i.id}"><span class="icon">${ICON.plus}</span><span>添加</span></button>` : '') +
       (!list.length && !i ? '<div class="grid-empty">还没有网站，从右上角的 + 开始。</div>' : '');
     let k = 0;
@@ -295,7 +304,7 @@
   function reel(a, meta = '') {
     return `<button class="reel" data-account="${a.id}">
       ${poster([a], 1, 'blur')}${favIcon(a)}
-      <span class="reel-main"><span class="reel-title">${esc(a.name)}</span><span class="caps">${caps(a.identityIds) || '<span class="cap dim">未关联</span>'}</span></span>
+      <span class="reel-main"><span class="reel-title">${esc(a.name)}${handle(a)}</span><span class="caps">${caps(a.identityIds) || '<span class="cap dim">未关联</span>'}</span></span>
       ${meta ? `<span class="reel-meta">${meta}</span>` : ICON.chev}
     </button>`;
   }
@@ -451,7 +460,7 @@
         <div class="cine">
           ${poster([a, a, a, a], 4, 'backdrop')}
           ${favIcon(a, 'lg')}
-          <h2>${esc(a.name)}</h2>
+          <h2>${esc(a.name)}</h2>${a.handle ? `<p class="acc-handle">${esc(a.handle)}</p>` : ''}
           <div class="caps"><span class="cap dim">${esc(a.category)}</span>${d ? `<span class="cap dim">${esc(d)}</span>` : ''}</div>
         </div>
         <div class="actions">
@@ -523,6 +532,7 @@
         <div class="group">
           <div class="field" id="nameField"><label>名称</label><input id="aName" value="${esc(a.name)}" placeholder="GitHub、淘宝、微信…" autocomplete="off"></div>
           <div class="suggest" id="suggest"></div>
+          <div class="field"><label>账号名</label><input id="aHandle" value="${esc(a.handle || '')}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="选填，用户名、昵称或 UID"></div>
           <div class="field"><label>网址</label><input id="aDomain" value="${esc(a.domain)}" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="选填，用来显示图标"></div>
         </div>
         <p class="hint dup" id="dupHint" hidden></p>
@@ -547,7 +557,7 @@
         h.style.setProperty('--pc', name ? brand(fake) : 'transparent'); h.innerHTML = `${name ? favIcon(fake, 'lg') : `<span class="icon lg" style="background:rgba(255,255,255,.08);color:var(--tertiary)">${ICON.plus}</span>`}<b>${esc(name || '新网站或 App')}</b>`;
         const dup = name && state.accounts.find(x => x !== existing && x.name.toLowerCase() === name.toLowerCase());
         const dh = $('#dupHint');
-        if (dup) { dh.hidden = false; dh.innerHTML = `已经记录过 ${esc(dup.name)}，<button data-account="${dup.id}">去看看</button>`; } else dh.hidden = true;
+        if (dup) { dh.hidden = false; dh.innerHTML = `已经记录过 ${esc(dup.name)}${dup.handle ? `（${esc(dup.handle)}）` : ''}。是另一个账号的话，填个账号名区分。`; } else dh.hidden = true;
       };
       hero();
       const applyPreset = p => { $('#aName').value = p[0]; $('#aDomain').value = p[1]; setCat(p[2]); $('#suggest').innerHTML = ''; hero(); };
@@ -565,7 +575,7 @@
       $('#saveAccount').onclick = () => {
         const name = $('#aName').value.trim();
         if (!name) { const f = $('#nameField'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); $('#aName').focus(); toast('填一下名称'); return; }
-        const data = { name, domain: cleanDomain($('#aDomain').value), category: cat, identityIds: [...sel], notes: $('#aNotes').value.trim() };
+        const data = { name, handle: $('#aHandle').value.trim(), domain: cleanDomain($('#aDomain').value), category: cat, identityIds: [...sel], notes: $('#aNotes').value.trim() };
         let id;
         if (existing) { Object.assign(existing, data); id = existing.id; } else { id = uid(); state.accounts.push({ id, createdAt: Date.now(), ...data }); }
         save(); render(); showAccount(id); toast(existing ? '已保存' : `已添加 ${name}`);
@@ -578,7 +588,8 @@
   function pickApps(presetId, query = '') {
     if (!state.identities.length) { identityForm(); toast('先添加一个邮箱或手机号'); return; }
     const chosen = new Set(); let cat = '常用', q = query;
-    const have = name => state.accounts.find(x => x.name.toLowerCase() === name.toLowerCase());
+    const have = name => state.accounts.filter(x => x.name.toLowerCase() === name.toLowerCase()).length;
+    let told = false;
     const cats = ['常用', ...CATS.filter(c => PRESETS.some(p => p[2] === c))];
     openSheet(`<div class="sheet-bar"><button data-close>取消</button><span class="t" id="pkTitle">选择网站或 App</span><button id="pkNext" disabled>下一步</button></div>
       <div class="pick-head">
@@ -592,7 +603,7 @@
         : cat === '常用' ? POPULAR.map(n => PRESETS.find(p => p[0] === n)).filter(Boolean) : PRESETS.filter(p => p[2] === cat);
       $('#pkCats').style.display = ql ? 'none' : '';
       const exact = ql && PRESETS.some(p => p[0].toLowerCase() === ql);
-      $('#pkGrid').innerHTML = list.map(p => { const k = PRESETS.indexOf(p), h = have(p[0]); return `<button class="pk ${chosen.has(k) ? 'on' : ''} ${h ? 'had' : ''}" data-pk="${k}">${favIcon({ name: p[0], domain: p[1] })}<span>${esc(p[0])}</span>${h ? '<small>已记录</small>' : ''}<i class="pk-tick">${ICON.check}</i></button>`; }).join('') +
+      $('#pkGrid').innerHTML = list.map(p => { const k = PRESETS.indexOf(p), h = have(p[0]); return `<button class="pk ${chosen.has(k) ? 'on' : ''} ${h ? 'had' : ''}" data-pk="${k}">${favIcon({ name: p[0], domain: p[1] })}<span>${esc(p[0])}</span>${h ? `<small>已记 ${h} 个</small>` : ''}<i class="pk-tick">${ICON.check}</i></button>`; }).join('') +
         (ql && !exact ? `<button class="pk custom" data-pk-custom="${esc(q.trim())}"><span class="icon">${ICON.plus}</span><span>添加“${esc(q.trim())}”</span></button>` : '') +
         (!ql ? `<button class="pk custom" data-pk-custom=""><span class="icon">${ICON.edit}</span><span>手动添加</span></button>` : '');
     };
@@ -610,7 +621,7 @@
         if (c) return accountForm(null, presetId, c.dataset.pkCustom);
         const b = e.target.closest('[data-pk]'); if (!b) return;
         const k = +b.dataset.pk, h = have(PRESETS[k][0]);
-        if (h) return toast(`已经记录过 ${h.name}`, { label: '去看看', fn: () => showAccount(h.id) });
+        if (h && !chosen.has(k) && !told) { told = true; toast(`再记一个 ${PRESETS[k][0]} 账号，下一步填账号名区分`); }
         chosen.has(k) ? chosen.delete(k) : chosen.add(k);
         b.classList.toggle('on'); if (b.classList.contains('on')) b.animate([{ transform: 'scale(.86)' }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.34,1.45,.64,1)' });
         sync();
@@ -628,13 +639,16 @@
         <div class="form-hero" style="--pc:${brand(fakes[0])}"><span class="pk-stack">${fakes.slice(0, 5).map(f => favIcon(f, 'lg')).join('')}</span><b>${picks.length === 1 ? esc(picks[0][0]) : `${esc(picks[0][0])} 等 ${picks.length} 个`}</b></div>
         <div class="sec-title">用哪个邮箱或手机号注册、绑定的</div>
         <div class="group" id="idPicks">${state.identities.map(i => `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(i.label || display(i))}</span>${i.label ? `<span class="cell-sub">${esc(display(i))}</span>` : ''}</span>${ICON.tick}</button>`).join('')}</div>
-        <p class="hint">可以多选，比如用邮箱注册、再绑定了手机号。${picks.length > 1 ? '选好的这几个都会用同样的设置，之后可以单独改。' : ''}</p>
+        <p class="hint">可以多选，比如用邮箱注册、再绑定了手机号。</p>
+        <div class="sec-title">账号名</div>
+        <div class="group">${picks.map((p, k) => { const n = state.accounts.filter(x => x.name.toLowerCase() === p[0].toLowerCase()).length; return `<div class="field hd-field">${favIcon(fakes[k])}<input data-hd="${k}" placeholder="${n ? `第 ${n + 1} 个${esc(p[0])}账号，填用户名区分` : `${esc(p[0])}的用户名或昵称（选填）`}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`; }).join('')}</div>
+        <p class="hint">同一个网站有好几个账号时，靠它区分。</p>
       </div>`, { kind: 'form' });
     setTimeout(() => {
       $$('#idPicks .check-cell').forEach(b => b.onclick = () => { const id = b.dataset.id; sel.has(id) ? sel.delete(id) : sel.add(id); b.classList.toggle('on'); });
       $('#pkBack').onclick = () => pickApps(presetId, q);
       $('#pkSave').onclick = () => {
-        const now = Date.now(), made = picks.map((p, k) => ({ id: uid(), createdAt: now + k, name: p[0], domain: p[1], category: p[2], identityIds: [...sel], notes: '' }));
+        const now = Date.now(), made = picks.map((p, k) => ({ id: uid(), createdAt: now + k, name: p[0], handle: ($(`[data-hd="${k}"]`)?.value || '').trim(), domain: p[1], category: p[2], identityIds: [...sel], notes: '' }));
         state.accounts.push(...made); save(); render();
         if (made.length === 1) showAccount(made[0].id); else if (sel.size === 1) showIdentity([...sel][0]); else closeSheet();
         toast(made.length === 1 ? `已添加 ${made[0].name}` : `已添加 ${made.length} 个`);
@@ -659,14 +673,14 @@
   }
   function renderSpot(q) {
     q = q.trim(); const ql = q.toLowerCase(), qd = q.replace(/\D/g, '');
-    const accs = q ? state.accounts.filter(a => a.name.toLowerCase().includes(ql) || (a.domain || '').includes(ql)).slice(0, 8) : [];
+    const accs = q ? state.accounts.filter(a => a.name.toLowerCase().includes(ql) || (a.domain || '').includes(ql) || (a.handle || '').toLowerCase().includes(ql)).slice(0, 8) : [];
     const ids = q ? state.identities.filter(i => i.value.toLowerCase().includes(ql) || (i.label || '').toLowerCase().includes(ql) || (qd.length >= 3 && i.value.replace(/\D/g, '').includes(qd))).slice(0, 6) : [];
     spotItems = [...accs.map(a => ['account', a.id]), ...ids.map(i => ['identity', i.id])]; spotSel = spotItems.length ? 0 : -1;
     const box = $('#spotResults');
     if (!q) { box.innerHTML = `<div class="spot-empty">输入网站名，看它用的是哪个邮箱。<br>输入邮箱或号码，看它绑定了哪些 App。</div>`; return; }
     if (!spotItems.length) { box.innerHTML = `<div class="spot-empty">没有找到“${esc(q)}”<br><button class="btn-filled" data-quick="${esc(q)}">添加“${esc(q)}”</button></div>`; return; }
     box.innerHTML =
-      (accs.length ? `<div class="sec-title">网站与 App</div>${accs.map(a => reel(a).replace(`<span class="reel-title">${esc(a.name)}</span>`, `<span class="reel-title">${hl(a.name, q)}</span>`)).join('')}` : '') +
+      (accs.length ? `<div class="sec-title">网站与 App</div>${accs.map(a => reel(a).replace(`<span class="reel-title">${esc(a.name)}`, `<span class="reel-title">${hl(a.name, q)}`)).join('')}` : '') +
       (ids.length ? `<div class="sec-title">邮箱与手机号</div><div class="group">${ids.map(i => `<button class="cell" data-identity="${i.id}">${idIcon(i)}<span class="cell-main"><span class="cell-title">${ui.privacy ? esc(display(i)) : hl(i.value, q)}</span><span class="cell-sub">${esc(i.label || '')}${i.label ? '，' : ''}${accountsOf(i.id).length} 个网站与 App</span></span>${ICON.chev}</button>`).join('')}</div>` : '');
     markSpot();
     $$('#spotResults .reel, #spotResults .cell').forEach((el, k) => el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 300, delay: k * 20, easing: 'ease-out', fill: 'backwards' }));
@@ -804,7 +818,7 @@
       box.style.height = H + 'px';
       box.innerHTML = `<svg class="threads" viewBox="0 0 ${W} ${H}" style="width:${W}px;height:${H}px" aria-hidden="true">${paths.join('')}</svg>
         ${pos.map(p => { const c = accountsOf(p.i.id).length; return `<button class="mcard" data-map-identity="${p.i.id}" style="top:${p.y - 31}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${ICON[p.i.type]}<b>${c}</b></span><span class="mv">${esc(p.i.label || display(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
-        ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
+        ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}${handle(a)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
       apply();
       if (!drawn) { drawn = true; $$('.threads path', box).forEach((p, k) => { const len = p.getTotalLength(); p.animate([{ strokeDasharray: len, strokeDashoffset: len }, { strokeDasharray: len, strokeDashoffset: 0 }], { duration: 700, delay: 60 + Math.min(k, 20) * 18, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }); }); }
     }

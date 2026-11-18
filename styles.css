@@ -517,3 +517,12 @@ html[data-theme=light] .check-cell .tick{color:var(--tint)}
 .threads path{stroke-opacity:.62}
 .pick-grid{min-height:58vh;align-content:start}
 html[data-theme=light] .reel .blur{opacity:.11}
+/* v4.1 sharp bundled icons, handles */
+.fav.full{background:#fff}
+.fav.full img{width:100%;height:100%;object-fit:cover}
+.pk.had .icon{opacity:1}
+.hd{font-style:normal;font-weight:400;color:var(--secondary);margin-left:6px;font-size:.9em}
+.acc-handle{font-size:16px;color:var(--secondary);margin-top:4px}
+.hd-field .icon{width:28px;height:28px;border-radius:7px}
+.hd-field .fav.letter{font-size:13px}
+.hd-field input{padding-left:2px}
