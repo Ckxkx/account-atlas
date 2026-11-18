@@ -44,22 +44,36 @@ struct RootView: View {
     .overlay(alignment: .top) { ToastView() }
   }
 
-  @ViewBuilder func sheet(_ r: Route) -> some View {
-    Group {
-      switch r {
-      case .identity(let id): IdentityDetail(id: id)
-      case .account(let id): AccountDetail(id: id)
-      case .newIdentity(let t): IdentityForm(existing: nil, type: t, defaultColor: COLORS[store.data.identities.count % COLORS.count])
-      case .editIdentity(let id): IdentityForm(existing: store.identity(id), type: "email", defaultColor: COLORS[0])
-      case .editAccount(let id): if let a = store.account(id) { AccountForm(existing: a) }
-      case .picker(let pre): PickerSheet(presetIdentity: pre)
-      case .settings: SettingsSheet()
-      }
+  func sheet(_ r: Route) -> some View {
+    SheetHost(route: r)
+      .environmentObject(store)
+      .presentationDragIndicator(.visible)
+      .presentationCornerRadius(34)
+      .preferredColorScheme(store.theme == "light" ? .light : store.theme == "system" ? nil : .dark)
+  }
+}
+
+struct SheetHost: View {
+  @EnvironmentObject var store: Store
+  let route: Route
+  var body: some View {
+    switch route {
+    case .identity(let id): IdentityDetail(id: id)
+    case .account(let id): AccountDetail(id: id)
+    case .newIdentity(let t): IdentityForm(existing: nil, type: t, defaultColor: COLORS[store.data.identities.count % COLORS.count])
+    case .editIdentity(let id): IdentityForm(existing: store.identity(id), type: "email", defaultColor: COLORS[0])
+    case .editAccount(let id): AccountFormHost(id: id)
+    case .picker(let pre): PickerSheet(presetIdentity: pre)
+    case .settings: SettingsSheet()
     }
-    .environmentObject(store)
-    .presentationDragIndicator(.visible)
-    .presentationCornerRadius(34)
-    .preferredColorScheme(store.theme == "light" ? .light : store.theme == "system" ? nil : .dark)
+  }
+}
+
+struct AccountFormHost: View {
+  @EnvironmentObject var store: Store
+  let id: String
+  var body: some View {
+    if let a = store.account(id) { AccountForm(existing: a) }
   }
 }
 

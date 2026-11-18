@@ -191,7 +191,8 @@ struct PickerSheet: View {
   @State private var ids: [String] = []
   @State private var step2 = false
   @State private var manual = false
-  @State private var mName = "", mDomain = "", mCat = "其他"
+  @State private var mName = ""
+  @State private var mDomain = ""
 
   var cats: [String] {
     (store.customApps.isEmpty ? [] : ["我添加的"]) + ["常用"] + CATS.filter { c in Presets.all.contains { $0.category == c } }
