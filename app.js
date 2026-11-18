@@ -980,7 +980,7 @@
     };
   })();
 
-  // ---------- end-to-end encrypted sync (GitHub secret gist) ----------
+  // ---------- end-to-end encrypted sync (Gitee or GitHub private gist) ----------
   const Sync = (() => {
     const CONF = 'atlas.sync', FILE = 'atlas.enc.json', DESC = '账号星图 · 加密数据（只有同步密码能解开）';
     const enc = new TextEncoder(), dec = new TextDecoder();
@@ -1005,17 +1005,32 @@
       const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(box.iv) }, k, unb64(box.ct));
       return JSON.parse(dec.decode(pt));
     }
-    async function gh(path, opt = {}, token = conf?.token) {
-      const r = await fetch('https://api.github.com' + path, { ...opt, cache: 'no-store', headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', ...(opt.body ? { 'Content-Type': 'application/json' } : {}) } });
+    // Two homes for the encrypted file: Gitee (reachable in mainland China without a proxy) or GitHub.
+    const HOSTS = {
+      gitee: { base: 'https://gitee.com/api/v5', name: 'Gitee' },
+      github: { base: 'https://api.github.com', name: 'GitHub' },
+    };
+    async function gh(path, opt = {}, token = conf?.token, prov = conf?.provider || 'github') {
+      const h = HOSTS[prov]; let url = h.base + path, init = { method: opt.method || 'GET', cache: 'no-store', headers: {} };
+      if (prov === 'gitee') {
+        if (init.method === 'GET') url += (url.includes('?') ? '&' : '?') + 'access_token=' + encodeURIComponent(token);
+        else { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify({ access_token: token, ...JSON.parse(opt.body || '{}') }); }
+      } else {
+        init.headers = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', ...(opt.body ? { 'Content-Type': 'application/json' } : {}) };
+        if (opt.body) init.body = opt.body;
+      }
+      let r;
+      try { r = await fetch(url, init); }
+      catch { throw new Error(navigator.onLine === false ? '没有网络，联网后会自动同步' : `连不上 ${h.name}` + (prov === 'github' ? '，国内网络建议改用 Gitee' : '')); }
       if (r.status === 401) throw new Error('令牌无效或已过期');
-      if (r.status === 403 || r.status === 404) throw new Error('令牌没有 gist 权限');
-      if (!r.ok) throw new Error('GitHub 返回 ' + r.status);
+      if (r.status === 403 || r.status === 404) throw new Error(prov === 'gitee' ? '令牌没有 gists 权限' : '令牌没有 gist 权限');
+      if (!r.ok) throw new Error(h.name + ' 返回 ' + r.status);
       return r.json();
     }
-    async function readGist(id, token) {
-      const g = await gh('/gists/' + id, {}, token);
-      const f = g.files[FILE]; if (!f) return null;
-      return f.truncated ? (await fetch(f.raw_url)).text() : f.content;
+    async function readGist(id, token, prov) {
+      const g = await gh('/gists/' + id, {}, token, prov);
+      const f = g.files && g.files[FILE]; if (!f) return null;
+      return f.truncated || f.content == null ? (await fetch(f.raw_url)).text() : f.content;
     }
     function merge(a, b) {
       const del = { ...(a.deleted || {}) };
@@ -1050,7 +1065,7 @@
           if (before !== JSON.stringify([state.identities, state.accounts])) { ui.active = Math.min(ui.active, deck().length); render(); refreshSheet(); }
         }
         if (!text || !same(merged, remote) || JSON.stringify(merged.deleted) !== JSON.stringify(remote.deleted || {}))
-          await gh('/gists/' + conf.gistId, { method: 'PATCH', body: JSON.stringify({ files: { [FILE]: { content: await seal(merged) } } }) });
+          await gh('/gists/' + conf.gistId, { method: 'PATCH', body: JSON.stringify({ description: DESC, files: { [FILE]: { content: await seal(merged) } } }) });
         status.state = 'idle'; status.err = ''; status.at = conf.at = Date.now(); localStorage.setItem(CONF, JSON.stringify(conf));
       } catch (e) {
         status.state = 'error'; status.err = navigator.onLine === false ? '没有网络，联网后会自动同步' : (e.message || '同步失败');
@@ -1070,13 +1085,14 @@
       },
       schedule() { if (!conf || !key) return; clearTimeout(timer); timer = setTimeout(run, 1200); },
       now: run,
-      async enable(token, pass) {
+      get provider() { return conf?.provider || 'github'; },
+      async enable(token, pass, prov = 'gitee') {
         token = token.trim();
-        const gists = await gh('/gists?per_page=100', {}, token);
+        const gists = await gh('/gists?per_page=100', {}, token, prov);
         let g = gists.find(x => x.files && x.files[FILE]);
         let remote = null, salt;
         if (g) {
-          const text = await readGist(g.id, token); const box = JSON.parse(text);
+          const text = await readGist(g.id, token, prov); const box = JSON.parse(text);
           salt = box.salt;
           const k = await derive(pass, unb64(salt));
           try { remote = await open(text, k); } catch { throw new Error('同步密码不对（和第一次设置的不一样）'); }
@@ -1085,12 +1101,12 @@
           salt = b64(crypto.getRandomValues(new Uint8Array(16)));
           key = await derive(pass, unb64(salt));
         }
-        conf = { token, salt, key: b64(await crypto.subtle.exportKey('raw', key)), gistId: g ? g.id : null, at: 0 };
+        conf = { provider: prov, token, salt, key: b64(await crypto.subtle.exportKey('raw', key)), gistId: g ? g.id : null, at: 0 };
         if (remote && state.demo) { state = { identities: [], accounts: [], deleted: {} }; remember(); }
         if (!g) {
           const local = state.demo ? { identities: [], accounts: [], deleted: {} } : state;
           if (state.demo) { state = local; remember(); }
-          const made = await gh('/gists', { method: 'POST', body: JSON.stringify({ description: DESC, public: false, files: { [FILE]: { content: await seal(local) } } }) }, token);
+          const made = await gh('/gists', { method: 'POST', body: JSON.stringify({ description: DESC, public: false, files: { [FILE]: { content: await seal(local) } } }) }, token, prov);
           conf.gistId = made.id;
         }
         delete state.demo;
@@ -1120,7 +1136,7 @@
         <div class="group">
           <button class="cell" id="syncNow"><span class="cell-main"><span class="cell-title tint">立即同步</span></span></button>
         </div>
-        <p class="hint">数据在这台设备上用你的同步密码加密，再存进你 GitHub 账号里的一个私密 Gist。GitHub 和任何人都只能看到乱码。在另一台设备上打开“同步”，填同一个令牌和同步密码，就会自动合并。</p>
+        <p class="hint">数据在这台设备上用你的同步密码加密，再存进你 ${Sync.provider === 'gitee' ? 'Gitee' : 'GitHub'} 账号里的一个私密代码片段。平台和任何人都只能看到乱码。在另一台设备上打开“同步”，选同一个平台，填同一个令牌和同步密码，就会自动合并。</p>
         <div class="group"><button class="cell" id="syncOff"><span class="cell-main"><span class="cell-title destructive-text">在这台设备上关闭同步</span></span></button></div>
         <p class="hint">关闭只影响这台设备，云端的加密数据和本机数据都会保留。</p>
       </div>`, { kind: 'sync' });
@@ -1132,21 +1148,37 @@
     }
     openSheet(`${bar('取消', '加密同步', '开启', 'id="syncGo"')}<div class="sheet-body form">
       <div class="form-hero sync-hero" style="--pc:#0a84ff"><span class="icon lg sync-ic">${cloud}</span><b>在你的所有设备上同步</b><p class="sync-sub">端到端加密，只有你的同步密码能解开</p></div>
-      <div class="sec-title">GitHub 令牌</div>
-      <div class="group"><div class="field" id="tokField"><input id="sTok" type="password" placeholder="ghp_… 或 github_pat_…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div></div>
-      <p class="hint">只需要 gist 权限。<a href="https://github.com/settings/tokens/new?scopes=gist&description=%E8%B4%A6%E5%8F%B7%E6%98%9F%E5%9B%BE%E5%90%8C%E6%AD%A5" target="_blank" rel="noopener">在 GitHub 创建一个</a>，有效期选“无期限”最省心。</p>
+      <div class="sec-title">存放在哪里</div>
+      <div class="seg prov-seg" id="provSeg"><button class="on" data-p="gitee">Gitee · 国内直连</button><button data-p="github">GitHub</button></div>
+      <div class="sec-title" id="tokTitle">Gitee 私人令牌</div>
+      <div class="group"><div class="field" id="tokField"><input id="sTok" type="password" placeholder="32 位私人令牌" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div></div>
+      <p class="hint" id="tokHint"></p>
       <div class="sec-title">同步密码</div>
       <div class="group"><div class="field" id="pwField"><input id="sPw" type="password" placeholder="至少 8 位，所有设备填同一个" autocomplete="new-password"></div></div>
       <p class="hint">同步密码不会上传，也没法找回。忘了它，云端数据就打不开了，本机数据不受影响。</p>
     </div>`, { kind: 'form' });
+    const PROV = {
+      gitee: { title: 'Gitee 私人令牌', ph: '32 位私人令牌', ok: t => /^[0-9a-f]{32}$/i.test(t),
+        hint: '只需要勾选 gists 权限。<a href="https://gitee.com/profile/personal_access_tokens/new" target="_blank" rel="noopener">在 Gitee 创建一个</a>，国内网络不用代理也能同步。' },
+      github: { title: 'GitHub 令牌', ph: 'ghp_… 或 github_pat_…', ok: t => /^(ghp_|github_pat_|gho_)\w{20,}/.test(t),
+        hint: '只需要 gist 权限。<a href="https://github.com/settings/tokens/new?scopes=gist&description=%E8%B4%A6%E5%8F%B7%E6%98%9F%E5%9B%BE%E5%90%8C%E6%AD%A5" target="_blank" rel="noopener">在 GitHub 创建一个</a>，有效期选“无期限”最省心。国内网络可能需要代理。' },
+    };
+    let prov = 'gitee';
+    const paintProv = () => {
+      const P = PROV[prov];
+      $$('#provSeg button').forEach(b => b.classList.toggle('on', b.dataset.p === prov));
+      $('#tokTitle').textContent = P.title; $('#sTok').placeholder = P.ph; $('#tokHint').innerHTML = P.hint;
+    };
     setTimeout(() => {
+      paintProv();
+      $$('#provSeg button').forEach(b => b.onclick = () => { prov = b.dataset.p; paintProv(); });
       $('#syncGo').onclick = async () => {
         const tok = $('#sTok').value, pw = $('#sPw').value;
         const shake = id => { const f = $(id); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); };
-        if (!/^(ghp_|github_pat_|gho_)\w{20,}/.test(tok.trim())) { shake('#tokField'); toast('令牌格式不对'); return; }
+        if (!PROV[prov].ok(tok.trim())) { shake('#tokField'); toast('令牌格式不对'); return; }
         if (pw.length < 8) { shake('#pwField'); toast('同步密码至少 8 位'); return; }
         const btn = $('#syncGo'); btn.disabled = true; btn.textContent = '连接中…';
-        try { const found = await Sync.enable(tok, pw); closeSheet(); toast(found ? '已连接，数据已合并' : '同步已开启'); }
+        try { const found = await Sync.enable(tok, pw, prov); closeSheet(); toast(found ? '已连接，数据已合并' : '同步已开启'); }
         catch (e) { btn.disabled = false; btn.textContent = '开启'; toast(e.message || '连接失败'); }
       };
     }, 0);

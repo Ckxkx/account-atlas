@@ -682,3 +682,9 @@ html[data-theme=light] .reel .blur{opacity:.13}
 .tabbar button{height:46px}
 .tabbar button svg{width:25px;height:25px}
 @media (max-width:340px){.tabbar{--tw:64px}}
+/* sync provider picker */
+.prov-seg{display:flex;gap:4px;padding:3px;margin:0 0 6px;border-radius:12px;background:rgba(255,255,255,.07)}
+.prov-seg button{flex:1;padding:9px 0;border-radius:9px;font-size:14px;font-weight:600;color:var(--secondary);transition:background .3s,color .3s}
+.prov-seg button.on{background:rgba(255,255,255,.16);color:var(--label,#fff)}
+html[data-theme=light] .prov-seg{background:rgba(0,0,0,.05)}
+html[data-theme=light] .prov-seg button.on{background:#fff;color:#1d1d1f;box-shadow:0 1px 3px rgba(0,0,0,.1)}
