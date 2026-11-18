@@ -27,3 +27,6 @@ python3 -m http.server 8080
 ## 部署
 
 推送到 `main` 后由 GitHub Actions 自动发布到 GitHub Pages。
+
+## 加密同步
+菜单 → 加密同步：填一个只有 gist 权限的 GitHub 令牌和同步密码。数据在浏览器里用 PBKDF2(310k) + AES-GCM 加密后存进你账号下的私密 Gist（atlas.enc.json），同步密码不上传。多台设备按条目合并（updatedAt + 删除墓碑）。

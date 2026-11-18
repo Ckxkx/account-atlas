@@ -31,7 +31,23 @@
   // ---------- state ----------
   let state = (() => { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } })();
   const ui = { tab: 'home', cat: '全部', privacy: localStorage.getItem('atlas.privacy') === '1', active: 0 };
-  const save = () => localStorage.setItem(KEY, JSON.stringify(state));
+  // every item carries updatedAt; removed ids become tombstones, so two devices can merge
+  const strip = o => { const { updatedAt, ...r } = o; return JSON.stringify(r); };
+  let seen = new Map();
+  const remember = () => { seen = new Map(); if (state) for (const k of ['identities', 'accounts']) for (const x of state[k]) seen.set(x.id, strip(x)); };
+  const save = () => {
+    const now = Date.now(); state.deleted = state.deleted || {};
+    const live = new Set();
+    for (const k of ['identities', 'accounts']) for (const x of state[k]) {
+      live.add(x.id);
+      if (seen.get(x.id) !== strip(x) || !x.updatedAt) x.updatedAt = now;
+      delete state.deleted[x.id];
+    }
+    for (const id of seen.keys()) if (!live.has(id)) state.deleted[id] = now;
+    remember();
+    localStorage.setItem(KEY, JSON.stringify(state));
+    Sync.schedule();
+  };
 
   function demo() {
     const ids = [
@@ -45,6 +61,7 @@
     const now = Date.now();
     const mk = (name, domain, category, identityIds, ago, notes = '') => ({ id: uid(), name, domain, category, identityIds, notes, createdAt: now - ago * DAY - Math.random() * 3e6 });
     return {
+      demo: true,
       identities: ids,
       accounts: [
         mk('GitHub', 'github.com', '开发', [o, p1], 0, '已开两步验证'), mk('Claude', 'claude.ai', 'AI', [g], 0),
@@ -127,7 +144,7 @@
   let toastTimer;
   function toast(msg, action) {
     const t = $('#toast');
-    t.innerHTML = `<img class="ti" src="icon.png?v=2" alt=""><span class="tx"><span class="tn">账号星图</span><span class="tt">${esc(msg)}</span></span>${action ? `<button>${esc(action.label)}</button>` : ''}`;
+    t.innerHTML = `<img class="ti" src="icon.png?v=3" alt=""><span class="tx"><span class="tn">账号星图</span><span class="tt">${esc(msg)}</span></span>${action ? `<button>${esc(action.label)}</button>` : ''}`;
     if (action) t.querySelector('button').onclick = () => { action.fn(); t.classList.remove('show'); };
     t.classList.add('show');
     clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), action ? 4500 : 2200);
@@ -158,12 +175,15 @@
     const e = state.identities.filter(i => i.type === 'email').length, p = state.identities.length - e, a = state.accounts.length;
     $('#summary').textContent = state.identities.length || a ? `${e} 个邮箱、${p} 个手机号，关联着 ${a} 个网站与 App` : '先添加一个邮箱或手机号';
     $('#sitesSummary').textContent = a ? `共 ${a} 个` : '';
+    document.body.classList.toggle('is-empty', !state.identities.length && !a);
+    const demoBtn = $('#menu [data-act="demo"]'); if (demoBtn) demoBtn.hidden = Sync.on;
   }
 
   function renderWallet() {
     const w = $('#wallet');
     w.innerHTML = state.identities.map(i => walletCard(i)).join('') +
-      `<button class="wcard ghost" data-new="identity"><div>${ICON.plus}添加邮箱或手机号</div></button>`;
+      (state.identities.length ? `<button class="wcard ghost" data-new="identity"><div>${ICON.plus}添加邮箱或手机号</div></button>`
+        : `<button class="wcard ghost first" data-new="identity"><img src="icon.png?v=3" alt=""><b>从一个邮箱或手机号开始</b><span>每张卡片记着它注册、绑定过的网站与 App</span><em>${ICON.plus}添加</em></button>`);
     fixStack(w);
     $('#dots').innerHTML = [...state.identities, 0].map((_, k) => `<i class="${k === ui.active ? 'on' : ''}"></i>`).join('');
     ui.active = Math.min(ui.active, state.identities.length);
@@ -571,10 +591,11 @@
     if (d.act) {
       menu.classList.remove('open');
       if (d.act === 'privacy') { ui.privacy = !ui.privacy; localStorage.setItem('atlas.privacy', ui.privacy ? '1' : '0'); render(); refreshSheet(); toast(ui.privacy ? '号码已隐藏' : '号码已显示'); }
+      if (d.act === 'sync') syncSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
       if (d.act === 'demo') { snap(); state = demo(); save(); ui.active = 0; render(); undoToast('已载入示例'); }
-      if (d.act === 'wipe') confirmSheet('清空全部数据？', '所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。', '清空全部数据', () => { snap(); state = { identities: [], accounts: [] }; save(); render(); undoToast('已清空'); });
+      if (d.act === 'wipe') confirmSheet('清空全部数据？', Sync.on ? '所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。' : '所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。', '清空全部数据', () => { snap(); state = { identities: [], accounts: [] }; save(); render(); undoToast('已清空'); });
       return;
     }
     if (t.closest('#tabbar')) return setTab(d.tab);
@@ -767,12 +788,190 @@
     };
   })();
 
+  // ---------- end-to-end encrypted sync (GitHub secret gist) ----------
+  const Sync = (() => {
+    const CONF = 'atlas.sync', FILE = 'atlas.enc.json', DESC = '账号星图 · 加密数据（只有同步密码能解开）';
+    const enc = new TextEncoder(), dec = new TextDecoder();
+    const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+    let conf = (() => { try { return JSON.parse(localStorage.getItem(CONF)); } catch { return null; } })();
+    let key = null, timer = null, busy = false, again = false;
+    const status = { state: conf ? 'idle' : 'off', at: conf?.at || 0, err: '' };
+    const listeners = new Set(); const emit = () => listeners.forEach(f => f());
+
+    async function derive(pass, salt) {
+      const base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+      return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 310000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+    }
+    async function seal(obj) {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(obj)));
+      return JSON.stringify({ v: 1, salt: conf.salt, iv: b64(iv), ct: b64(ct), at: Date.now() });
+    }
+    async function open(text, k = key) {
+      const box = JSON.parse(text);
+      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(box.iv) }, k, unb64(box.ct));
+      return JSON.parse(dec.decode(pt));
+    }
+    async function gh(path, opt = {}, token = conf?.token) {
+      const r = await fetch('https://api.github.com' + path, { ...opt, cache: 'no-store', headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', ...(opt.body ? { 'Content-Type': 'application/json' } : {}) } });
+      if (r.status === 401) throw new Error('令牌无效或已过期');
+      if (r.status === 403 || r.status === 404) throw new Error('令牌没有 gist 权限');
+      if (!r.ok) throw new Error('GitHub 返回 ' + r.status);
+      return r.json();
+    }
+    async function readGist(id, token) {
+      const g = await gh('/gists/' + id, {}, token);
+      const f = g.files[FILE]; if (!f) return null;
+      return f.truncated ? (await fetch(f.raw_url)).text() : f.content;
+    }
+    function merge(a, b) {
+      const del = { ...(a.deleted || {}) };
+      for (const [id, t] of Object.entries(b.deleted || {})) del[id] = Math.max(del[id] || 0, t);
+      const out = { identities: [], accounts: [], deleted: del };
+      for (const k of ['identities', 'accounts']) {
+        const map = new Map();
+        for (const x of [...a[k], ...b[k]]) { const cur = map.get(x.id); if (!cur || (x.updatedAt || 0) > (cur.updatedAt || 0)) map.set(x.id, x); }
+        out[k] = [...map.values()].filter(x => !(del[x.id] >= (x.updatedAt || 0)));
+      }
+      for (const id of Object.keys(del)) if (out.identities.some(x => x.id === id) || out.accounts.some(x => x.id === id)) delete del[id];
+      // drop links to identities that no longer exist
+      const ids = new Set(out.identities.map(i => i.id));
+      out.accounts.forEach(x => { x.identityIds = x.identityIds.filter(i => ids.has(i)); });
+      // forget tombstones older than 90 days
+      const old = Date.now() - 90 * DAY; for (const [id, t] of Object.entries(del)) if (t < old) delete del[id];
+      return out;
+    }
+    const same = (a, b) => JSON.stringify([a.identities, a.accounts]) === JSON.stringify([b.identities, b.accounts]);
+
+    async function run() {
+      if (!conf || !key) return;
+      if (busy) { again = true; return; }
+      busy = true; status.state = 'syncing'; emit();
+      try {
+        const text = await readGist(conf.gistId);
+        const remote = text ? await open(text) : { identities: [], accounts: [], deleted: {} };
+        const merged = merge(state, remote);
+        if (!same(merged, state) || JSON.stringify(merged.deleted) !== JSON.stringify(state.deleted || {})) {
+          const before = JSON.stringify([state.identities, state.accounts]);
+          state = merged; remember(); localStorage.setItem(KEY, JSON.stringify(state));
+          if (before !== JSON.stringify([state.identities, state.accounts])) { ui.active = Math.min(ui.active, state.identities.length); render(); refreshSheet(); }
+        }
+        if (!text || !same(merged, remote) || JSON.stringify(merged.deleted) !== JSON.stringify(remote.deleted || {}))
+          await gh('/gists/' + conf.gistId, { method: 'PATCH', body: JSON.stringify({ files: { [FILE]: { content: await seal(merged) } } }) });
+        status.state = 'idle'; status.err = ''; status.at = conf.at = Date.now(); localStorage.setItem(CONF, JSON.stringify(conf));
+      } catch (e) {
+        status.state = 'error'; status.err = navigator.onLine === false ? '没有网络，联网后会自动同步' : (e.message || '同步失败');
+      }
+      busy = false; emit();
+      if (again) { again = false; run(); }
+    }
+
+    return {
+      get on() { return !!conf; }, status, listeners,
+      async init() {
+        if (!conf) return;
+        try { key = await crypto.subtle.importKey('raw', unb64(conf.key), 'AES-GCM', true, ['encrypt', 'decrypt']); run(); }
+        catch { status.state = 'error'; status.err = '本机的同步信息损坏，请重新开启'; emit(); }
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) run(); });
+        addEventListener('online', run);
+      },
+      schedule() { if (!conf || !key) return; clearTimeout(timer); timer = setTimeout(run, 1200); },
+      now: run,
+      async enable(token, pass) {
+        token = token.trim();
+        const gists = await gh('/gists?per_page=100', {}, token);
+        let g = gists.find(x => x.files && x.files[FILE]);
+        let remote = null, salt;
+        if (g) {
+          const text = await readGist(g.id, token); const box = JSON.parse(text);
+          salt = box.salt;
+          const k = await derive(pass, unb64(salt));
+          try { remote = await open(text, k); } catch { throw new Error('同步密码不对（和第一次设置的不一样）'); }
+          key = k;
+        } else {
+          salt = b64(crypto.getRandomValues(new Uint8Array(16)));
+          key = await derive(pass, unb64(salt));
+        }
+        conf = { token, salt, key: b64(await crypto.subtle.exportKey('raw', key)), gistId: g ? g.id : null, at: 0 };
+        if (remote && state.demo) { state = { identities: [], accounts: [], deleted: {} }; remember(); }
+        if (!g) {
+          const local = state.demo ? { identities: [], accounts: [], deleted: {} } : state;
+          if (state.demo) { state = local; remember(); }
+          const made = await gh('/gists', { method: 'POST', body: JSON.stringify({ description: DESC, public: false, files: { [FILE]: { content: await seal(local) } } }) }, token);
+          conf.gistId = made.id;
+        }
+        delete state.demo;
+        localStorage.setItem(CONF, JSON.stringify(conf));
+        status.state = 'idle'; emit();
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) run(); });
+        await run(); render();
+        return !!g;
+      },
+      disable() { conf = null; key = null; localStorage.removeItem(CONF); status.state = 'off'; emit(); },
+    };
+  })();
+
+  const ago = t => { if (!t) return ''; const s = (Date.now() - t) / 1e3; return s < 60 ? '刚刚' : s < 3600 ? Math.floor(s / 60) + ' 分钟前' : s < 86400 ? Math.floor(s / 3600) + ' 小时前' : new Date(t).toLocaleDateString('zh-CN'); };
+  function syncLine() {
+    const st = Sync.status;
+    if (!Sync.on) return '未开启';
+    if (st.state === 'syncing') return '正在同步…';
+    if (st.state === 'error') return st.err;
+    return '已同步 · ' + ago(st.at);
+  }
+  function syncSheet() {
+    const cloud = '<svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9a4 4 0 0 1-.5 9H7Z"/></svg>';
+    if (Sync.on) {
+      openSheet(`${closeX}<div class="sheet-body form">
+        <div class="form-hero sync-hero" style="--pc:#0a84ff"><img src="icon.png?v=3" class="icon lg" alt=""><b>加密同步已开启</b><p class="sync-state ${Sync.status.state}" id="syncState">${esc(syncLine())}</p></div>
+        <div class="group">
+          <button class="cell" id="syncNow"><span class="cell-main"><span class="cell-title tint">立即同步</span></span></button>
+        </div>
+        <p class="hint">数据在这台设备上用你的同步密码加密，再存进你 GitHub 账号里的一个私密 Gist。GitHub 和任何人都只能看到乱码。在另一台设备上打开“同步”，填同一个令牌和同步密码，就会自动合并。</p>
+        <div class="group"><button class="cell" id="syncOff"><span class="cell-main"><span class="cell-title destructive-text">在这台设备上关闭同步</span></span></button></div>
+        <p class="hint">关闭只影响这台设备，云端的加密数据和本机数据都会保留。</p>
+      </div>`, { kind: 'sync' });
+      setTimeout(() => {
+        $('#syncNow').onclick = () => Sync.now();
+        $('#syncOff').onclick = () => { Sync.disable(); closeSheet(); render(); toast('已在这台设备上关闭同步'); };
+      }, 0);
+      return;
+    }
+    openSheet(`${bar('取消', '加密同步', '开启', 'id="syncGo"')}<div class="sheet-body form">
+      <div class="form-hero sync-hero" style="--pc:#0a84ff"><span class="icon lg sync-ic">${cloud}</span><b>在你的所有设备上同步</b><p class="sync-sub">端到端加密，只有你的同步密码能解开</p></div>
+      <div class="sec-title">GitHub 令牌</div>
+      <div class="group"><div class="field" id="tokField"><input id="sTok" type="password" placeholder="ghp_… 或 github_pat_…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div></div>
+      <p class="hint">只需要 gist 权限。<a href="https://github.com/settings/tokens/new?scopes=gist&description=%E8%B4%A6%E5%8F%B7%E6%98%9F%E5%9B%BE%E5%90%8C%E6%AD%A5" target="_blank" rel="noopener">在 GitHub 创建一个</a>，有效期选“无期限”最省心。</p>
+      <div class="sec-title">同步密码</div>
+      <div class="group"><div class="field" id="pwField"><input id="sPw" type="password" placeholder="至少 8 位，所有设备填同一个" autocomplete="new-password"></div></div>
+      <p class="hint">同步密码不会上传，也没法找回。忘了它，云端数据就打不开了，本机数据不受影响。</p>
+    </div>`, { kind: 'form' });
+    setTimeout(() => {
+      $('#syncGo').onclick = async () => {
+        const tok = $('#sTok').value, pw = $('#sPw').value;
+        const shake = id => { const f = $(id); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); };
+        if (!/^(ghp_|github_pat_|gho_)\w{20,}/.test(tok.trim())) { shake('#tokField'); toast('令牌格式不对'); return; }
+        if (pw.length < 8) { shake('#pwField'); toast('同步密码至少 8 位'); return; }
+        const btn = $('#syncGo'); btn.disabled = true; btn.textContent = '连接中…';
+        try { const found = await Sync.enable(tok, pw); closeSheet(); toast(found ? '已连接，数据已合并' : '同步已开启'); }
+        catch (e) { btn.disabled = false; btn.textContent = '开启'; toast(e.message || '连接失败'); }
+      };
+    }, 0);
+  }
+  Sync.listeners.add(() => {
+    const el = $('#syncState'); if (el) { el.textContent = syncLine(); el.className = 'sync-state ' + Sync.status.state; }
+    const m = $('#menu [data-act="sync"] small'); if (m) m.textContent = syncLine();
+    const f = $('#footnote'); if (f) f.textContent = Sync.on ? '已开启端到端加密同步。不记录任何密码。' : '数据只保存在这台设备的浏览器里，不记录任何密码。想在多台设备上用，可以开启加密同步。';
+  });
+
   // ---------- boot ----------
+  if (state) remember();
   if (!state) {
     state = demo(); save();
     setTimeout(() => toast('这是示例数据', { label: '清空', fn: () => { state = { identities: [], accounts: [] }; save(); render(); } }), 1400);
   }
-  render();
+  render(); Sync.init(); Sync.listeners.forEach(f => f());
   const first = state.identities[0];
   document.documentElement.style.setProperty('--accent', first ? first.color : '#3a3a3c');
   // one orchestrated entrance: the cards deal in from the right

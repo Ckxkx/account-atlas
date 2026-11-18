@@ -12,8 +12,8 @@
   <title>账号 · Atlas</title>
   <link rel="icon" href="logo.svg" type="image/svg+xml" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="apple-touch-icon" href="icon.png?v=2" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="apple-touch-icon" href="icon.png?v=3" />
+  <link rel="stylesheet" href="styles.css?v=1794970867" />
 </head>
 <body>
   <div class="glow" id="glow"></div>
@@ -28,6 +28,8 @@
       </div>
     </div>
     <div class="menu" id="menu" role="menu">
+      <button data-act="sync"><span>加密同步<small>未开启</small></span><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9a4 4 0 0 1-.5 9H7Z"/></svg></button>
+      <div class="menu-sep"></div>
       <button data-act="privacy"><span>隐藏号码</span><svg viewBox="0 0 24 24"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
       <button data-act="export"><span>导出备份</span><svg viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg></button>
       <button data-act="import"><span>导入备份</span><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg></button>
@@ -71,7 +73,7 @@
       <div class="graph-card"><canvas id="graph"></canvas></div>
     </section>
 
-    <p class="footnote">所有内容只保存在这台设备的浏览器里，不上传，不记录密码。换设备时用“导出备份”。</p>
+    <p class="footnote" id="footnote"></p>
   </main>
 
   <nav class="tabbar" id="tabbar">
@@ -97,6 +99,6 @@
 
   <div class="toast" id="toast"></div>
   <input type="file" id="fileInput" accept="application/json" hidden />
-  <script src="app.js"></script>
+  <script src="app.js?v=1794970867"></script>
 </body>
 </html>
