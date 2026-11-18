@@ -213,8 +213,9 @@
     return `<div class="${cls}" aria-hidden="true">${tiles.join('')}</div>`;
   }
   const maskHandle = h => [...h].slice(0, 1).join('') + '•••';
-  // the map hides usernames too while 隐藏号码 is on
-  const handle = (a, priv) => a.handle ? `<em class="hd">${esc(priv && ui.privacy ? maskHandle(a.handle) : a.handle)}</em>` : '';
+  // 隐藏号码 also hides usernames everywhere they're shown (not in the edit form)
+  const hd = h => ui.privacy ? maskHandle(h) : h;
+  const handle = a => a.handle ? `<em class="hd">${esc(hd(a.handle))}</em>` : '';
   const caps = ids => ids.map(idById).filter(Boolean).map(i => `<span class="cap" style="--c:${i.color}"><i></i>${esc(i.label || display(i))}</span>`).join('');
 
   // ---------- toast (notification banner) ----------
@@ -335,7 +336,7 @@
     $$('.app[data-account]', g).forEach(el => before[el.dataset.account] = el.getBoundingClientRect());
     const more = list.length > 11 ? list.length - 11 : 0;
     const shown = more ? list.slice(0, 11) : list;
-    g.innerHTML = shown.map(a => `<button class="app" data-account="${a.id}">${favIcon(a)}<span>${esc(a.handle || a.name)}</span></button>`).join('') +
+    g.innerHTML = shown.map(a => `<button class="app" data-account="${a.id}">${favIcon(a)}<span>${esc(a.handle ? hd(a.handle) : a.name)}</span></button>`).join('') +
       (more ? `<button class="app add" data-identity="${i ? i.id : ''}"><span class="icon more">+${more}</span><span>全部</span></button>` : i ? `<button class="app add" data-new="account" data-preset="${i.id}"><span class="icon">${ICON.plus}</span><span>添加</span></button>` : '') +
       (!list.length && !i ? '<div class="grid-empty">还没有网站，从右上角的 + 开始。</div>' : '');
     let k = 0;
@@ -551,7 +552,7 @@
         <div class="cine">
           ${poster([a, a, a, a], 4, 'backdrop')}
           ${favIcon(a, 'lg')}
-          <h2>${esc(a.name)}</h2>${a.handle ? `<p class="acc-handle">${esc(a.handle)}</p>` : ''}
+          <h2>${esc(a.name)}</h2>${a.handle ? `<p class="acc-handle">${esc(hd(a.handle))}</p>` : ''}
           <div class="caps"><span class="cap dim">${esc(a.category)}</span>${d ? `<span class="cap dim">${esc(d)}</span>` : ''}</div>
         </div>
         <div class="actions">
@@ -955,7 +956,7 @@
       box.innerHTML = `<svg class="threads" viewBox="0 0 ${W} ${H}" style="width:${W}px;height:${H}px" aria-hidden="true">${paths.join('')}</svg>
         ${pos.map((p, k) => (k === 0 || k === brk) ? `<span class="mgroup" style="top:${p.y - 31 - 24}px;width:${L}px">${p.i.type === 'phone' ? ICON.phone + '手机号' : ICON.email + '邮箱'}</span>` : '').join('')}
         ${pos.map(p => { const c = accountsOf(p.i.id).length; return `<button class="mcard" data-map-identity="${p.i.id}" style="top:${p.y - 31}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${ICON[p.i.type]}<b>${c}</b></span><span class="mv">${esc(p.i.label || display(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
-        ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}${handle(a, 1)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
+        ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}${handle(a)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
       apply();
       if (!drawn) { drawn = true; $$('.threads path', box).forEach((p, k) => { const len = p.getTotalLength(); p.animate([{ strokeDasharray: len, strokeDashoffset: len }, { strokeDasharray: len, strokeDashoffset: 0 }], { duration: 700, delay: 60 + Math.min(k, 20) * 18, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }); }); }
     }
