@@ -43,3 +43,42 @@ jobs:
           mkdir out && cp *.ipa out/ && cd out
           git init -q -b ipa && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "IPA $(ls *.ipa)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ipa
+
+  preview:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build for simulator and take screenshots
+        run: |
+          set -euo pipefail
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          APP=sim/Atlas.app
+          mkdir -p "$APP" shots
+          xcrun -sdk iphonesimulator swiftc -parse-as-library -Onone -swift-version 5 -target arm64-apple-ios17.0-simulator -sdk "$SDK" native/*.swift -o "$APP/Atlas"
+          cp -R icons "$APP/icons"
+          sed -e "s/__VERSION__/2.0/" -e "s/__BUILD__/1/" native/Info.plist > "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleSupportedPlatforms" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleSupportedPlatforms array" -c "Add :CFBundleSupportedPlatforms:0 string iPhoneSimulator" "$APP/Info.plist"
+          xcrun actool ios/Assets.xcassets --compile "$APP" --platform iphonesimulator --minimum-deployment-target 17.0 \
+            --app-icon AppIcon --output-partial-info-plist sim/partial.plist --target-device iphone
+          /usr/libexec/PlistBuddy -c "Merge sim/partial.plist" "$APP/Info.plist"
+          codesign -s - --force "$APP"
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];c=[x for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone 16 Pro') or x['name'].startswith('iPhone 17 Pro')];c=c or [x for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')];print(c[-1]['udid'])")
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryLevel 100 --cellularBars 4 || true
+          xcrun simctl install "$UDID" "$APP"
+          shot() { xcrun simctl terminate "$UDID" dev.huichen.atlas || true; xcrun simctl launch "$UDID" dev.huichen.atlas "${@:2}"; sleep 7; xcrun simctl io "$UDID" screenshot "shots/$1.png"; }
+          shot 1-wallet
+          shot 2-wallet-light -atlas.theme light
+          shot 3-sites -atlasTab 1
+          shot 4-map -atlasTab 2
+          shot 5-identity -atlasRoute identity
+          shot 6-picker -atlasRoute picker
+          shot 7-settings -atlasRoute settings
+          shot 8-new -atlasRoute new
+          ls shots
+      - name: Publish screenshots
+        run: |
+          mkdir out && cp shots/*.png out/ && cd out
+          git init -q -b shots && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "shots"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" shots

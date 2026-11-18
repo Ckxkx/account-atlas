@@ -42,6 +42,18 @@ struct RootView: View {
     .sensoryFeedback(.selection, trigger: tab)
     .sheet(item: $store.route) { r in sheet(r) }
     .overlay(alignment: .top) { ToastView() }
+    .onAppear {
+      // launch arguments used by the CI preview screenshots
+      let d = UserDefaults.standard
+      tab = d.integer(forKey: "atlasTab")
+      switch d.string(forKey: "atlasRoute") {
+      case "picker": store.route = .picker(store.active?.id)
+      case "identity": if let i = store.active { store.route = .identity(i.id) }
+      case "settings": store.route = .settings
+      case "new": store.route = .newIdentity("email")
+      default: break
+      }
+    }
   }
 
   func sheet(_ r: Route) -> some View {
