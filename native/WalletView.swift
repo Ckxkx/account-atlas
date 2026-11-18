@@ -61,6 +61,7 @@ struct WalletView: View {
       .padding(.vertical, 26)
     }
     .scrollIndicators(.hidden)
+    .scrollClipDisabled()
     .scrollTargetBehavior(.viewAligned)
     .scrollPosition(id: Binding(get: { store.activeID }, set: { v in if let v { store.activeID = v } }))
     .safeAreaPadding(.horizontal, 34)
