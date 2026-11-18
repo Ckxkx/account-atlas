@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths: ['ios/**', '.github/workflows/ios.yml']
 
+permissions:
+  contents: write
+
 jobs:
   ipa:
     runs-on: macos-15
@@ -36,3 +39,8 @@ jobs:
         with:
           name: Atlas-ipa
           path: '*.ipa'
+      - name: Publish IPA to the ipa branch
+        run: |
+          mkdir out && cp *.ipa out/ && cd out
+          git init -q -b ipa && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "IPA $(ls *.ipa)"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ipa
