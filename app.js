@@ -276,12 +276,17 @@
     const s = $('#kindSeg'), e = state.identities.filter(i => i.type === 'email').length, p = state.identities.length - e;
     s.hidden = !state.identities.length;
     s.classList.toggle('right', ui.kind === 'phone');
+    if (s.querySelector('.thumb')) {   // update in place so the thumb slides instead of jumping
+      $$('button', s).forEach(btn => btn.classList.toggle('on', btn.dataset.kind === ui.kind));
+      const bs = $$('b', s); bs[0].textContent = e; bs[1].textContent = p; return;
+    }
     s.innerHTML = `<span class="thumb"></span><button data-kind="email" class="${ui.kind === 'email' ? 'on' : ''}">${ICON.email}邮箱<b>${e}</b></button><button data-kind="phone" class="${ui.kind === 'phone' ? 'on' : ''}">${ICON.phone}手机号<b>${p}</b></button>`;
   }
   function switchKind(k) {
     if (k === ui.kind) return;
     const w = $('#wallet'), dir = k === 'phone' ? 1 : -1;
     setKind(k); renderWallet(); onActiveChange();
+    const th = $('#kindSeg .thumb'); if (th && !calm()) th.animate([{ scale: '1 1' }, { scale: '1.12 .92', offset: .4 }, { scale: '1 1' }], { duration: 420, easing: 'cubic-bezier(.32,.72,0,1)' });
     // animate the cards, not the wallet: a transform on the wallet would change the cards' offsetParent
     $$('.wcard', w).forEach((c, k) => c.animate([{ translate: `${dir * 50}px 0`, opacity: 0 }, { translate: '0 0', opacity: 1 }], { duration: 520, delay: k * 50, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }));
   }
@@ -429,11 +434,12 @@
   const TABS = ['home', 'sites', 'graph'];
   function setTab(tab) {
     if (tab === ui.tab) { scrollTo({ top: 0, behavior: 'smooth' }); return; }
-    ui.tab = tab;
-    const idx = TABS.indexOf(tab);
+    const from = TABS.indexOf(ui.tab); ui.tab = tab;
+    const idx = TABS.indexOf(tab), th = $('#tabThumb');
     $$('#tabbar button').forEach((b, k) => b.classList.toggle('active', k === idx));
-    $('#tabThumb').style.transform = `translateX(${idx * 100}%)`;
-    $$('.view').forEach(v => v.classList.toggle('active', v.dataset.view === tab));
+    th.style.transform = `translateX(${idx * 100}%)`;
+    if (!calm()) th.animate([{ scale: '1 1' }, { scale: `${1 + .18 * Math.abs(idx - from)} .9`, offset: .4 }, { scale: '1 1' }], { duration: 500, easing: 'cubic-bezier(.32,.72,0,1)' });
+    $$('.view').forEach(v => { const on = v.dataset.view === tab; v.classList.toggle('active', on); v.classList.toggle('from-r', on && idx > from); v.classList.toggle('from-l', on && idx < from); });
     $('#topTitle').textContent = { home: '账号', sites: '网站与 App', graph: '关系图' }[tab];
     scrollTo(0, 0);
     tab === 'graph' ? Graph.start() : Graph.stop();
@@ -448,6 +454,7 @@
     sheetCtx = ctx;
     inner.innerHTML = html;
     fixStack(inner);
+    inner.classList.add('enter'); clearTimeout(inner._en); inner._en = setTimeout(() => inner.classList.remove('enter'), 700);
     if (wasOpen) {
       inner.animate([{ opacity: 0, transform: 'translateX(18px)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.32,.72,0,1)' });
     } else {

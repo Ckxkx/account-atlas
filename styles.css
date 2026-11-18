@@ -584,3 +584,26 @@ html[data-theme=light] .theme-btn .sun path{transform:rotate(45deg) scale(.6)}
 .pk-exp-f input{font:inherit;font-size:16px;background:none;border:0;outline:0;color:var(--label);padding:0;width:100%}
 .pk-exp-x{flex:none;height:32px;padding:0 14px;border-radius:16px;background:var(--tint);color:#fff;font-weight:600;font-size:14px;transition:transform .25s var(--bounce)}
 .pk-exp-x:active{transform:scale(.9)}
+
+/* v5.3 polish */
+/* card glow was cut off by the scroller: give it room, then pull the content back up */
+.wallet{padding-bottom:52px;margin-bottom:-38px}
+.wcard{--ring:color-mix(in srgb,var(--c) 72%,#000);transition:scale .35s var(--bounce)}
+.wcard:active{scale:.975}
+.wcard .stack>*,html[data-theme=light] .wcard .stack>.fav{margin-left:-6px;box-shadow:0 0 0 2px var(--ring),0 3px 8px rgba(0,0,0,.22)}
+/* tab views slide in from the side you came from */
+.view.active{animation:viewIn .5s var(--spring)}
+.view.active.from-r{animation-name:viewInR}.view.active.from-l{animation-name:viewInL}
+@keyframes viewInR{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}
+@keyframes viewInL{from{opacity:0;transform:translateX(-26px)}to{opacity:1;transform:none}}
+.tabbar button svg{transition:transform .45s var(--bounce)}
+.tabbar button.active svg{transform:translateY(-1px) scale(1.08)}
+.tabbar button:active svg{transform:scale(.82)}
+.dots i{transition:width .5s var(--bounce),background .3s}
+.kind-seg button{transition:color .3s,transform .3s var(--bounce)}
+.kind-seg button:active{transform:scale(.95)}
+.pill-btn:active,.btn-filled:active{transform:scale(.93)}
+.sheet .enter .group,.sheet .enter .sec-title,.sheet .enter .form-hero,.sheet .enter .pick-grid{animation:rise .5s var(--spring) backwards}
+.sheet .enter .group:nth-of-type(2),.sheet .enter .sec-title:nth-of-type(2){animation-delay:.04s}
+.sheet .enter .group:nth-of-type(3),.sheet .enter .sec-title:nth-of-type(3){animation-delay:.08s}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}}
