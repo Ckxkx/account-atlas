@@ -3,7 +3,21 @@
   'use strict';
 
   const KEY = 'atlas.v1';
-  const COLORS = ['#0a84ff', '#30d158', '#ff9f0a', '#ff375f', '#bf5af2', '#64d2ff', '#ff453a', '#5e5ce6'];
+  // card skins: the key colour (used for threads, tags, glow) and the gradient the card is painted with
+  const SKINS = {
+    '#0a84ff': ['深海', '#56c6ff 0%, #0a84ff 42%, #3b2fd0 100%'],
+    '#30d158': ['青柠', '#d2f56a 0%, #30d158 48%, #0b7f6a 100%'],
+    '#ff9f0a': ['落日', '#ffdf5c 0%, #ff9f0a 42%, #ff3d5a 100%'],
+    '#ff375f': ['莓果', '#ff9bb8 0%, #ff375f 46%, #9e1470 100%'],
+    '#bf5af2': ['极光', '#ff86dc 0%, #bf5af2 44%, #4636ee 100%'],
+    '#64d2ff': ['冰川', '#9df0ff 0%, #4cc3fb 40%, #2a6cf0 100%'],
+    '#ff453a': ['珊瑚', '#ffa36b 0%, #ff453a 46%, #c1185f 100%'],
+    '#5e5ce6': ['靛蓝', '#9a98ff 0%, #5e5ce6 46%, #1f1b78 100%'],
+    '#00c7be': ['海湾', '#8af5d6 0%, #00c7be 44%, #0a62b0 100%'],
+    '#3a3a3c': ['曜石', '#76767c 0%, #3a3a3c 46%, #0d0d10 100%'],
+  };
+  const COLORS = Object.keys(SKINS);
+  const skin = c => `linear-gradient(145deg, ${SKINS[c] ? SKINS[c][1] : `color-mix(in srgb, ${c} 70%, #fff) 0%, ${c} 50%, color-mix(in srgb, ${c} 70%, #000) 100%`})`;
   const CATS = ['社交', '购物', '支付金融', '开发', 'AI', '娱乐', '游戏', '出行', '工具', '加密', '其他'];
   // name, domain, category, brand colour
   const PRESETS = [
@@ -19,7 +33,25 @@
     ['Telegram', 'telegram.org', '社交', '#26a5e4'], ['X', 'x.com', '社交', '#3a3a3a'], ['Instagram', 'instagram.com', '社交', '#e1306c'], ['Netflix', 'netflix.com', '娱乐', '#e50914'],
     ['Spotify', 'spotify.com', '娱乐', '#1db954'], ['YouTube', 'youtube.com', '娱乐', '#ff0000'], ['Binance', 'binance.com', '加密', '#f0b90b'], ['OKX', 'okx.com', '加密', '#3a3a3a'],
     ['MetaMask', 'metamask.io', '加密', '#f6851b'], ['PayPal', 'paypal.com', '支付金融', '#003087'], ['Amazon', 'amazon.com', '购物', '#ff9900'],
+    ['QQ 邮箱', 'mail.qq.com', '工具', '#12b7f5'], ['网易邮箱', 'mail.163.com', '工具', '#d7000f'], ['Outlook', 'outlook.com', '工具', '#0078d4'], ['iCloud', 'icloud.com', '工具', '#3693f3'],
+    ['快手', 'kuaishou.com', '娱乐', '#ff4906'], ['豆瓣', 'douban.com', '社交', '#2e963d'], ['腾讯视频', 'v.qq.com', '娱乐', '#ff7f00'], ['爱奇艺', 'iqiyi.com', '娱乐', '#00be06'],
+    ['优酷', 'youku.com', '娱乐', '#1ebeff'], ['QQ 音乐', 'y.qq.com', '娱乐', '#31c27c'], ['喜马拉雅', 'ximalaya.com', '娱乐', '#f86442'], ['百度网盘', 'pan.baidu.com', '工具', '#06a7ff'],
+    ['阿里云盘', 'alipan.com', '工具', '#637dff'], ['夸克', 'quark.cn', '工具', '#4a5cff'], ['钉钉', 'dingtalk.com', '工具', '#3296fa'], ['飞书', 'feishu.cn', '工具', '#3370ff'],
+    ['企业微信', 'work.weixin.qq.com', '工具', '#2b85e4'], ['腾讯会议', 'meeting.tencent.com', '工具', '#006eff'], ['WPS', 'wps.cn', '工具', '#e8463a'], ['饿了么', 'ele.me', '出行', '#0097ff'],
+    ['大众点评', 'dianping.com', '出行', '#ff6633'], ['滴滴出行', 'didiglobal.com', '出行', '#ff7e33'], ['飞猪', 'fliggy.com', '出行', '#ffc900'], ['去哪儿', 'qunar.com', '出行', '#00bcd4'],
+    ['得物', 'dewu.com', '购物', '#1a1a1a'], ['唯品会', 'vip.com', '购物', '#f10180'], ['云闪付', 'unionpay.com', '支付金融', '#e60012'], ['招商银行', 'cmbchina.com', '支付金融', '#c8152d'],
+    ['腾讯云', 'cloud.tencent.com', '开发', '#006eff'], ['阿里云', 'aliyun.com', '开发', '#ff6a00'], ['Hugging Face', 'huggingface.co', '开发', '#ffb000'], ['Docker', 'docker.com', '开发', '#1d63ed'],
+    ['npm', 'npmjs.com', '开发', '#cb3837'], ['Cursor', 'cursor.com', 'AI', '#2f2f2f'], ['豆包', 'doubao.com', 'AI', '#3c6cff'], ['通义', 'tongyi.aliyun.com', 'AI', '#615ced'],
+    ['智谱清言', 'chatglm.cn', 'AI', '#3859ff'], ['文心一言', 'yiyan.baidu.com', 'AI', '#2932e1'], ['Perplexity', 'perplexity.ai', 'AI', '#20808d'], ['Midjourney', 'midjourney.com', 'AI', '#3a3a3a'],
+    ['OpenRouter', 'openrouter.ai', 'AI', '#6467f2'], ['Poe', 'poe.com', 'AI', '#5d5cde'], ['腾讯游戏', 'game.qq.com', '游戏', '#1e7cff'], ['网易游戏', 'game.163.com', '游戏', '#d7000f'],
+    ['PlayStation', 'playstation.com', '游戏', '#0070d1'], ['Xbox', 'xbox.com', '游戏', '#107c10'], ['Nintendo', 'nintendo.com', '游戏', '#e60012'], ['TikTok', 'tiktok.com', '娱乐', '#fe2c55'],
+    ['Facebook', 'facebook.com', '社交', '#1877f2'], ['WhatsApp', 'whatsapp.com', '社交', '#25d366'], ['Reddit', 'reddit.com', '社交', '#ff4500'], ['LinkedIn', 'linkedin.com', '社交', '#0a66c2'],
+    ['Twitch', 'twitch.tv', '娱乐', '#9146ff'], ['Slack', 'slack.com', '工具', '#4a154b'], ['Zoom', 'zoom.us', '工具', '#0b5cff'], ['Dropbox', 'dropbox.com', '工具', '#0061ff'],
+    ['Canva', 'canva.com', '工具', '#00c4cc'], ['Coinbase', 'coinbase.com', '加密', '#0052ff'], ['Bybit', 'bybit.com', '加密', '#f7a600'], ['Bitget', 'bitget.com', '加密', '#00f0ff'],
+    ['Uber', 'uber.com', '出行', '#2b2b2b'], ['Airbnb', 'airbnb.com', '出行', '#ff385c'], ['Booking', 'booking.com', '出行', '#003580'], ['Visa', 'visa.com', '支付金融', '#1a1f71'],
   ];
+  // the ones most people have, shown first in the picker
+  const POPULAR = ['微信', 'QQ', '支付宝', '淘宝', '京东', '拼多多', '抖音', '小红书', '哔哩哔哩', '微博', '美团', '知乎', '网易云音乐', '12306', '百度网盘', 'Apple ID', 'GitHub', 'Google', 'ChatGPT', 'Steam', '豆包', 'DeepSeek', 'Telegram', 'Microsoft'];
 
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -157,7 +189,7 @@
   function walletCard(i, extra = '') {
     const accs = accountsOf(i.id), n = accs.length;
     const stack = accs.slice(0, 4).map(a => favIcon(a)).join('');
-    return `<button class="wcard" ${extra} data-identity="${i.id}" style="--c:${i.color}">
+    return `<button class="wcard" ${extra} data-identity="${i.id}" style="--c:${i.color};--g:${skin(i.color)}">
       ${poster(accs.slice().sort((a, b) => b.createdAt - a.createdAt), 9)}
       <span class="sheen"></span>
       <span class="wc-top"><span class="wc-kind">${ICON[i.type]}${esc(i.label || (i.type === 'email' ? '邮箱' : '手机号'))}</span>
@@ -298,6 +330,21 @@
     if (ui.tab === 'graph') Graph.rebuild();
   }
 
+  // ---------- appearance ----------
+  function setTheme(t) {
+    const root = document.documentElement;
+    root.classList.add('theming');
+    if (t === 'light') root.dataset.theme = 'light'; else delete root.dataset.theme;
+    localStorage.setItem('atlas.theme', t);
+    paintTheme();
+    setTimeout(() => root.classList.remove('theming'), 450);
+  }
+  function paintTheme() {
+    const light = document.documentElement.dataset.theme === 'light';
+    $('meta[name="theme-color"]').content = light ? '#f2f2f7' : '#000000';
+    const m = $('#menu [data-act="theme"] span'); if (m) m.textContent = light ? '深色外观' : '浅色外观';
+  }
+
   // ---------- tabs ----------
   const TABS = ['home', 'sites', 'graph'];
   function setTab(tab) {
@@ -380,7 +427,7 @@
       <div class="sheet-body">
         <div class="cine idcine" style="--c:${i.color}">
           ${poster(accs, 4, 'backdrop')}
-          ${walletCard(i, 'tabindex="-1" style="--c:' + i.color + ';pointer-events:none"')}
+          ${walletCard(i, 'tabindex="-1" data-static')}
         </div>
         <div class="actions">
           <button class="action" data-copy="${esc(i.value)}">${ICON.copy}复制</button>
@@ -431,8 +478,8 @@
           <div class="field" id="valueField"><label id="valueLabel">${type === 'email' ? '地址' : '号码'}</label><input id="fValue" value="${esc(i.value)}" inputmode="${type === 'email' ? 'email' : 'tel'}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${type === 'email' ? 'name@example.com' : '+86 138 0000 0000'}"></div>
           <div class="field"><label>标签</label><input id="fLabel" value="${esc(i.label)}" placeholder="主力、小号、工作…"></div>
         </div>
-        <div class="sec-title">颜色</div>
-        <div class="group"><div class="colors" id="colors">${COLORS.map(c => `<button class="color ${c === color ? 'active' : ''}" style="--c:${c}" data-c="${c}" aria-label="颜色"></button>`).join('')}</div></div>
+        <div class="sec-title">卡面</div>
+        <div class="group"><div class="colors" id="colors">${COLORS.map(c => `<button class="color ${c === color ? 'active' : ''}" style="--c:${c};--g:${skin(c)}" data-c="${c}" aria-label="${SKINS[c][0]}"><span>${SKINS[c][0]}</span></button>`).join('')}</div></div>
         <div class="sec-title">备注</div>
         <div class="group"><div class="field stack"><textarea id="fNotes" placeholder="运营商、是否实名、找回方式">${esc(i.notes || '')}</textarea></div></div>
         <p class="hint">不要在这里填写密码。</p>
@@ -440,7 +487,7 @@
     setTimeout(() => {
       const preview = () => {
         const tmp = { id: existing?.id || '_new', type, value: $('#fValue').value.trim() || (type === 'email' ? 'name@example.com' : '+86 138 0000 0000'), label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim() };
-        const html = walletCard(tmp, 'tabindex="-1" style="--c:' + color + ';pointer-events:none"');
+        const html = walletCard(tmp, 'tabindex="-1" data-static');
         const box = $('#preview'); box.innerHTML = html; fixStack(box);
       };
       preview();
@@ -476,7 +523,7 @@
         <div class="group">
           <div class="field" id="nameField"><label>名称</label><input id="aName" value="${esc(a.name)}" placeholder="GitHub、淘宝、微信…" autocomplete="off"></div>
           <div class="suggest" id="suggest"></div>
-          <div class="field"><label>网址</label><input id="aDomain" value="${esc(a.domain)}" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="github.com（用来显示图标）"></div>
+          <div class="field"><label>网址</label><input id="aDomain" value="${esc(a.domain)}" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="选填，用来显示图标"></div>
         </div>
         <p class="hint dup" id="dupHint" hidden></p>
         <div class="sec-title">用哪个邮箱或手机号注册、绑定的</div>
@@ -524,6 +571,74 @@
         save(); render(); showAccount(id); toast(existing ? '已保存' : `已添加 ${name}`);
       };
       if (!existing && !presetName && matchMedia('(hover:hover)').matches) $('#aName').focus({ preventScroll: true });
+    }, 0);
+  }
+
+  // ---------- add by picking: tap the apps you use, then say which email or number ----------
+  function pickApps(presetId, query = '') {
+    if (!state.identities.length) { identityForm(); toast('先添加一个邮箱或手机号'); return; }
+    const chosen = new Set(); let cat = '常用', q = query;
+    const have = name => state.accounts.find(x => x.name.toLowerCase() === name.toLowerCase());
+    const cats = ['常用', ...CATS.filter(c => PRESETS.some(p => p[2] === c))];
+    openSheet(`<div class="sheet-bar"><button data-close>取消</button><span class="t" id="pkTitle">选择网站或 App</span><button id="pkNext" disabled>下一步</button></div>
+      <div class="pick-head">
+        <div class="spot-field pk-field"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/></svg><input id="pkQ" placeholder="搜索，或直接输入名字" value="${esc(q)}" autocomplete="off" enterkeyhint="search"></div>
+        <div class="filters pk-cats" id="pkCats">${cats.map(c => `<button data-pc="${c}" class="${c === cat ? 'active' : ''}">${c}</button>`).join('')}</div>
+      </div>
+      <div class="sheet-body"><div class="pick-grid" id="pkGrid"></div></div>`, { kind: 'form' });
+    const draw = () => {
+      const ql = q.trim().toLowerCase();
+      let list = ql ? PRESETS.filter(p => p[0].toLowerCase().includes(ql) || p[1].includes(ql))
+        : cat === '常用' ? POPULAR.map(n => PRESETS.find(p => p[0] === n)).filter(Boolean) : PRESETS.filter(p => p[2] === cat);
+      $('#pkCats').style.display = ql ? 'none' : '';
+      const exact = ql && PRESETS.some(p => p[0].toLowerCase() === ql);
+      $('#pkGrid').innerHTML = list.map(p => { const k = PRESETS.indexOf(p), h = have(p[0]); return `<button class="pk ${chosen.has(k) ? 'on' : ''} ${h ? 'had' : ''}" data-pk="${k}">${favIcon({ name: p[0], domain: p[1] })}<span>${esc(p[0])}</span>${h ? '<small>已记录</small>' : ''}<i class="pk-tick">${ICON.check}</i></button>`; }).join('') +
+        (ql && !exact ? `<button class="pk custom" data-pk-custom="${esc(q.trim())}"><span class="icon">${ICON.plus}</span><span>添加“${esc(q.trim())}”</span></button>` : '') +
+        (!ql ? `<button class="pk custom" data-pk-custom=""><span class="icon">${ICON.edit}</span><span>手动添加</span></button>` : '');
+    };
+    const sync = () => {
+      const n = chosen.size, b = $('#pkNext');
+      b.disabled = !n; b.textContent = n ? `下一步（${n}）` : '下一步';
+      $('#pkTitle').textContent = n ? `已选 ${n} 个` : '选择网站或 App';
+    };
+    setTimeout(() => {
+      draw();
+      $('#pkQ').addEventListener('input', e => { q = e.target.value; draw(); });
+      $('#pkCats').onclick = e => { const b = e.target.closest('[data-pc]'); if (!b) return; cat = b.dataset.pc; $$('#pkCats button').forEach(x => x.classList.toggle('active', x === b)); draw(); $('.sheet-body', sheet).scrollTop = 0; };
+      $('#pkGrid').onclick = e => {
+        const c = e.target.closest('[data-pk-custom]');
+        if (c) return accountForm(null, presetId, c.dataset.pkCustom);
+        const b = e.target.closest('[data-pk]'); if (!b) return;
+        const k = +b.dataset.pk, h = have(PRESETS[k][0]);
+        if (h) return toast(`已经记录过 ${h.name}`, { label: '去看看', fn: () => showAccount(h.id) });
+        chosen.has(k) ? chosen.delete(k) : chosen.add(k);
+        b.classList.toggle('on'); if (b.classList.contains('on')) b.animate([{ transform: 'scale(.86)' }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.34,1.45,.64,1)' });
+        sync();
+      };
+      $('#pkNext').onclick = () => chosen.size && pickIdentities([...chosen].map(k => PRESETS[k]), presetId, q);
+      if (q) $('#pkQ').focus();
+    }, 0);
+  }
+
+  function pickIdentities(picks, presetId, q) {
+    const sel = new Set(presetId && idById(presetId) ? [presetId] : state.identities[ui.active] ? [state.identities[ui.active].id] : []);
+    const fakes = picks.map(p => ({ name: p[0], domain: p[1] }));
+    openSheet(`<div class="sheet-bar"><button id="pkBack">返回</button><span class="t">用哪个注册的</span><button id="pkSave">添加</button></div>
+      <div class="sheet-body form">
+        <div class="form-hero" style="--pc:${brand(fakes[0])}"><span class="pk-stack">${fakes.slice(0, 5).map(f => favIcon(f, 'lg')).join('')}</span><b>${picks.length === 1 ? esc(picks[0][0]) : `${esc(picks[0][0])} 等 ${picks.length} 个`}</b></div>
+        <div class="sec-title">用哪个邮箱或手机号注册、绑定的</div>
+        <div class="group" id="idPicks">${state.identities.map(i => `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(i.label || display(i))}</span>${i.label ? `<span class="cell-sub">${esc(display(i))}</span>` : ''}</span>${ICON.tick}</button>`).join('')}</div>
+        <p class="hint">可以多选，比如用邮箱注册、再绑定了手机号。${picks.length > 1 ? '选好的这几个都会用同样的设置，之后可以单独改。' : ''}</p>
+      </div>`, { kind: 'form' });
+    setTimeout(() => {
+      $$('#idPicks .check-cell').forEach(b => b.onclick = () => { const id = b.dataset.id; sel.has(id) ? sel.delete(id) : sel.add(id); b.classList.toggle('on'); });
+      $('#pkBack').onclick = () => pickApps(presetId, q);
+      $('#pkSave').onclick = () => {
+        const now = Date.now(), made = picks.map((p, k) => ({ id: uid(), createdAt: now + k, name: p[0], domain: p[1], category: p[2], identityIds: [...sel], notes: '' }));
+        state.accounts.push(...made); save(); render();
+        if (made.length === 1) showAccount(made[0].id); else if (sel.size === 1) showIdentity([...sel][0]); else closeSheet();
+        toast(made.length === 1 ? `已添加 ${made[0].name}` : `已添加 ${made.length} 个`);
+      };
     }, 0);
   }
 
@@ -584,13 +699,14 @@
     const t = e.target.closest('button,a,[data-account],[data-identity]'); if (!t) return;
     const d = t.dataset;
     if (t.id === 'menuBtn') return menu.classList.toggle('open');
-    if (t.id === 'addBtn') return ui.tab === 'home' && !state.identities.length ? identityForm() : accountForm(null, ui.tab === 'home' ? state.identities[ui.active]?.id : null);
-    if (t.id === 'gridAdd') return accountForm(null, state.identities[ui.active]?.id);
+    if (t.id === 'addBtn') return !state.identities.length ? identityForm() : pickApps(ui.tab === 'home' ? state.identities[ui.active]?.id : null);
+    if (t.id === 'gridAdd') return pickApps(state.identities[ui.active]?.id);
     if (t.id === 'openSearch') return openSpot();
     if (t.id === 'spotCancel') return closeSpot();
     if (d.act) {
       menu.classList.remove('open');
       if (d.act === 'privacy') { ui.privacy = !ui.privacy; localStorage.setItem('atlas.privacy', ui.privacy ? '1' : '0'); render(); refreshSheet(); toast(ui.privacy ? '号码已隐藏' : '号码已显示'); }
+      if (d.act === 'theme') setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
       if (d.act === 'sync') syncSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
@@ -605,8 +721,8 @@
       return closeSheet();
     }
     if (d.new === 'identity') return identityForm(null, d.type);
-    if (d.new === 'account') return accountForm(null, d.preset);
-    if (d.quick !== undefined) { closeSpot(); return accountForm(null, null, d.quick); }
+    if (d.new === 'account') return pickApps(d.preset);
+    if (d.quick !== undefined) { closeSpot(); return pickApps(null, d.quick); }
     if (d.copy) { navigator.clipboard?.writeText(d.copy).then(() => toast('已复制'), () => toast('复制失败')); return; }
     if (d.editIdentity) return identityForm(idById(d.editIdentity));
     if (d.editAccount) return accountForm(accById(d.editAccount));
@@ -653,138 +769,65 @@
   addEventListener('scroll', () => top.classList.toggle('scrolled', scrollY > 30), { passive: true });
   addEventListener('resize', () => { Graph.resize(); coverflow(); });
 
-  // ---------- relationship graph ----------
+  // ---------- relationship map: identities on the left, apps on the right, threads between ----------
   const Graph = (() => {
-    const c = $('#graph'), ctx = c.getContext('2d');
-    let nodes = [], edges = [], w = 0, h = 0, running = false, alpha = 0, hover = null, drag = null, moved = false;
-    const imgs = {};
-    const dark = () => true;
-    function loadImg(d) {
-      d = cleanDomain(d); if (!d) return null; if (imgs[d]) return imgs[d];
-      const im = new Image(), src = favSources(d); let k = 0;
-      im.onerror = () => { if (++k < src.length) im.src = src[k]; else im.dead = true; };
-      im.onload = () => { if (im.naturalWidth < 12 && ++k < src.length) im.src = src[k]; kick(.05); };
-      im.src = src[0]; return imgs[d] = im;
+    let sel = null, running = false, drawn = false;
+    const ROW = 54;
+    function layout() {
+      const ids = state.identities;
+      const idx = id => ids.findIndex(i => i.id === id);
+      const first = a => { const ks = a.identityIds.map(idx).filter(k => k >= 0); return ks.length ? Math.min(...ks) : 1e3; };
+      const apps = state.accounts.slice().sort((a, b) => first(a) - first(b) || b.identityIds.length - a.identityIds.length || zh(a.name, b.name));
+      const ay = {}; apps.forEach((a, k) => ay[a.id] = k * ROW + ROW / 2);
+      const H = Math.max(apps.length * ROW, ids.length * 78, 120);
+      // each card sits at the middle of its apps, then nudge apart so cards never overlap
+      let pos = ids.map(i => { const ys = accountsOf(i.id).map(a => ay[a.id]); return { i, y: ys.length ? ys.reduce((s, v) => s + v, 0) / ys.length : H }; });
+      pos.sort((p, q) => p.y - q.y);
+      const GAP = 78, half = 33;
+      for (let k = 0; k < pos.length; k++) pos[k].y = Math.max(pos[k].y, k ? pos[k - 1].y + GAP : half);
+      const over = pos.length ? pos[pos.length - 1].y - (H - half) : 0;
+      if (over > 0) for (let k = pos.length - 1; k >= 0; k--) { pos[k].y = Math.min(pos[k].y, k === pos.length - 1 ? H - half : pos[k + 1].y - GAP); pos[k].y = Math.max(pos[k].y, half); }
+      return { apps, ay, pos, H };
     }
-    function resize() {
-      const r = c.getBoundingClientRect(); if (!r.width) return;
-      const dpr = Math.min(3, devicePixelRatio || 1); w = r.width; h = r.height;
-      c.width = w * dpr; c.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); kick(.1);
-    }
-    function rebuild() {
-      resize();
-      const old = Object.fromEntries(nodes.map(n => [n.id, n])), cx = w / 2, cy = h / 2;
-      const I = state.identities.map((i, k) => {
-        const ang = k / Math.max(1, state.identities.length) * Math.PI * 2;
-        const n = old[i.id] || { id: i.id, x: cx + Math.cos(ang) * 110, y: cy + Math.sin(ang) * 110, vx: 0, vy: 0 };
-        return Object.assign(n, { kind: 'i', ref: i, r: 20 + Math.min(8, accountsOf(i.id).length) });
-      });
-      const A = state.accounts.map(a => {
-        const n = old[a.id] || { id: a.id, x: cx + (Math.random() - .5) * 260, y: cy + (Math.random() - .5) * 260, vx: 0, vy: 0 };
-        return Object.assign(n, { kind: 'a', ref: a, r: 15, img: loadImg(a.domain) });
-      });
-      nodes = [...I, ...A];
-      const map = Object.fromEntries(nodes.map(n => [n.id, n]));
-      edges = [];
-      state.accounts.forEach(a => a.identityIds.forEach(id => map[id] && edges.push([map[id], map[a.id]])));
-      kick(1);
-    }
-    function kick(a) { alpha = Math.max(alpha, a); if (running && !kick.raf) kick.raf = requestAnimationFrame(loop); }
-    function step() {
-      const cx = w / 2, cy = h / 2;
-      for (let i = 0; i < nodes.length; i++) {
-        const a = nodes[i];
-        for (let j = i + 1; j < nodes.length; j++) {
-          const b = nodes[j]; let dx = b.x - a.x, dy = b.y - a.y; const d2 = dx * dx + dy * dy || 1, d = Math.sqrt(d2);
-          const f = (a.kind === 'i' && b.kind === 'i' ? 22000 : 3600) / d2 * alpha; dx /= d; dy /= d;
-          a.vx -= dx * f; a.vy -= dy * f; b.vx += dx * f; b.vy += dy * f;
-        }
-        a.vx += (cx - a.x) * .004 * alpha; a.vy += (cy - a.y) * .004 * alpha;
+    function render() {
+      const box = $('#mapBox'); if (!box) return;
+      const n = state.accounts.length, multi = state.accounts.filter(a => a.identityIds.length > 1).length;
+      $('#graphSummary').textContent = n ? `${state.identities.length} 个身份，${n} 个网站与 App` + (multi ? `，${multi} 个绑了不止一个` : '') : '';
+      if (!state.identities.length || !n) { box.innerHTML = `<div class="empty"><h3>还没有可以连线的</h3><p>添加一个邮箱或手机号，再给它记几个网站，这里就会连起来。</p><button class="btn-filled" data-new="${state.identities.length ? 'account' : 'identity'}">${state.identities.length ? '添加网站或 App' : '添加邮箱或手机号'}</button></div>`; return; }
+      const { apps, ay, pos, H } = layout();
+      const W = box.clientWidth || 350, L = Math.min(150, Math.round(W * .38)), R = L + Math.max(56, Math.round(W * .17));
+      const paths = [];
+      for (const p of pos) for (const a of accountsOf(p.i.id)) {
+        const y1 = p.y, y2 = ay[a.id], mx = (L + R) / 2;
+        paths.push(`<path data-i="${p.i.id}" data-a="${a.id}" style="--c:${p.i.color}" d="M${L} ${y1.toFixed(1)}C${mx} ${y1.toFixed(1)} ${mx} ${y2.toFixed(1)} ${R - 6} ${y2.toFixed(1)}"/>`);
       }
-      for (const [s, t] of edges) {
-        const dx = t.x - s.x, dy = t.y - s.y, d = Math.hypot(dx, dy) || 1, f = (d - 90) * .03 * alpha;
-        s.vx += dx / d * f; s.vy += dy / d * f; t.vx -= dx / d * f; t.vy -= dy / d * f;
-      }
-      for (const n of nodes) {
-        if (n === drag) { n.vx = n.vy = 0; continue; }
-        n.vx *= .78; n.vy *= .78; n.x += n.vx; n.y += n.vy;
-        n.x = Math.max(n.r + 6, Math.min(w - n.r - 6, n.x)); n.y = Math.max(n.r + 6, Math.min(h - n.r - 40, n.y));
-      }
-      alpha *= .985;
+      box.style.height = H + 'px';
+      box.innerHTML = `<svg class="threads" viewBox="0 0 ${W} ${H}" style="width:${W}px;height:${H}px" aria-hidden="true">${paths.join('')}</svg>
+        ${pos.map(p => { const c = accountsOf(p.i.id).length; return `<button class="mcard" data-map-identity="${p.i.id}" style="top:${p.y - 31}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${ICON[p.i.type]}<b>${c}</b></span><span class="mv">${esc(p.i.label || display(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
+        ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
+      apply();
+      if (!drawn) { drawn = true; $$('.threads path', box).forEach((p, k) => { const len = p.getTotalLength(); p.animate([{ strokeDasharray: len, strokeDashoffset: len }, { strokeDasharray: len, strokeDashoffset: 0 }], { duration: 700, delay: 60 + Math.min(k, 20) * 18, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }); }); }
     }
-    const near = (n, m) => edges.some(([s, t]) => (s === n && t === m) || (s === m && t === n));
-    function rr(x, y, s, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, s, s, r) : ctx.rect(x, y, s, s); }
-    function draw() {
-      const dk = dark(), label = dk ? '#f5f5f7' : '#1d1d1f', sec = dk ? '#98989d' : '#6e6e73';
-      ctx.clearRect(0, 0, w, h);
-      ctx.lineCap = 'round';
-      for (const [s, t] of edges) {
-        const on = !hover || s === hover || t === hover;
-        ctx.strokeStyle = s.ref.color; ctx.globalAlpha = hover ? (on ? .75 : .06) : .28; ctx.lineWidth = on && hover ? 2 : 1.4;
-        ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(t.x, t.y); ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-      for (const n of nodes) {
-        const dim = hover && n !== hover && !near(n, hover);
-        ctx.globalAlpha = dim ? .2 : 1;
-        if (n.kind === 'i') {
-          const s = n.r * 2;
-          ctx.shadowColor = 'rgba(0,0,0,.18)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
-          const g = ctx.createLinearGradient(0, n.y - n.r, 0, n.y + n.r); g.addColorStop(0, n.ref.color + 'cc'); g.addColorStop(1, n.ref.color);
-          ctx.fillStyle = g; rr(n.x - n.r, n.y - n.r, s, s * .26); ctx.fill();
-          ctx.shadowColor = 'transparent';
-          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
-          const k = n.r * .5;
-          if (n.ref.type === 'email') { ctx.beginPath(); ctx.roundRect?.(n.x - k, n.y - k * .7, k * 2, k * 1.4, 3); ctx.stroke(); ctx.beginPath(); ctx.moveTo(n.x - k * .85, n.y - k * .45); ctx.lineTo(n.x, n.y + k * .15); ctx.lineTo(n.x + k * .85, n.y - k * .45); ctx.stroke(); }
-          else { ctx.beginPath(); ctx.roundRect?.(n.x - k * .55, n.y - k, k * 1.1, k * 2, 3); ctx.stroke(); }
-          ctx.fillStyle = label; ctx.font = '600 12px -apple-system, "PingFang SC", sans-serif'; ctx.textAlign = 'center';
-          ctx.fillText(n.ref.label || display(n.ref), n.x, n.y + n.r + 17);
-        } else {
-          const s = n.r * 2;
-          ctx.shadowColor = 'rgba(0,0,0,.14)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
-          ctx.fillStyle = '#fff'; rr(n.x - n.r, n.y - n.r, s, s * .26); ctx.fill(); ctx.shadowColor = 'transparent';
-          if (n.img && n.img.complete && n.img.naturalWidth >= 12 && !n.img.dead) {
-            try { ctx.drawImage(n.img, n.x - n.r * .62, n.y - n.r * .62, n.r * 1.24, n.r * 1.24); } catch { }
-          } else {
-            ctx.fillStyle = brand(n.ref); rr(n.x - n.r, n.y - n.r, s, s * .26); ctx.fill();
-            ctx.fillStyle = '#fff'; ctx.font = '600 13px -apple-system, "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText((n.ref.name || '?').slice(0, 1).toUpperCase(), n.x, n.y + .5); ctx.textBaseline = 'alphabetic';
-          }
-          if (hover && (n === hover || near(n, hover))) {
-            ctx.fillStyle = sec; ctx.font = '500 11px -apple-system, "PingFang SC", sans-serif'; ctx.textAlign = 'center';
-            ctx.fillText(n.ref.name, n.x, n.y + n.r + 14);
-          }
-        }
-      }
-      ctx.globalAlpha = 1;
+    function apply() {
+      const box = $('#mapBox'); if (!box) return;
+      box.classList.toggle('focus', !!sel);
+      const linked = new Set(sel ? accountsOf(sel).map(a => a.id) : []);
+      $$('.threads path', box).forEach(p => p.classList.toggle('on', p.dataset.i === sel));
+      $$('.mcard', box).forEach(c => c.classList.toggle('on', c.dataset.mapIdentity === sel));
+      $$('.mapp', box).forEach(c => c.classList.toggle('on', linked.has(c.dataset.account)));
     }
-    function loop() {
-      kick.raf = null; if (!running) return;
-      step(); draw();
-      if (alpha > .004 || drag) kick.raf = requestAnimationFrame(loop);
-    }
-    const at = (x, y) => { for (let k = nodes.length - 1; k >= 0; k--) { const n = nodes[k]; if (Math.abs(n.x - x) < n.r + 6 && Math.abs(n.y - y) < n.r + 6) return n; } return null; };
-    const pos = e => { const r = c.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-    let start = null;
-    c.addEventListener('pointerdown', e => { const [x, y] = pos(e); drag = at(x, y); start = [x, y]; moved = false; hover = drag; if (drag) c.setPointerCapture(e.pointerId); kick(.05); draw(); });
-    c.addEventListener('pointermove', e => {
-      const [x, y] = pos(e);
-      if (drag) { if (Math.hypot(x - start[0], y - start[1]) > 4) moved = true; drag.x = x; drag.y = y; kick(.25); }
-      else if (e.pointerType === 'mouse') { const n = at(x, y); if (n !== hover) { hover = n; c.style.cursor = n ? 'pointer' : 'default'; draw(); } }
+    document.addEventListener('click', e => {
+      if (ui.tab !== 'graph' || e.target.closest('.sheet,.menu,#tabbar,.top')) return;
+      const c = e.target.closest('[data-map-identity]');
+      if (c) { const id = c.dataset.mapIdentity; if (sel === id) showIdentity(id); else { sel = id; apply(); } return; }
+      if (!e.target.closest('.mapp') && sel) { sel = null; apply(); }
     });
-    c.addEventListener('pointerup', () => {
-      const n = drag; drag = null;
-      if (n && !moved) n.kind === 'i' ? showIdentity(n.id) : showAccount(n.id);
-      if (!matchMedia('(hover:hover)').matches) hover = null;
-      draw();
-    });
-    c.addEventListener('pointerleave', () => { if (!drag) { hover = null; draw(); } });
-    matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => draw());
+    let rz;
     return {
-      start() { running = true; requestAnimationFrame(rebuild); },
+      start() { running = true; drawn = false; sel = null; render(); },
       stop() { running = false; },
-      rebuild() { if (running) rebuild(); },
-      resize() { if (running) resize(); },
+      rebuild() { if (running) render(); },
+      resize() { if (running) { clearTimeout(rz); rz = setTimeout(render, 120); } },
     };
   })();
 
@@ -971,7 +1014,7 @@
     state = demo(); save();
     setTimeout(() => toast('这是示例数据', { label: '清空', fn: () => { state = { identities: [], accounts: [] }; save(); render(); } }), 1400);
   }
-  render(); Sync.init(); Sync.listeners.forEach(f => f());
+  paintTheme(); render(); Sync.init(); Sync.listeners.forEach(f => f());
   const first = state.identities[0];
   document.documentElement.style.setProperty('--accent', first ? first.color : '#3a3a3c');
   // one orchestrated entrance: the cards deal in from the right
