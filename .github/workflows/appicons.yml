@@ -1,6 +1,7 @@
 name: App Store icons
 on:
   push:
+    branches: [none]
     paths: [tools/appicons.json, tools/appicons.py]
   workflow_dispatch:
 permissions: { contents: write }
