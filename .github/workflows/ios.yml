@@ -49,9 +49,9 @@ jobs:
         run: |
           F=$(ls *.ipa); B=${F#Atlas-}; B=${B%.ipa}
           MSG=$(git log -1 --format=%s)
-          cp "$F" "账号星图.ipa"
-          gh release create "build-$B" "$F" "账号星图.ipa" --repo "${{ github.repository }}" --target "${{ github.sha }}" \
-            --title "账号星图 2.0 ($B)" --notes "未签名 IPA，用爱思助手或 Sideloadly 自签后安装。本次：$MSG" --latest
+          cp "$F" Atlas.ipa
+          gh release create "v2.0-r${{ github.run_number }}" Atlas.ipa --repo "${{ github.repository }}" --target "${{ github.sha }}" \
+            --title "账号星图 2.0 · 构建 ${{ github.run_number }}" --notes "未签名 IPA，用爱思助手或 Sideloadly 自签后安装。本次：$MSG" --latest
 
   preview:
     runs-on: macos-15
