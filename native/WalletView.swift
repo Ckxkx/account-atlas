@@ -99,8 +99,12 @@ struct TopButtons: ToolbarContent {
   var body: some ToolbarContent {
     ToolbarItemGroup(placement: .topBarTrailing) {
       Button {
-        withAnimation(.easeInOut(duration: 0.45)) { store.theme = store.theme == "light" ? "dark" : "light" }
-      } label: { Image(systemName: store.theme == "light" ? "moon.fill" : "sun.max.fill") }
+        store.theme = store.theme == "light" ? "dark" : "light"
+      } label: {
+        Image(systemName: store.theme == "light" ? "moon.fill" : "sun.max.fill")
+          .contentTransition(.symbolEffect(.replace.downUp))
+          .background(ThemeOrigin())
+      }
         .sensoryFeedback(.impact(weight: .light), trigger: store.theme)
       Menu {
         Button { store.route = .picker(store.active?.id) } label: { Label("添加网站或 App", systemImage: "square.grid.2x2") }

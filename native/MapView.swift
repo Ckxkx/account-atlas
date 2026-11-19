@@ -4,6 +4,16 @@ import SwiftUI
 struct MapView: View {
   @EnvironmentObject var store: Store
   @State private var focus: String? = nil
+  @Environment(\.selectedTab) private var tab
+  @State private var drawn = false   // threads drawn in, nodes settled
+
+  /// Every visit replays the build-up: cards and apps settle in with a short stagger, then the
+  /// threads draw from the cards to the apps. Reset happens while the tab is hidden.
+  func play() {
+    var tr = Transaction(); tr.disablesAnimations = true
+    withTransaction(tr) { drawn = false }
+    DispatchQueue.main.async { withAnimation(.smooth(duration: 0.9)) { drawn = true } }
+  }
 
   let cardH: CGFloat = 64, cardGap: CGFloat = 12, appH: CGFloat = 46, appGap: CGFloat = 8, groupGap: CGFloat = 30
 
@@ -23,6 +33,10 @@ struct MapView: View {
       .toolbar { TopButtons() }
       .background(Glow().ignoresSafeArea())
       .sensoryFeedback(.selection, trigger: focus)
+    }
+    .onAppear { if tab == 2 { play() } }
+    .onChange(of: tab) { _, t in
+      if t == 2 { play() } else { var tr = Transaction(); tr.disablesAnimations = true; withTransaction(tr) { drawn = false; focus = nil } }
     }
   }
 
@@ -50,23 +64,22 @@ struct MapView: View {
     let appIndex = Dictionary(uniqueKeysWithValues: apps.enumerated().map { ($0.element.id, $0.offset) })
     let linked = Set(apps.filter { a in focus.map { a.identityIds.contains($0) } ?? true }.map(\.id))
     return ZStack(alignment: .topLeading) {
-      Canvas { ctx, _ in
-        for (k, i) in ids.enumerated() {
-          let on = focus == nil || focus == i.id
-          let y0 = idY(k) + cardH / 2
-          for a in apps where a.identityIds.contains(i.id) {
-            guard let j = appIndex[a.id] else { continue }
-            let y1 = appY(j) + appH / 2
-            var p = Path()
-            p.move(to: CGPoint(x: 16 + L, y: y0))
-            let mx = (16 + L + rx) / 2
-            p.addCurve(to: CGPoint(x: rx, y: y1), control1: CGPoint(x: mx, y: y0), control2: CGPoint(x: mx, y: y1))
-            ctx.stroke(p, with: .color(Color(hex: i.color).opacity(on ? 0.75 : 0.08)), lineWidth: on && focus != nil ? 2 : 1.3)
+      ForEach(Array(ids.enumerated()), id: \.element.id) { e in
+        let k = e.offset, i = e.element
+        let on = focus == nil || focus == i.id
+        let y0 = idY(k) + cardH / 2
+        ForEach(apps.filter { $0.identityIds.contains(i.id) }) { a in
+          if let j = appIndex[a.id] {
+            MapThread(from: CGPoint(x: 16 + L, y: y0), to: CGPoint(x: rx, y: appY(j) + appH / 2))
+              .trim(from: 0, to: drawn ? 1 : 0)
+              .stroke(Color(hex: i.color).opacity(on ? 0.75 : 0.08),
+                      style: StrokeStyle(lineWidth: on && focus != nil ? 2 : 1.3, lineCap: .round))
+              .animation(.smooth(duration: 0.75).delay(drawn ? 0.18 + Double(k) * 0.07 + Double(j) * 0.012 : 0), value: drawn)
           }
         }
       }
       .allowsHitTesting(false)
-      .animation(.easeInOut(duration: 0.3), value: focus)
+      .animation(.smooth(duration: 0.3), value: focus)
 
       // group labels
       if ids.contains(where: { $0.type == "email" }) { label("邮箱").offset(x: 18, y: 0) }
@@ -80,9 +93,10 @@ struct MapView: View {
           }
         } label: { mini(i, width: L) }
           .buttonStyle(PressStyle())
-          .opacity(focus == nil || focus == i.id ? 1 : 0.4)
-          .scaleEffect(focus == i.id ? 1.04 : 1)
-          .offset(x: 16, y: idY(k))
+          .opacity(drawn ? (focus == nil || focus == i.id ? 1 : 0.4) : 0)
+          .scaleEffect(focus == i.id ? 1.04 : drawn ? 1 : 0.92)
+          .offset(x: drawn ? 16 : -10, y: idY(k))
+          .animation(.spring(duration: 0.5, bounce: 0.18).delay(drawn ? Double(k) * 0.05 : 0), value: drawn)
       }
       ForEach(Array(apps.enumerated()), id: \.element.id) { e in
         let j = e.offset, a = e.element
@@ -97,8 +111,9 @@ struct MapView: View {
         }
         .buttonStyle(PressStyle())
         .foregroundStyle(.primary)
-        .opacity(linked.contains(a.id) ? 1 : 0.3)
-        .offset(x: rx, y: appY(j))
+        .opacity(drawn ? (linked.contains(a.id) ? 1 : 0.3) : 0)
+        .offset(x: drawn ? rx : rx + 18, y: appY(j))
+        .animation(.spring(duration: 0.5, bounce: 0.12).delay(drawn ? 0.1 + Double(j) * 0.02 : 0), value: drawn)
       }
     }
     .contentShape(Rectangle())
@@ -123,5 +138,16 @@ struct MapView: View {
     .frame(width: width, height: cardH, alignment: .leading)
     .background(skinGradient(i.color), in: CardShape(sim: i.isPhone))
     .shadow(color: Color(hex: i.color).opacity(0.4), radius: 10, y: 5)
+  }
+}
+
+struct MapThread: Shape {
+  let from: CGPoint, to: CGPoint
+  func path(in _: CGRect) -> Path {
+    var p = Path()
+    let mx = (from.x + to.x) / 2
+    p.move(to: from)
+    p.addCurve(to: to, control1: CGPoint(x: mx, y: from.y), control2: CGPoint(x: mx, y: to.y))
+    return p
   }
 }
