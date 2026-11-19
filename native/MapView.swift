@@ -12,7 +12,7 @@ struct MapView: View {
   func play() {
     var tr = Transaction(); tr.disablesAnimations = true
     withTransaction(tr) { drawn = false }
-    DispatchQueue.main.async { withAnimation(.smooth(duration: 0.9)) { drawn = true } }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { drawn = true }  // each element animates itself; no global transaction
   }
 
   let cardH: CGFloat = 64, cardGap: CGFloat = 12, appH: CGFloat = 46, appGap: CGFloat = 8, groupGap: CGFloat = 30

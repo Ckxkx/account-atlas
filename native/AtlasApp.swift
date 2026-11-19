@@ -134,14 +134,15 @@ struct TabEnter: ViewModifier {
   @State private var shown: Bool
   init(index: Int, tab: Int, dir: CGFloat) { self.index = index; self.tab = tab; self.dir = dir; _shown = State(initialValue: index == tab) }
   func body(content: Content) -> some View {
+    // Scoped animation: only the opacity/offset animate. The page's own layout (large title,
+    // scroll insets) is never pulled into the spring, so the title doesn't slide around.
     content
-      .opacity(shown ? 1 : 0)
-      .offset(x: shown ? 0 : dir * 36)
-      .scaleEffect(shown ? 1 : 0.985)
+      .animation(.spring(duration: 0.4, bounce: 0)) {
+        $0.opacity(shown ? 1 : 0.35).offset(x: shown ? 0 : dir * 28)
+      }
       .onChange(of: tab) { old, t in
-        if t == index {
-          withAnimation(.spring(duration: 0.42, bounce: 0)) { shown = true }
-        } else if old == index {
+        if t == index { shown = true }
+        else if old == index {
           var tr = Transaction(); tr.disablesAnimations = true
           withTransaction(tr) { shown = false }
         }
