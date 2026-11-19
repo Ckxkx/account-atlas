@@ -16,7 +16,7 @@ struct AtlasApp: App {
           sync.store = store
           let s = sync
           store.onSaved = { [weak s] in s?.schedule() }
-          if store.data.demo == true {
+          if store.data.demo == true && UserDefaults.standard.string(forKey: "atlasDemo") == nil {
             store.show("这是示例数据", action: "清空") {
               store.mutate(nil) { s in s.identities = []; s.accounts = [] }
               store.setKind(store.kind)
@@ -56,6 +56,40 @@ struct RootView: View {
       case "new": store.route = .newIdentity("email")
       default: break
       }
+      if let demo = d.string(forKey: "atlasDemo") { Task { await runDemo(demo) } }
+    }
+  }
+
+  // Scripted walkthroughs used to record the promo clips in CI (-atlasDemo <name>).
+  func go(_ t: Int) { dir = t >= tab ? 1 : -1; tab = t }
+  func wait(_ s: Double) async { try? await Task.sleep(for: .seconds(s)) }
+  func swipe(_ id: String?) { withAnimation(.spring(duration: 0.55, bounce: 0.15)) { store.activeID = id } }
+  @MainActor func runDemo(_ name: String) async {
+    await wait(3.2)
+    switch name {
+    case "wallet":
+      for id in store.deck.map(\.id).dropFirst() { swipe(id); await wait(1.5) }
+      await wait(0.4); swipe(store.deck.first?.id)
+    case "kind":
+      withAnimation(.spring(duration: 0.5, bounce: 0.1)) { store.setKind("phone") }
+      await wait(1.6)
+      if store.deck.count > 1 { swipe(store.deck[1].id); await wait(1.5) }
+      withAnimation(.spring(duration: 0.5, bounce: 0.1)) { store.setKind("email") }
+    case "map":
+      go(2); await wait(2.6)
+      if let a = store.data.identities.first?.id { store.demoFocus = a; await wait(1.6) }
+      if store.data.identities.count > 2 { store.demoFocus = store.data.identities[2].id; await wait(1.6) }
+      store.demoFocus = "none"
+    case "theme":
+      store.theme = "light"; await wait(1.8)
+      store.theme = "dark"; await wait(1.8)
+      go(2); await wait(1.4)
+      store.theme = "light"
+    case "tabs":
+      go(1); await wait(1.4); go(2); await wait(2.2); go(0)
+    case "picker":
+      store.route = .picker(store.active?.id)
+    default: break
     }
   }
 

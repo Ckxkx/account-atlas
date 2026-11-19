@@ -156,6 +156,7 @@ final class Store: ObservableObject {
   @Published var activeID: String? = nil
   @Published var route: Route? = nil
   @Published var toast: Toast? = nil
+  @Published var demoFocus: String? = nil
   var toastAction: (() -> Void)? = nil
   var onSaved: (() -> Void)? = nil
 

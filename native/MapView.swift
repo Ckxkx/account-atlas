@@ -35,6 +35,9 @@ struct MapView: View {
       .sensoryFeedback(.selection, trigger: focus)
     }
     .onAppear { if tab == 2 { play() } }
+    .onChange(of: store.demoFocus) { _, f in
+      withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { focus = f == "none" ? nil : f }
+    }
     .onChange(of: tab) { _, t in
       if t == 2 { play() } else { var tr = Transaction(); tr.disablesAnimations = true; withTransaction(tr) { drawn = false; focus = nil } }
     }
