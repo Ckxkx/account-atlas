@@ -1,43 +1,41 @@
-# Atlas · 账号星图
+<p align="center"><img src="icon-512.png" width="112" alt="账号星图"></p>
+<h1 align="center">账号星图 · Atlas</h1>
+<p align="center">这个邮箱注册过什么？那个手机号绑了哪些 App？一眼看清。</p>
+<p align="center">
+  <a href="https://huichen.dev/account-atlas/">在线使用</a> ·
+  <a href="https://github.com/Ckxkx/account-atlas/releases/latest">下载 iOS 版（IPA）</a>
+</p>
 
-> 记清每个邮箱、每个手机号到底注册 / 绑定了哪些网站和 App。
+<p align="center">
+  <img src="docs/wallet.gif" width="30%">
+  <img src="docs/map.gif" width="30%">
+  <img src="docs/theme.gif" width="30%">
+</p>
 
-一个纯前端、零依赖、本地优先的小工具：
-
-- **身份**：把每个邮箱、手机号当作一个“身份”，自定义标签和颜色
-- **网站 / App**：记录名称、域名（自动显示图标）、分类、备注，可同时关联多个身份
-- **星图**：力导向关系图，拖拽、悬停高亮、粒子流动，一眼看清谁连着谁
-- **⌘K / Ctrl+K 全局搜索**：输入 `github` 立刻知道用的是哪个邮箱；输入号码片段反查绑定了哪些 App
-- **隐私模式**：一键打码显示，截图分享也安心
-- **导入 / 导出 JSON 备份**，删除可撤销
-- 内置 40+ 常见网站（微信、支付宝、淘宝、GitHub、ChatGPT…）自动补全
+## 它能做什么
+- **卡包**：每个邮箱、手机号都是一张 Wallet 风格的卡，左右翻看，手机号做成 SIM 卡
+- **点选添加**：内置 100+ 常用网站和 App（官方图标），多选后再选用哪个邮箱或手机号，同一网站可记多个账号名
+- **关系图**：左边身份、右边 App，自动连线，点卡片只看它连着的
+- **深色 / 浅色**：从按钮扩散开的圆形切换
+- **隐私模式**：号码和账号名一键打码，截图分享也安心
+- **加密同步（可选）**：数据用你的同步密码在本地 AES-GCM 加密后，存进你自己的 Gitee（国内直连）或 GitHub 私密 Gist
+- 拖动排序、撤销删除、JSON 导入导出、离线可用
 
 ## 隐私
+数据默认只存在你自己的设备上，没有任何服务器。**不记录密码**。开启同步时，云端只有加密后的文件。
 
-所有数据只保存在浏览器的 `localStorage`，不上传任何服务器，也**不记录密码**。换设备请用「导出 / 导入」。
+## 两个版本
+| | 网页版 | iOS 原生版 |
+|---|---|---|
+| 技术 | 纯 HTML/CSS/JS，零依赖 | SwiftUI，iOS 17+ |
+| 安装 | 打开网址，Safari「添加到主屏幕」 | 从 Releases 下载 IPA，用爱思助手 / Sideloadly 等自签安装 |
+| 代码 | 根目录 `index.html` `app.js` `styles.css` | `native/` |
 
-## 本地运行
+两边的数据格式相同，可以通过同步或 JSON 互通。
 
-直接用浏览器打开 `index.html`，或：
+## 自己运行 / 构建
+- 网页版：`python3 -m http.server 8080`，打开 `http://localhost:8080`
+- iOS 版：推送 `native/` 的改动后，GitHub Actions（`.github/workflows/ios.yml`，macOS runner）会用 `swiftc` 编译并发布未签名 IPA 到 Releases
 
-```bash
-python3 -m http.server 8080
-```
-
-## 部署
-
-推送到 `main` 后由 GitHub Actions 自动发布到 GitHub Pages。
-
-## 加密同步
-菜单 → 加密同步：填一个只有 gist 权限的 GitHub 令牌和同步密码。数据在浏览器里用 PBKDF2(310k) + AES-GCM 加密后存进你账号下的私密 Gist（atlas.enc.json），同步密码不上传。多台设备按条目合并（updatedAt + 删除墓碑）。
-
-
-## v4
-- 添加网站改成“选”的：按分类或搜索点选常见网站与 App（可多选），再选用哪个邮箱或手机号；找不到可以手动添加。
-- 关系图改成左边身份卡、右边 App 列表、中间连线；点卡片只看它连着的。
-- 卡面改为 10 种预设渐变。
-- 新增浅色外观（菜单里切换）。
-- 底部导航栏只保留图标。
-
-- v4.1：内置 111 个常用网站与 App 的高清图标（icons/），同一个网站可以记多个账号（账号名区分）。
-- v5：卡包分成「邮箱 | 手机号」两组切换，手机号用 SIM 卡样式（芯片、切角、按号段识别运营商）；关系图左侧也按邮箱、手机号分组。
+## 许可
+[MIT](LICENSE)，随便用，欢迎 PR 和 Issue。
