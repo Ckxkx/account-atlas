@@ -43,6 +43,15 @@ jobs:
           mkdir out && cp *.ipa out/ && cd out
           git init -q -b ipa && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "IPA $(ls *.ipa)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ipa
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          F=$(ls *.ipa); B=${F#Atlas-}; B=${B%.ipa}
+          MSG=$(git log -1 --format=%s)
+          cp "$F" "账号星图.ipa"
+          gh release create "build-$B" "$F" "账号星图.ipa" --repo "${{ github.repository }}" --target "${{ github.sha }}" \
+            --title "账号星图 2.0 ($B)" --notes "未签名 IPA，用爱思助手或 Sideloadly 自签后安装。本次：$MSG" --latest
 
   preview:
     runs-on: macos-15
