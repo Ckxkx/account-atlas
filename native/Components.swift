@@ -226,12 +226,15 @@ struct AppIcon: View {
   let domain: String
   var size: CGFloat = 52
   @State private var loaded = 0   // bumps when an async load lands, to re-read the cache
+  @State private var drew = Drew() // what the last body pass showed (plain box, never invalidates)
+  final class Drew { var image = false }
 
   var body: some View {
     let r = RoundedRectangle(cornerRadius: size * 0.235, style: .continuous)
     let key = IconStore.shared.key(name: name, domain: domain)
     let _ = loaded
     let entry = IconStore.shared.cached(key)
+    let _ = { drew.image = entry != nil }()
     ZStack {
       if let entry {
         if entry.favicon {
@@ -245,10 +248,15 @@ struct AppIcon: View {
     .clipShape(r)
     .overlay(r.strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
     .task(id: key) {
-      guard !key.isEmpty, IconStore.shared.cached(key) == nil, !IconStore.shared.hasFailed(key) else { return }
-      await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in IconStore.shared.load(key) { _ in c.resume() } }
-      var t = Transaction(); t.disablesAnimations = true
-      withTransaction(t) { loaded &+= 1 }
+      guard !key.isEmpty, !IconStore.shared.hasFailed(key) else { return }
+      if IconStore.shared.cached(key) == nil {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in IconStore.shared.load(key) { _ in c.resume() } }
+      }
+      // the image may have landed (here or via the launch prefetch) after this body was drawn
+      if IconStore.shared.cached(key) != nil && !drew.image {
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { loaded &+= 1 }
+      }
     }
   }
   var letter: some View {

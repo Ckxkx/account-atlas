@@ -166,7 +166,11 @@ extension EnvironmentValues {
 struct TabEnter: ViewModifier {
   let index: Int, tab: Int, dir: CGFloat
   @State private var shown: Bool
-  init(index: Int, tab: Int, dir: CGFloat) { self.index = index; self.tab = tab; self.dir = dir; _shown = State(initialValue: index == tab) }
+  @State private var selected: Bool
+  init(index: Int, tab: Int, dir: CGFloat) {
+    self.index = index; self.tab = tab; self.dir = dir
+    _shown = State(initialValue: index == tab); _selected = State(initialValue: index == tab)
+  }
   func body(content: Content) -> some View {
     // Scoped animation: only the opacity/offset animate. The page's own layout (large title,
     // scroll insets) is never pulled into the spring, so the title doesn't slide around.
@@ -175,10 +179,16 @@ struct TabEnter: ViewModifier {
         $0.opacity(shown ? 1 : 0.35).offset(x: shown ? 0 : dir * 28)
       }
       .onChange(of: tab) { old, t in
+        selected = t == index
         if t == index { shown = true }
         else if old == index {
-          var tr = Transaction(); tr.disablesAnimations = true
-          withTransaction(tr) { shown = false }
+          // The tab bar cross-fades the outgoing page for a moment; dimming it right away showed
+          // as a flicker. Re-arm the entrance only once it's fully off screen.
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            guard !selected else { return }
+            var tr = Transaction(); tr.disablesAnimations = true
+            withTransaction(tr) { shown = false }
+          }
         }
       }
   }

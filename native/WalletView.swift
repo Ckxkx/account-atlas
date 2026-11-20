@@ -178,7 +178,7 @@ struct AppGrid: View {
       HStack(alignment: .firstTextBaseline) {
         VStack(alignment: .leading, spacing: 2) {
           Text(i.map { store.title($0) } ?? "全部网站与 App").font(.system(size: 22, weight: .bold)).lineLimit(1)
-          if let i { Text("用它注册或绑定的 \(list.count) 个网站与 App").font(.system(size: 13)).foregroundStyle(.secondary) }
+          if i != nil { Text("用它注册或绑定的 \(list.count) 个网站与 App").font(.system(size: 13)).foregroundStyle(.secondary) }
         }
         Spacer()
         Button { store.route = .picker(i?.id) } label: { Label("添加", systemImage: "plus").font(.system(size: 14, weight: .semibold)) }

@@ -7,6 +7,7 @@ struct MapView: View {
   @State private var focus: String? = nil
   @Environment(\.selectedTab) private var tab
   @State private var drawn = false   // threads drawn in, nodes settled
+  @State private var visible = false
 
   let cardH: CGFloat = 64, cardGap: CGFloat = 12, appH: CGFloat = 46, appGap: CGFloat = 8, groupGap: CGFloat = 30
 
@@ -38,12 +39,17 @@ struct MapView: View {
       .background(Glow().ignoresSafeArea())
       .sensoryFeedback(.selection, trigger: focus)
     }
-    .onAppear { if tab == 2 && !drawn { play() } }
+    .onAppear { visible = tab == 2; if tab == 2 && !drawn { play() } }
     .onChange(of: store.demoFocus) { _, f in
       withAnimation(Motion.smooth) { focus = f == "none" ? nil : f }
     }
     .onChange(of: tab) { _, t in
-      if t == 2 { play() } else if drawn || focus != nil { hide() }
+      visible = t == 2
+      if t == 2 { if !drawn { play() } }
+      else {
+        // reset only after the outgoing cross-fade has finished, so the map never empties on screen
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { if !visible && (drawn || focus != nil) { hide() } }
+      }
     }
   }
 
