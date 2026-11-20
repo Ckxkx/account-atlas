@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct IdentityForm: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @Environment(\.dismiss) var dismiss
   let existing: Identity?
   @State private var type: String
@@ -31,8 +31,8 @@ struct IdentityForm: View {
         Section {
           WalletCard(identity: preview)
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: color)
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: type)
+            .animation(Motion.smooth, value: color)
+            .animation(Motion.smooth, value: type)
           Picker("类型", selection: $type) {
             Text("邮箱").tag("email")
             Text("手机号").tag("phone")
@@ -47,7 +47,7 @@ struct IdentityForm: View {
         Section("卡面") {
           LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 12) {
             ForEach(SKINS, id: \.0) { s in
-              Button { withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { color = s.0 } } label: {
+              Button { withAnimation(Motion.snappy) { color = s.0 } } label: {
                 VStack(spacing: 4) {
                   RoundedRectangle(cornerRadius: 8, style: .continuous).fill(skinGradient(s.0)).frame(height: 34)
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.primary, lineWidth: color == s.0 ? 2.5 : 0).padding(-3))
@@ -94,7 +94,7 @@ struct IdentityForm: View {
 }
 
 struct AccountForm: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @Environment(\.dismiss) var dismiss
   let existing: Account
   @State private var name: String
@@ -152,13 +152,13 @@ struct AccountForm: View {
 }
 
 struct IdentityToggles: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @Binding var selected: [String]
   var body: some View {
     ForEach(store.data.identities) { i in
       let on = selected.contains(i.id)
       Button {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { if on { selected.removeAll { $0 == i.id } } else { selected.append(i.id) } }
+        withAnimation(Motion.snappy) { if on { selected.removeAll { $0 == i.id } } else { selected.append(i.id) } }
       } label: {
         HStack(spacing: 12) {
           Image(systemName: i.isPhone ? "simcard.fill" : "envelope.fill").font(.system(size: 12)).foregroundStyle(.white).frame(width: 36, height: 24)
@@ -181,7 +181,7 @@ struct IdentityToggles: View {
 // MARK: - add apps: pick sites, then pick which email / phone each uses
 
 struct PickerSheet: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @Environment(\.dismiss) var dismiss
   let presetIdentity: String?
   @State private var query = ""
@@ -212,7 +212,7 @@ struct PickerSheet: View {
   var body: some View {
     NavigationStack {
       Group { if step2 { chooseIdentities } else { grid } }
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: step2)
+        .animation(Motion.smooth, value: step2)
     }
     .onAppear { if let p = presetIdentity { ids = [p] } }
   }
@@ -226,7 +226,7 @@ struct PickerSheet: View {
               Button { withAnimation(.snappy) { cat = c } } label: {
                 Text(c).font(.system(size: 14, weight: .semibold)).padding(.horizontal, 13).frame(height: 32)
                   .foregroundStyle(cat == c && query.isEmpty ? Color.white : Color.primary)
-                  .background(cat == c && query.isEmpty ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.ultraThinMaterial), in: Capsule())
+                  .background(cat == c && query.isEmpty ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.glass), in: Capsule())
               }.buttonStyle(PressStyle(scale: 0.94))
             }
           }.padding(.horizontal, 16)
@@ -236,7 +236,7 @@ struct PickerSheet: View {
           Button { manual = true; mName = query } label: {
             VStack(spacing: 6) {
               Image(systemName: "plus").font(.system(size: 22, weight: .medium)).frame(width: 60, height: 60)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(.glass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
               Text(query.isEmpty ? "手动添加" : "添加“\(query)”").font(.system(size: 12)).lineLimit(1).foregroundStyle(.secondary)
             }
           }.buttonStyle(PressStyle(scale: 0.9))
@@ -270,7 +270,7 @@ struct PickerSheet: View {
     let on = picked.contains { key($0) == key(p) }
     let has = store.data.accounts.contains { $0.name.lowercased() == p.name.lowercased() }
     return Button {
-      withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) {
+      withAnimation(Motion.snappy) {
         if on { picked.removeAll { key($0) == key(p) } } else { picked.append(p) }
       }
     } label: {

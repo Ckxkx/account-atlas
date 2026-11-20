@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SitesView: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @State private var cat = "全部"
   @State private var query = ""
 
@@ -11,9 +11,10 @@ struct SitesView: View {
         VStack(alignment: .leading, spacing: 0) {
           if store.data.accounts.isEmpty { empty } else {
             chips.padding(.top, 4)
+            let groups = sections
             LazyVStack(alignment: .leading, spacing: 8, pinnedViews: []) {
-              ForEach(shownCats, id: \.self) { c in
-                let list = filtered.filter { $0.category == c }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+              ForEach(groups, id: \.self) { c in
+                let list = sectionItems(c)
                 if !list.isEmpty {
                   HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(c).font(.system(size: 20, weight: .bold))
@@ -26,7 +27,7 @@ struct SitesView: View {
               }
             }
             .padding(.horizontal, 16)
-            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: cat)
+            .animation(Motion.smooth, value: cat)
           }
           Color.clear.frame(height: 30)
         }
@@ -39,31 +40,32 @@ struct SitesView: View {
     }
   }
 
-  var filtered: [Account] {
-    let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-    guard !q.isEmpty else { return store.data.accounts }
-    return store.data.accounts.filter { a in
-      a.name.lowercased().contains(q) || a.domain.lowercased().contains(q) || (a.handle ?? "").lowercased().contains(q) || a.notes.lowercased().contains(q)
-        || a.identityIds.compactMap { store.identity($0) }.contains { $0.value.lowercased().contains(q) || $0.label.lowercased().contains(q) }
-    }
+  // Sections come straight from the store's prebuilt per-category lists (already name-sorted);
+  // only a search query does any filtering, once per keystroke instead of once per category.
+  var query_: String { query.trimmingCharacters(in: .whitespaces).lowercased() }
+  func matches(_ a: Account, _ q: String) -> Bool {
+    a.name.lowercased().contains(q) || a.domain.lowercased().contains(q) || (a.handle ?? "").lowercased().contains(q) || a.notes.lowercased().contains(q)
+      || a.identityIds.compactMap { store.identity($0) }.contains { $0.value.lowercased().contains(q) || $0.label.lowercased().contains(q) }
   }
-  var cats: [String] {
-    let have = Set(store.data.accounts.map(\.category))
-    return CATS.filter { have.contains($0) } + have.filter { !CATS.contains($0) }.sorted()
+  func sectionItems(_ c: String) -> [Account] {
+    let all = store.index.byCategory[c] ?? []
+    let q = query_
+    return q.isEmpty ? all : all.filter { matches($0, q) }
   }
-  var shownCats: [String] { cat == "全部" || !cats.contains(cat) ? cats : [cat] }
+  var cats: [String] { store.index.categories }
+  var sections: [String] { cat == "全部" || !cats.contains(cat) ? cats : [cat] }
 
   var chips: some View {
     ScrollView(.horizontal) {
       HStack(spacing: 8) {
         ForEach(["全部"] + cats, id: \.self) { c in
-          let n = c == "全部" ? store.data.accounts.count : store.data.accounts.filter { $0.category == c }.count
-          Button { withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { cat = c } } label: {
+          let n = c == "全部" ? store.data.accounts.count : (store.index.categoryCount[c] ?? 0)
+          Button { withAnimation(Motion.snappy) { cat = c } } label: {
             HStack(spacing: 4) { Text(c); Text("\(n)").foregroundStyle(cat == c ? Color.white.opacity(0.75) : Color.secondary) }
               .font(.system(size: 14, weight: .semibold))
               .padding(.horizontal, 13).frame(height: 32)
               .foregroundStyle(cat == c ? Color.white : Color.primary)
-              .background(cat == c ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.ultraThinMaterial), in: Capsule())
+              .background(cat == c ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.glass), in: Capsule())
           }.buttonStyle(PressStyle(scale: 0.94))
         }
       }.padding(.horizontal, 16)

@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 struct IdentityDetail: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @Environment(\.dismiss) var dismiss
   let id: String
   @State private var askDelete = false
@@ -25,7 +25,7 @@ struct IdentityDetail: View {
             if !i.notes.isEmpty {
               section("备注")
               Text(i.notes).frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous)).padding(.horizontal, 20)
+                .background(.glass, in: RoundedRectangle(cornerRadius: 16, style: .continuous)).padding(.horizontal, 20)
             }
             section("用它注册或绑定的 \(accs.count) 个网站与 App")
             VStack(spacing: 8) {
@@ -35,7 +35,7 @@ struct IdentityDetail: View {
               Button { store.route = .picker(i.id) } label: {
                 Label("添加网站或 App", systemImage: "plus").font(.system(size: 16, weight: .semibold))
                   .frame(maxWidth: .infinity).frame(height: 52)
-                  .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                  .background(.glass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
               }.buttonStyle(PressStyle(scale: 0.98))
             }.padding(.horizontal, 20)
             Color.clear.frame(height: 30)
@@ -71,13 +71,13 @@ struct IdentityDetail: View {
       }
       .foregroundStyle(role == .destructive ? Color.red : Color.primary)
       .frame(maxWidth: .infinity).frame(height: 66)
-      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+      .background(.glass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }.buttonStyle(PressStyle())
   }
 }
 
 struct AccountDetail: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @Environment(\.dismiss) var dismiss
   @Environment(\.openURL) var openURL
   let id: String
@@ -89,7 +89,8 @@ struct AccountDetail: View {
       NavigationStack {
         ScrollView {
           VStack(spacing: 0) {
-            AppIcon(name: a.name, domain: a.domain, size: 96).shadow(color: b.opacity(0.5), radius: 24, y: 10).padding(.top, 10)
+            AppIcon(name: a.name, domain: a.domain, size: 96)
+              .bakedShadow(RoundedRectangle(cornerRadius: 96 * 0.235, style: .continuous), key: "icon96" + a.name + a.domain, color: b.opacity(0.5), radius: 24, y: 10).padding(.top, 10)
             Text(a.name).font(.system(size: 26, weight: .bold)).padding(.top, 14)
             if let h = a.handle { Text(store.handleText(h)).font(.system(size: 15)).foregroundStyle(.secondary).padding(.top, 2) }
             HStack(spacing: 6) {
@@ -118,7 +119,7 @@ struct AccountDetail: View {
                     Spacer()
                     Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(.tertiary)
                   }
-                  .padding(12).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                  .padding(12).background(.glass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }.buttonStyle(PressStyle(scale: 0.98)).foregroundStyle(.primary)
               }
             }.padding(.horizontal, 20)
@@ -126,7 +127,7 @@ struct AccountDetail: View {
               Text("备注").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 36).padding(.top, 26).padding(.bottom, 8)
               Text(a.notes).frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous)).padding(.horizontal, 20)
+                .background(.glass, in: RoundedRectangle(cornerRadius: 16, style: .continuous)).padding(.horizontal, 20)
             }
             Text("添加于 " + Date(timeIntervalSince1970: a.createdAt / 1000).formatted(date: .long, time: .omitted))
               .font(.system(size: 12)).foregroundStyle(.tertiary).padding(.top, 24).padding(.bottom, 30)
@@ -141,7 +142,7 @@ struct AccountDetail: View {
     }
   }
   func tag(_ s: String) -> some View {
-    Text(s).font(.system(size: 12, weight: .medium)).padding(.horizontal, 9).padding(.vertical, 4).background(.ultraThinMaterial, in: Capsule())
+    Text(s).font(.system(size: 12, weight: .medium)).padding(.horizontal, 9).padding(.vertical, 4).background(.glass, in: Capsule())
   }
   func act(_ t: String, _ icon: String, disabled: Bool = false, destructive: Bool = false, _ fn: @escaping () -> Void) -> some View {
     Button(action: fn) {
@@ -151,7 +152,7 @@ struct AccountDetail: View {
       }
       .foregroundStyle(destructive ? Color.red : Color.primary)
       .frame(maxWidth: .infinity).frame(height: 66)
-      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+      .background(.glass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }.buttonStyle(PressStyle()).disabled(disabled).opacity(disabled ? 0.35 : 1)
   }
 }

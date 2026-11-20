@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 // MARK: - colour
 
@@ -35,25 +36,188 @@ func skinGradient(_ c: String) -> LinearGradient {
   return LinearGradient(stops: stops, startPoint: UnitPoint(x: 0.21, y: 0), endPoint: UnitPoint(x: 0.79, y: 1))
 }
 
+private var brandCache: [String: Color] = [:]
+/// Brand colour of an app: preset colour or a stable hash hue. Memoised, since rows, grid icons,
+/// baked shadows and the wallet poster all ask for it on every render.
 func brandColor(name: String, domain: String) -> Color {
-  if let p = presetFor(name: name, domain: domain) { return Color(hex: p.color) }
-  var h: UInt32 = 0
-  let key = cleanDomain(domain).isEmpty ? name.lowercased() : cleanDomain(domain)
-  for u in key.unicodeScalars { h = h &* 31 &+ u.value }
-  return Color(hue: Double(h % 360) / 360, saturation: 0.62, brightness: 0.74)
+  let ck = name + "\u{1}" + domain
+  if let c = brandCache[ck] { return c }
+  let c: Color
+  if let p = presetFor(name: name, domain: domain) { c = Color(hex: p.color) }
+  else {
+    var h: UInt32 = 0
+    let key = cleanDomain(domain).isEmpty ? name.lowercased() : cleanDomain(domain)
+    for u in key.unicodeScalars { h = h &* 31 &+ u.value }
+    c = Color(hue: Double(h % 360) / 360, saturation: 0.62, brightness: 0.74)
+  }
+  brandCache[ck] = c
+  return c
+}
+
+// MARK: - glass
+
+/// Flat stand-in for .ultraThinMaterial on things that repeat or move (rows, tiles, map nodes).
+/// Every material is a live backdrop blur re-sampled each frame while scrolling or animating;
+/// over this app's soft gradient backgrounds the blur is invisible, so a tint looks the same.
+struct GlassStyle: ShapeStyle {
+  func resolve(in env: EnvironmentValues) -> Color {
+    env.colorScheme == .dark ? Color(white: 1, opacity: 0.10) : Color(white: 1, opacity: 0.62)
+  }
+}
+extension ShapeStyle where Self == GlassStyle { static var glass: GlassStyle { GlassStyle() } }
+
+// MARK: - baked shadows
+
+/// Coloured soft shadows rendered once into a bitmap (Core Graphics, off the frame loop) and then
+/// shown as a plain image. A live .shadow on a view is an offscreen blur pass every frame, which
+/// is what made the 3D-rotating coverflow and the icon grid drop frames.
+@MainActor enum ShadowBaker {
+  static var cache: [String: UIImage] = [:]
+  static func image(key: String, size: CGSize, color: UIColor, radius: CGFloat, path: (CGRect) -> Path) -> UIImage? {
+    guard size.width > 1, size.height > 1 else { return nil }
+    let w = size.width.rounded(), h = size.height.rounded()
+    let k = "\(key)|\(w)x\(h)|\(radius)"
+    if let i = cache[k] { return i }
+    let pad = ceil(radius * 3)
+    let canvas = CGSize(width: w + pad * 2, height: h + pad * 2)
+    let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = false   // blurred: 1x is indistinguishable
+    let img = UIGraphicsImageRenderer(size: canvas, format: fmt).image { ctx in
+      let cg = ctx.cgContext
+      // draw the shape far off-canvas and throw only its shadow back in
+      let far: CGFloat = 10_000
+      cg.setShadow(offset: CGSize(width: far, height: 0), blur: radius * 2, color: color.cgColor)
+      cg.translateBy(x: pad - far, y: pad)
+      cg.addPath(path(CGRect(x: 0, y: 0, width: w, height: h)).cgPath)
+      cg.setFillColor(UIColor.black.cgColor)
+      cg.fillPath()
+    }
+    if cache.count > 300 { cache.removeAll() }
+    cache[k] = img
+    return img
+  }
+}
+
+struct BakedShadow<S: Shape>: View {
+  let key: String
+  let shape: S
+  let color: Color
+  let radius: CGFloat
+  var y: CGFloat = 0
+  var body: some View {
+    GeometryReader { g in
+      if let img = ShadowBaker.image(key: key, size: g.size, color: UIColor(color), radius: radius, path: { shape.path(in: $0) }) {
+        Image(uiImage: img).resizable().interpolation(.medium)
+          .frame(width: img.size.width, height: img.size.height)
+          .position(x: g.size.width / 2, y: g.size.height / 2 + y)
+      }
+    }
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
+  }
+}
+extension View {
+  /// Same look as .shadow(color:radius:y:) for a view filling `shape`, without per-frame blur.
+  func bakedShadow<S: Shape>(_ shape: S, key: String, color: Color, radius: CGFloat, y: CGFloat = 0) -> some View {
+    background(BakedShadow(key: key, shape: shape, color: color, radius: radius, y: y))
+  }
 }
 
 // MARK: - app icon
 
-final class IconCache {
-  static var local: [String: UIImage] = [:]
-  static func image(name: String, domain: String) -> UIImage? {
+/// Icon pipeline: bundled PNGs and downloaded favicons are decoded and downsampled on a background
+/// queue (ImageIO, decoded immediately), kept in memory, and favicons also on disk. Views read the
+/// cache synchronously, so a row that scrolls back in or a tab you return to shows its icon on the
+/// first frame with no decode on the main thread and no AsyncImage re-download/flash.
+final class IconEntry { let image: UIImage; let favicon: Bool; init(_ i: UIImage, _ f: Bool) { image = i; favicon = f } }
+
+@MainActor final class IconStore {
+  static let shared = IconStore()
+  private var mem: [String: IconEntry] = [:]
+  private var failed = Set<String>()
+  private var waiting: [String: [(IconEntry?) -> Void]] = [:]
+  private var keyCache: [String: String] = [:]
+  private let work = DispatchQueue(label: "atlas.icons", qos: .userInitiated, attributes: .concurrent)
+  private let disk: URL = {
+    let u = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("favicons", isDirectory: true)
+    try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
+    return u
+  }()
+
+  /// "b:<preset domain>" for a bundled icon, "f:<domain>" for a favicon, "" for a letter tile
+  func key(name: String, domain: String) -> String {
+    let ck = name + "\u{1}" + domain
+    if let k = keyCache[ck] { return k }
     let d = cleanDomain(domain), n = name.lowercased()
-    guard let p = Presets.all.first(where: { (!d.isEmpty && (d == $0.domain || d.hasSuffix("." + $0.domain))) || (d.isEmpty && $0.name.lowercased() == n) }) else { return nil }
-    if let i = local[p.domain] { return i }
-    guard let path = Bundle.main.path(forResource: p.domain, ofType: "png", inDirectory: "icons"), let i = UIImage(contentsOfFile: path) else { return nil }
-    local[p.domain] = i
-    return i
+    var k = ""
+    if let p = Presets.all.first(where: { (!d.isEmpty && (d == $0.domain || d.hasSuffix("." + $0.domain))) || (d.isEmpty && $0.name.lowercased() == n) }),
+       Bundle.main.path(forResource: p.domain, ofType: "png", inDirectory: "icons") != nil {
+      k = "b:" + p.domain
+    } else if !d.isEmpty { k = "f:" + d }
+    keyCache[ck] = k
+    return k
+  }
+  func cached(_ key: String) -> IconEntry? { mem[key] }
+  func hasFailed(_ key: String) -> Bool { failed.contains(key) }
+
+  func prefetch(_ accounts: [Account]) {
+    for a in accounts { load(key(name: a.name, domain: a.domain)) { _ in } }
+  }
+
+  func load(_ key: String, _ done: @escaping (IconEntry?) -> Void) {
+    if key.isEmpty || failed.contains(key) { done(nil); return }
+    if let e = mem[key] { done(e); return }
+    if waiting[key] != nil { waiting[key]!.append(done); return }
+    waiting[key] = [done]
+    let body = String(key.dropFirst(2)), disk = self.disk
+    if key.hasPrefix("b:") {
+      work.async {
+        let path = Bundle.main.path(forResource: body, ofType: "png", inDirectory: "icons")
+        let img = path.flatMap { IconStore.decode(url: URL(fileURLWithPath: $0)) }
+        Task { @MainActor in self.finish(key, img.map { IconEntry($0, false) }) }
+      }
+      return
+    }
+    let file = disk.appendingPathComponent(body.replacingOccurrences(of: "/", with: "_") + ".img")
+    work.async {
+      if let img = IconStore.decode(url: file) {
+        Task { @MainActor in self.finish(key, IconEntry(img, true)) }
+        return
+      }
+      guard let u = URL(string: "https://favicon.im/\(body)?larger=true") else {
+        Task { @MainActor in self.finish(key, nil) }; return
+      }
+      URLSession.shared.dataTask(with: u) { data, resp, _ in
+        let ok = ((resp as? HTTPURLResponse)?.statusCode ?? 0) == 200
+        let img = ok ? data.flatMap { IconStore.decode(data: $0) } : nil
+        if img != nil, let data { try? data.write(to: file, options: .atomic) }
+        Task { @MainActor in self.finish(key, img.map { IconEntry($0, true) }) }
+      }.resume()
+    }
+  }
+  private func finish(_ key: String, _ e: IconEntry?) {
+    if let e { mem[key] = e } else { failed.insert(key) }
+    let cbs = waiting.removeValue(forKey: key) ?? []
+    for c in cbs { c(e) }
+  }
+
+  nonisolated static func decode(url: URL) -> UIImage? {
+    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return thumb(src)
+  }
+  nonisolated static func decode(data: Data) -> UIImage? {
+    guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+    return thumb(src)
+  }
+  /// decoded right here (kCGImageSourceShouldCacheImmediately), capped at 288 px = 96 pt @3x
+  nonisolated private static func thumb(_ src: CGImageSource) -> UIImage? {
+    let opts: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceShouldCacheImmediately: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: 288,
+    ]
+    guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+    return UIImage(cgImage: cg)
   }
 }
 
@@ -61,23 +225,31 @@ struct AppIcon: View {
   let name: String
   let domain: String
   var size: CGFloat = 52
+  @State private var loaded = 0   // bumps when an async load lands, to re-read the cache
+
   var body: some View {
     let r = RoundedRectangle(cornerRadius: size * 0.235, style: .continuous)
-    content
-      .frame(width: size, height: size)
-      .clipShape(r)
-      .overlay(r.strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
-  }
-  @ViewBuilder var content: some View {
-    if let img = IconCache.image(name: name, domain: domain) {
-      Image(uiImage: img).resizable().interpolation(.high).scaledToFill()
-    } else if !cleanDomain(domain).isEmpty, let u = URL(string: "https://favicon.im/\(cleanDomain(domain))?larger=true") {
-      AsyncImage(url: u) { phase in
-        if case .success(let img) = phase {
-          ZStack { Color.white; img.resizable().interpolation(.high).scaledToFit().padding(size * 0.14) }
-        } else { letter }
-      }
-    } else { letter }
+    let key = IconStore.shared.key(name: name, domain: domain)
+    let _ = loaded
+    let entry = IconStore.shared.cached(key)
+    ZStack {
+      if let entry {
+        if entry.favicon {
+          ZStack { Color.white; Image(uiImage: entry.image).resizable().interpolation(.high).scaledToFit().padding(size * 0.14) }
+        } else {
+          Image(uiImage: entry.image).resizable().interpolation(.high).scaledToFill()
+        }
+      } else { letter }
+    }
+    .frame(width: size, height: size)
+    .clipShape(r)
+    .overlay(r.strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+    .task(id: key) {
+      guard !key.isEmpty, IconStore.shared.cached(key) == nil, !IconStore.shared.hasFailed(key) else { return }
+      await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in IconStore.shared.load(key) { _ in c.resume() } }
+      var t = Transaction(); t.disablesAnimations = true
+      withTransaction(t) { loaded &+= 1 }
+    }
   }
   var letter: some View {
     let b = brandColor(name: name, domain: domain)
@@ -136,7 +308,7 @@ struct Chip: View {
 }
 
 struct WalletCard: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   let identity: Identity
   var body: some View {
     let i = identity
@@ -177,7 +349,11 @@ struct WalletCard: View {
     .aspectRatio(1.586, contentMode: .fit)
     .clipShape(shape)
     .overlay(shape.stroke(.white.opacity(0.22), lineWidth: 0.6))
-    .shadow(color: Color(hex: i.color).opacity(0.45), radius: 22, y: 14)
+    // The face (gradient, blurred poster, soft-light blend, text, icons) is flattened into one
+    // Metal-rendered layer, so the coverflow's per-frame 3D transform moves a single texture
+    // instead of re-compositing a dozen blended layers.
+    .drawingGroup()
+    .bakedShadow(shape, key: "card\(i.isPhone)\(i.color)", color: Color(hex: i.color).opacity(0.45), radius: 22, y: 14)
   }
   func footNote(_ i: Identity) -> String {
     if i.isPhone {
@@ -189,11 +365,15 @@ struct WalletCard: View {
   }
   // a blurred mosaic of the brand colours of what this identity unlocks
   func poster(_ accs: [Account]) -> some View {
-    let cols = Array(repeating: GridItem(.flexible(), spacing: 0), count: 3)
-    return LazyVGrid(columns: cols, spacing: 0) {
-      ForEach(0..<9, id: \.self) { k in
-        let a = accs.isEmpty ? nil : accs[k % accs.count]
-        Rectangle().fill(a.map { brandColor(name: $0.name, domain: $0.domain) } ?? .clear).aspectRatio(1.586, contentMode: .fit)
+    var colors: [Color] = []
+    for k in 0..<9 {
+      if accs.isEmpty { colors.append(.clear) } else { let a = accs[k % accs.count]; colors.append(brandColor(name: a.name, domain: a.domain)) }
+    }
+    return VStack(spacing: 0) {
+      ForEach(0..<3, id: \.self) { r in
+        HStack(spacing: 0) {
+          ForEach(0..<3, id: \.self) { c in Rectangle().fill(colors[r * 3 + c]).aspectRatio(1.586, contentMode: .fit) }
+        }
       }
     }
     .blur(radius: 30).opacity(accs.isEmpty ? 0 : 0.35).blendMode(.overlay)
@@ -210,7 +390,7 @@ struct IconStack: View {
       }
       if accounts.count > 4 {
         Text("+\(accounts.count - 4)").font(.system(size: 11, weight: .bold, design: .rounded))
-          .frame(height: 28).padding(.horizontal, 7).background(.ultraThinMaterial, in: Capsule()).padding(.leading, 12)
+          .frame(height: 28).padding(.horizontal, 7).background(Color.white.opacity(0.24), in: Capsule()).padding(.leading, 12)
       }
     }
   }
@@ -219,7 +399,7 @@ struct IconStack: View {
 // MARK: - rows
 
 struct IdentityCaps: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   let ids: [String]
   var body: some View {
     let list = ids.compactMap { store.identity($0) }
@@ -239,7 +419,7 @@ struct IdentityCaps: View {
 }
 
 struct ReelRow: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   let account: Account
   var meta: String? = nil
   var body: some View {
@@ -259,11 +439,9 @@ struct ReelRow: View {
     }
     .padding(.horizontal, 12).padding(.vertical, 10)
     .background {
-      ZStack {
-        Rectangle().fill(.ultraThinMaterial)
-        b.opacity(0.14)
-      }
-      .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+      // even colour wash: flat glass + brand tint (no per-row live blur while scrolling)
+      let r = RoundedRectangle(cornerRadius: 18, style: .continuous)
+      ZStack { r.fill(.glass); r.fill(b.opacity(0.14)) }
     }
     .contentShape(Rectangle())
   }
@@ -275,6 +453,19 @@ struct PressStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .scaleEffect(configuration.isPressed ? scale : 1)
-      .animation(.spring(response: 0.3, dampingFraction: 0.6), value: configuration.isPressed)
+      // interactive, critically damped: follows the finger, settles without wobble
+      .animation(Motion.press, value: configuration.isPressed)
   }
+}
+
+// MARK: - motion
+
+/// One set of Apple-like, no-bounce springs used everywhere. Springs keep velocity when retargeted,
+/// so an interrupted animation (tap during a swipe, quick tab hops) never jumps.
+enum Motion {
+  static let press = Animation.interactiveSpring(response: 0.26, dampingFraction: 0.86, blendDuration: 0.12)
+  static let snappy = Animation.spring(duration: 0.32, bounce: 0)
+  static let smooth = Animation.spring(duration: 0.45, bounce: 0)
+  static let gentle = Animation.spring(duration: 0.6, bounce: 0)
+  static let tab = Animation.spring(duration: 0.4, bounce: 0)
 }

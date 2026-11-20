@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct WalletView: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @Namespace private var seg
 
   var body: some View {
@@ -31,7 +31,7 @@ struct WalletView: View {
     .padding(.horizontal, 20)
   }
   var summary: String {
-    let e = store.data.identities.filter { $0.type == "email" }.count, p = store.data.identities.count - e, a = store.data.accounts.count
+    let e = store.index.emails.count, p = store.data.identities.count - e, a = store.data.accounts.count
     return store.data.identities.isEmpty && a == 0 ? "先添加一个邮箱或手机号" : "\(e) 个邮箱、\(p) 个手机号，关联着 \(a) 个网站与 App"
   }
 
@@ -77,25 +77,25 @@ struct WalletView: View {
       }
     }
     .frame(maxWidth: .infinity)
-    .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.activeID)
+    .animation(Motion.snappy, value: store.activeID)
   }
 }
 
 struct Glow: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @Environment(\.colorScheme) var scheme
   var body: some View {
     let c = Color(hex: store.active?.color ?? "#3a3a3c")
     ZStack {
       (scheme == .dark ? Color.black : Color(hex: "#f2f2f7"))
       RadialGradient(colors: [c.opacity(scheme == .dark ? 0.55 : 0.32), .clear], center: UnitPoint(x: 0.5, y: 0.18), startRadius: 0, endRadius: 420)
-        .animation(.easeInOut(duration: 0.6), value: store.activeID)
+        .animation(Motion.gentle, value: store.activeID)
     }
   }
 }
 
 struct TopButtons: ToolbarContent {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   var body: some ToolbarContent {
     ToolbarItemGroup(placement: .topBarTrailing) {
       Button {
@@ -105,7 +105,6 @@ struct TopButtons: ToolbarContent {
           .contentTransition(.symbolEffect(.replace.downUp))
           .background(ThemeOrigin())
       }
-        .sensoryFeedback(.impact(weight: .light), trigger: store.theme)
       Menu {
         Button { store.route = .picker(store.active?.id) } label: { Label("添加网站或 App", systemImage: "square.grid.2x2") }
         Button { store.route = .newIdentity("email") } label: { Label("添加邮箱", systemImage: "envelope") }
@@ -117,7 +116,7 @@ struct TopButtons: ToolbarContent {
 }
 
 struct KindSwitch: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @Namespace private var ns
   var body: some View {
     HStack(spacing: 0) {
@@ -125,12 +124,12 @@ struct KindSwitch: View {
         let k = t.0, name = t.1, icon = t.2
         let on = store.kind == k
         Button {
-          withAnimation(.spring(response: 0.42, dampingFraction: 0.8)) { store.setKind(k) }
+          withAnimation(Motion.smooth) { store.setKind(k) }
         } label: {
           HStack(spacing: 6) {
             Image(systemName: icon).font(.system(size: 14, weight: .semibold))
             Text(name).font(.system(size: 15, weight: .semibold))
-            Text("\(store.data.identities.filter { $0.type == k }.count)").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+            Text("\(k == "phone" ? store.index.phones.count : store.index.emails.count)").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
           }
           .frame(maxWidth: .infinity).frame(height: 36)
           .foregroundStyle(on ? .primary : .secondary)
@@ -143,13 +142,13 @@ struct KindSwitch: View {
       }
     }
     .padding(3)
-    .background(.ultraThinMaterial, in: Capsule())
+    .background(.glass, in: Capsule())
     .sensoryFeedback(.selection, trigger: store.kind)
   }
 }
 
 struct AddCard: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   let kind: String
   var body: some View {
     Button { store.route = .newIdentity(kind) } label: {
@@ -160,7 +159,7 @@ struct AddCard: View {
       .foregroundStyle(.secondary)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .aspectRatio(1.586, contentMode: .fit)
-      .background(CardShape(sim: kind == "phone").fill(.ultraThinMaterial))
+      .background(CardShape(sim: kind == "phone").fill(.glass))
       .overlay(CardShape(sim: kind == "phone").stroke(style: StrokeStyle(lineWidth: 1.2, dash: [6, 5])).foregroundStyle(.secondary.opacity(0.5)))
     }
     .buttonStyle(PressStyle())
@@ -169,17 +168,17 @@ struct AddCard: View {
 
 // icons of what the front card unlocks
 struct AppGrid: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   var body: some View {
     let i = store.active
-    let list = i.map { store.accounts(of: $0.id) } ?? store.data.accounts.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    let list = i.map { store.accounts(of: $0.id) } ?? store.index.byName
     let more = list.count > 11 ? list.count - 11 : 0
     let shown = more > 0 ? Array(list.prefix(11)) : list
     VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .firstTextBaseline) {
         VStack(alignment: .leading, spacing: 2) {
           Text(i.map { store.title($0) } ?? "全部网站与 App").font(.system(size: 22, weight: .bold)).lineLimit(1)
-          if let i { Text("用它注册或绑定的 \(store.accounts(of: i.id).count) 个网站与 App").font(.system(size: 13)).foregroundStyle(.secondary) }
+          if let i { Text("用它注册或绑定的 \(list.count) 个网站与 App").font(.system(size: 13)).foregroundStyle(.secondary) }
         }
         Spacer()
         Button { store.route = .picker(i?.id) } label: { Label("添加", systemImage: "plus").font(.system(size: 14, weight: .semibold)) }
@@ -190,7 +189,8 @@ struct AppGrid: View {
           Button { store.route = .account(a.id) } label: {
             VStack(spacing: 6) {
               AppIcon(name: a.name, domain: a.domain, size: 58)
-                .shadow(color: brandColor(name: a.name, domain: a.domain).opacity(0.35), radius: 8, y: 4)
+                .bakedShadow(RoundedRectangle(cornerRadius: 58 * 0.235, style: .continuous), key: "icon58" + a.name + a.domain,
+                             color: brandColor(name: a.name, domain: a.domain).opacity(0.35), radius: 8, y: 4)
               Text(a.handle.map { store.handleText($0) } ?? a.name).font(.system(size: 12)).lineLimit(1).foregroundStyle(.primary)
             }
           }
@@ -201,7 +201,7 @@ struct AppGrid: View {
           Button { store.route = .identity(i.id) } label: {
             VStack(spacing: 6) {
               Text("+\(more)").font(.system(size: 18, weight: .bold, design: .rounded)).frame(width: 58, height: 58)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 58 * 0.235, style: .continuous))
+                .background(.glass, in: RoundedRectangle(cornerRadius: 58 * 0.235, style: .continuous))
               Text("全部").font(.system(size: 12)).foregroundStyle(.secondary)
             }
           }.buttonStyle(PressStyle(scale: 0.9))
@@ -209,24 +209,24 @@ struct AppGrid: View {
           Button { store.route = .picker(i.id) } label: {
             VStack(spacing: 6) {
               Image(systemName: "plus").font(.system(size: 20, weight: .medium)).frame(width: 58, height: 58)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 58 * 0.235, style: .continuous))
+                .background(.glass, in: RoundedRectangle(cornerRadius: 58 * 0.235, style: .continuous))
               Text("添加").font(.system(size: 12)).foregroundStyle(.secondary)
             }
           }.buttonStyle(PressStyle(scale: 0.9))
         }
       }
-      .animation(.spring(response: 0.5, dampingFraction: 0.78), value: store.activeID)
+      .animation(Motion.smooth, value: store.activeID)
       .padding(16)
-      .background(.ultraThinMaterial.opacity(0.7), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+      .background(.glass.opacity(0.7), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
       if list.isEmpty && i == nil { Text("还没有网站，从右上角的 + 开始。").font(.system(size: 14)).foregroundStyle(.secondary) }
     }
   }
 }
 
 struct Timeline: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   var body: some View {
-    let list = Array(store.data.accounts.sorted { $0.createdAt > $1.createdAt }.prefix(5))
+    let list = store.index.recent
     let cal = Calendar.current
     let groups: [(Date, [Account])] = list.reduce(into: []) { g, a in
       let d = cal.startOfDay(for: Date(timeIntervalSince1970: a.createdAt / 1000))

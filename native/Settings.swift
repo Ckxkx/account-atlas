@@ -10,7 +10,7 @@ struct BackupDoc: FileDocument {
 }
 
 struct SettingsSheet: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @EnvironmentObject var sync: Sync
   @Environment(\.dismiss) var dismiss
   @State private var exporting = false
@@ -31,7 +31,7 @@ struct SettingsSheet: View {
           }
         }
         Section {
-          Toggle(isOn: $store.privacy.animation()) { Label("隐藏号码", systemImage: "eye.slash") }
+          Toggle(isOn: Binding(get: { store.privacy }, set: { v in store.privacy = v }).animation(Motion.smooth)) { Label("隐藏号码", systemImage: "eye.slash") }
           Picker(selection: Binding(get: { store.theme }, set: { ThemeFX.set($0, store: store) })) {
             Text("深色").tag("dark")
             Text("浅色").tag("light")
@@ -86,7 +86,7 @@ struct SettingsSheet: View {
 }
 
 struct OrderView: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   var body: some View {
     List {
       group("email", "邮箱")
@@ -128,7 +128,7 @@ struct OrderView: View {
 }
 
 struct SyncView: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @EnvironmentObject var sync: Sync
   @State private var prov = "gitee"
   @State private var token = ""

@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import Observation
 
 // MARK: - data (same JSON shape as the web app, so backups and sync interoperate)
 
@@ -147,22 +148,60 @@ enum Route: Identifiable, Equatable {
   }
 }
 
-@MainActor
-final class Store: ObservableObject {
-  @Published var data = AtlasData()
-  @Published var privacy: Bool = UserDefaults.standard.bool(forKey: "atlas.privacy") { didSet { UserDefaults.standard.set(privacy, forKey: "atlas.privacy") } }
-  @Published var kind: String = UserDefaults.standard.string(forKey: "atlas.kind") ?? "email" { didSet { UserDefaults.standard.set(kind, forKey: "atlas.kind") } }
-  @Published var theme: String = UserDefaults.standard.string(forKey: "atlas.theme") ?? "dark" { didSet { UserDefaults.standard.set(theme, forKey: "atlas.theme") } }
-  @Published var activeID: String? = nil
-  @Published var route: Route? = nil
-  @Published var toast: Toast? = nil
-  @Published var demoFocus: String? = nil
-  var toastAction: (() -> Void)? = nil
-  var onSaved: (() -> Void)? = nil
+/// Everything views read that is derived from `data`, built once per change instead of on every
+/// body evaluation (sorting with localizedStandardCompare in every card/row was the main cost).
+struct AtlasIndex {
+  var byIdentity: [String: [Account]] = [:]     // sorted by name
+  var identityByID: [String: Identity] = [:]
+  var accountByID: [String: Account] = [:]
+  var byName: [Account] = []
+  var recent: [Account] = []                     // newest 5
+  var emails: [Identity] = []
+  var phones: [Identity] = []
+  var categoryCount: [String: Int] = [:]
+  var categories: [String] = []
+  var byCategory: [String: [Account]] = [:]      // sorted by name
+  init() {}
+  init(_ d: AtlasData) {
+    byName = d.accounts.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    for i in d.identities {
+      identityByID[i.id] = i
+      if i.type == "email" { emails.append(i) } else if i.type == "phone" { phones.append(i) }
+    }
+    for a in byName {
+      accountByID[a.id] = a
+      for id in a.identityIds { byIdentity[id, default: []].append(a) }
+      categoryCount[a.category, default: 0] += 1
+      byCategory[a.category, default: []].append(a)
+    }
+    recent = Array(d.accounts.sorted { $0.createdAt > $1.createdAt }.prefix(5))
+    let have = Set(categoryCount.keys)
+    categories = CATS.filter { have.contains($0) } + have.filter { !CATS.contains($0) }.sorted()
+  }
+}
 
-  private var seen: [String: String] = [:]
-  private var undoSnap: AtlasData? = nil
+@MainActor
+@Observable
+final class Store {
+  // Observation tracks each property separately, so swiping the card deck (activeID) or showing a
+  // toast no longer invalidates every view of every tab the way one ObservableObject did.
+  var data = AtlasData() { didSet { index = AtlasIndex(data) } }
+  private(set) var index = AtlasIndex()
+  var privacy: Bool = UserDefaults.standard.bool(forKey: "atlas.privacy") { didSet { UserDefaults.standard.set(privacy, forKey: "atlas.privacy") } }
+  var kind: String = UserDefaults.standard.string(forKey: "atlas.kind") ?? "email" { didSet { UserDefaults.standard.set(kind, forKey: "atlas.kind") } }
+  var theme: String = UserDefaults.standard.string(forKey: "atlas.theme") ?? "dark" { didSet { UserDefaults.standard.set(theme, forKey: "atlas.theme") } }
+  var activeID: String? = nil
+  var route: Route? = nil
+  var toast: Toast? = nil
+  var demoFocus: String? = nil
+  @ObservationIgnored var toastAction: (() -> Void)? = nil
+  @ObservationIgnored var onSaved: (() -> Void)? = nil
+
+  @ObservationIgnored private var seenI: [String: Identity] = [:]
+  @ObservationIgnored private var seenA: [String: Account] = [:]
+  @ObservationIgnored private var undoSnap: AtlasData? = nil
   private let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("atlas.json")
+  private let io = DispatchQueue(label: "atlas.persist", qos: .utility)
 
   init() {
     if let d = try? Data(contentsOf: url), let s = try? JSONDecoder().decode(AtlasData.self, from: d) {
@@ -170,17 +209,18 @@ final class Store: ObservableObject {
     } else {
       data = Store.demo()
     }
+    index = AtlasIndex(data)
     remember()
     activeID = deck.first?.id
+    // decode every icon the first screens will show, off the main thread, before they're needed
+    IconStore.shared.prefetch(data.accounts)
   }
 
-  var deck: [Identity] { data.identities.filter { $0.type == kind } }
+  var deck: [Identity] { kind == "phone" ? index.phones : kind == "email" ? index.emails : data.identities.filter { $0.type == kind } }
   var active: Identity? { deck.first { $0.id == activeID } ?? (activeID == "add" ? nil : deck.first) }
-  func identity(_ id: String) -> Identity? { data.identities.first { $0.id == id } }
-  func account(_ id: String) -> Account? { data.accounts.first { $0.id == id } }
-  func accounts(of id: String) -> [Account] {
-    data.accounts.filter { $0.identityIds.contains(id) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-  }
+  func identity(_ id: String) -> Identity? { index.identityByID[id] }
+  func account(_ id: String) -> Account? { index.accountByID[id] }
+  func accounts(of id: String) -> [Account] { index.byIdentity[id] ?? [] }
 
   func display(_ i: Identity) -> String {
     guard privacy else { return i.value }
@@ -194,12 +234,16 @@ final class Store: ObservableObject {
   func handleText(_ h: String) -> String { privacy ? String(h.prefix(1)) + "•••" : h }
   func title(_ i: Identity) -> String { i.label.isEmpty ? display(i) : i.label }
 
-  // every change goes through here: snapshot for undo, stamp, persist, sync
+  // every change goes through here: snapshot for undo, stamp, persist, sync.
+  // Works on a copy and assigns once, so observers and the index update exactly once per change.
   func mutate(_ message: String? = nil, undo: Bool = true, _ f: (inout AtlasData) -> Void) {
     undoSnap = data
-    f(&data)
-    data.demo = nil
-    save()
+    var d = data
+    f(&d)
+    d.demo = nil
+    stamp(&d)
+    data = d
+    afterSave()
     if let message { show(message, action: undo ? "撤销" : nil) { [weak self] in self?.undo() } }
   }
   func undo() {
@@ -207,47 +251,57 @@ final class Store: ObservableObject {
     data = s; save()
   }
 
-  private func strip<T: Encodable>(_ x: T) -> String {
-    let e = JSONEncoder(); e.outputFormatting = .sortedKeys
-    guard var o = (try? JSONSerialization.jsonObject(with: e.encode(x))) as? [String: Any] else { return "" }
-    o["updatedAt"] = nil
-    return String(data: (try? JSONSerialization.data(withJSONObject: o, options: .sortedKeys)) ?? Data(), encoding: .utf8) ?? ""
-  }
+  private static func plain(_ x: Identity) -> Identity { var y = x; y.updatedAt = nil; return y }
+  private static func plain(_ x: Account) -> Account { var y = x; y.updatedAt = nil; return y }
   func remember() {
-    seen = [:]
-    for x in data.identities { seen[x.id] = strip(x) }
-    for x in data.accounts { seen[x.id] = strip(x) }
+    seenI = [:]; seenA = [:]
+    for x in data.identities { seenI[x.id] = Store.plain(x) }
+    for x in data.accounts { seenA[x.id] = Store.plain(x) }
   }
-  func save() {
+  /// stamps changed records (compared field by field, ignoring updatedAt) and tombstones removed ones
+  private func stamp(_ d: inout AtlasData) {
     let now = nowMS()
     var live = Set<String>()
-    for k in data.identities.indices {
-      let x = data.identities[k]; live.insert(x.id)
-      if seen[x.id] != strip(x) || x.updatedAt == nil { data.identities[k].updatedAt = now }
-      data.deleted[x.id] = nil
+    for k in d.identities.indices {
+      let x = d.identities[k]; live.insert(x.id)
+      if seenI[x.id] != Store.plain(x) || x.updatedAt == nil { d.identities[k].updatedAt = now }
+      d.deleted[x.id] = nil
     }
-    for k in data.accounts.indices {
-      let x = data.accounts[k]; live.insert(x.id)
-      if seen[x.id] != strip(x) || x.updatedAt == nil { data.accounts[k].updatedAt = now }
-      data.deleted[x.id] = nil
+    for k in d.accounts.indices {
+      let x = d.accounts[k]; live.insert(x.id)
+      if seenA[x.id] != Store.plain(x) || x.updatedAt == nil { d.accounts[k].updatedAt = now }
+      d.deleted[x.id] = nil
     }
-    for id in seen.keys where !live.contains(id) { data.deleted[id] = now }
+    for id in seenI.keys where !live.contains(id) { d.deleted[id] = now }
+    for id in seenA.keys where !live.contains(id) { d.deleted[id] = now }
+  }
+  func save() {
+    var d = data
+    stamp(&d)
+    data = d
+    afterSave()
+  }
+  private func afterSave() {
     remember()
     persist()
     onSaved?()
   }
+  /// encoding is cheap; the file write happens off the main thread so a tap never waits on disk
   func persist() {
-    if let d = try? JSONEncoder().encode(data) { try? d.write(to: url, options: .atomic) }
+    guard let d = try? JSONEncoder().encode(data) else { return }
+    let u = url
+    io.async { try? d.write(to: u, options: .atomic) }
   }
   // replace everything (sync merge), without new stamps
   func adopt(_ d: AtlasData) {
     data = d; remember(); persist()
+    IconStore.shared.prefetch(d.accounts)
     if active == nil || !deck.contains(where: { $0.id == activeID }) { activeID = deck.first?.id }
   }
 
   func show(_ text: String, action: String? = nil, _ fn: (() -> Void)? = nil) {
     toastAction = fn
-    withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { toast = Toast(text: text, action: action) }
+    withAnimation(Motion.smooth) { toast = Toast(text: text, action: action) }
     let t = toast
     DispatchQueue.main.asyncAfter(deadline: .now() + (action == nil ? 2.2 : 4.5)) { [weak self] in
       if self?.toast == t { withAnimation(.easeInOut(duration: 0.3)) { self?.toast = nil } }

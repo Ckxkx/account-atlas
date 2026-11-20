@@ -2,14 +2,14 @@ import SwiftUI
 
 @main
 struct AtlasApp: App {
-  @StateObject private var store = Store()
+  @State private var store = Store()
   @StateObject private var sync = Sync()
   @Environment(\.scenePhase) private var phase
 
   var body: some Scene {
     WindowGroup {
       RootView()
-        .environmentObject(store)
+        .environment(store)
         .environmentObject(sync)
         .onAppear {
           ThemeFX.apply(store.theme)
@@ -30,7 +30,7 @@ struct AtlasApp: App {
 }
 
 struct RootView: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   @State private var tab = 0
   @State private var dir: CGFloat = 1
 
@@ -43,7 +43,7 @@ struct RootView: View {
     .environment(\.selectedTab, tab)
     .sensoryFeedback(.selection, trigger: tab)
     .onChange(of: store.theme) { _, t in ThemeFX.apply(t) }
-    .sheet(item: $store.route) { r in sheet(r) }
+    .sheet(item: Binding(get: { store.route }, set: { r in store.route = r })) { r in sheet(r) }
     .overlay(alignment: .top) { ToastView() }
     .onAppear {
       // launch arguments used by the CI preview screenshots
@@ -63,7 +63,7 @@ struct RootView: View {
   // Scripted walkthroughs used to record the promo clips in CI (-atlasDemo <name>).
   func go(_ t: Int) { dir = t >= tab ? 1 : -1; tab = t }
   func wait(_ s: Double) async { try? await Task.sleep(for: .seconds(s)) }
-  func swipe(_ id: String?) { withAnimation(.spring(duration: 0.55, bounce: 0.15)) { store.activeID = id } }
+  func swipe(_ id: String?) { withAnimation(.spring(duration: 0.55, bounce: 0)) { store.activeID = id } }
   @MainActor func runDemo(_ name: String) async {
     await wait(3.2)
     switch name {
@@ -71,10 +71,10 @@ struct RootView: View {
       for id in store.deck.map(\.id).dropFirst() { swipe(id); await wait(1.5) }
       await wait(0.4); swipe(store.deck.first?.id)
     case "kind":
-      withAnimation(.spring(duration: 0.5, bounce: 0.1)) { store.setKind("phone") }
+      withAnimation(Motion.smooth) { store.setKind("phone") }
       await wait(1.6)
       if store.deck.count > 1 { swipe(store.deck[1].id); await wait(1.5) }
-      withAnimation(.spring(duration: 0.5, bounce: 0.1)) { store.setKind("email") }
+      withAnimation(Motion.smooth) { store.setKind("email") }
     case "map":
       go(2); await wait(2.6)
       if let a = store.data.identities.first?.id { store.demoFocus = a; await wait(1.6) }
@@ -95,14 +95,14 @@ struct RootView: View {
 
   func sheet(_ r: Route) -> some View {
     SheetHost(route: r)
-      .environmentObject(store)
+      .environment(store)
       .presentationDragIndicator(.visible)
       .presentationCornerRadius(34)
   }
 }
 
 struct SheetHost: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   let route: Route
   var body: some View {
     switch route {
@@ -118,7 +118,7 @@ struct SheetHost: View {
 }
 
 struct AccountFormHost: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   let id: String
   var body: some View {
     if let a = store.account(id) { AccountForm(existing: a) }
@@ -126,7 +126,7 @@ struct AccountFormHost: View {
 }
 
 struct ToastView: View {
-  @EnvironmentObject var store: Store
+  @Environment(Store.self) var store
   var body: some View {
     if let t = store.toast {
       HStack(spacing: 12) {
@@ -138,16 +138,16 @@ struct ToastView: View {
         }
         Spacer(minLength: 8)
         if let a = t.action {
-          Button(a) { store.toastAction?(); withAnimation { store.toast = nil } }.font(.system(size: 15, weight: .semibold))
+          Button(a) { store.toastAction?(); withAnimation(Motion.snappy) { store.toast = nil } }.font(.system(size: 15, weight: .semibold))
         }
       }
       .padding(.horizontal, 14).padding(.vertical, 11)
       .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-      .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
+      .bakedShadow(RoundedRectangle(cornerRadius: 24, style: .continuous), key: "toast", color: .black.opacity(0.25), radius: 20, y: 8)
       .padding(.horizontal, 14)
       .transition(.move(edge: .top).combined(with: .opacity))
       .id(t.id)
-      .gesture(DragGesture().onEnded { v in if v.translation.height < -10 { withAnimation { store.toast = nil } } })
+      .gesture(DragGesture().onEnded { v in if v.translation.height < -10 { withAnimation(Motion.snappy) { store.toast = nil } } })
       .sensoryFeedback(.success, trigger: t.id)
     }
   }
@@ -171,7 +171,7 @@ struct TabEnter: ViewModifier {
     // Scoped animation: only the opacity/offset animate. The page's own layout (large title,
     // scroll insets) is never pulled into the spring, so the title doesn't slide around.
     content
-      .animation(.spring(duration: 0.4, bounce: 0)) {
+      .animation(Motion.tab) {
         $0.opacity(shown ? 1 : 0.35).offset(x: shown ? 0 : dir * 28)
       }
       .onChange(of: tab) { old, t in
@@ -187,9 +187,18 @@ extension View {
   func tabEnter(_ index: Int, tab: Int, dir: CGFloat) -> some View { modifier(TabEnter(index: index, tab: tab, dir: dir)) }
 }
 
-/// Theme switch: render the current screen into an image shown in a separate overlay window
-/// (outside SwiftUI, unaffected by the style flip), commit that frame, then flip the app
-/// windows' interface style underneath and open a circular hole in the overlay from the button.
+/// Theme switch, done outside SwiftUI so it can't stutter:
+/// 1. `snapshotView(afterScreenUpdates: false)` of the screen — a render-server copy of what's on
+///    screen right now (no CPU redraw, unlike drawHierarchy/UIGraphicsImageRenderer, which cost a
+///    full-screen render on the main thread before anything moved).
+/// 2. It goes into an overlay window above the app, and in the same CA transaction the app windows'
+///    interface style flips once (the store change runs with animations disabled; there's no
+///    preferredColorScheme, so SwiftUI doesn't run a second implicit cross-fade).
+/// 3. A circular hole opens in the overlay with a CAShapeLayer path animation. Path animations run
+///    in the render server at the display's refresh rate (120 Hz on ProMotion), and because the
+///    animation is committed in the same transaction as the re-rendered UI, the first revealed
+///    pixels are already the new theme. The haptic fires from animationDidStart, i.e. on the frame
+///    the circle starts moving.
 @MainActor enum ThemeFX {
   static var origin: CGPoint? = nil
   static var overlay: UIWindow? = nil
@@ -197,22 +206,35 @@ extension View {
   static func appWindows() -> [UIWindow] {
     UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).filter { $0 !== overlay }
   }
-  /// Entry point for user actions: snapshot BEFORE any SwiftUI state changes.
+  private static func commit(_ theme: String, store: Store, _ wins: [UIWindow]) {
+    var tx = Transaction(); tx.disablesAnimations = true
+    withTransaction(tx) { store.theme = theme }
+    let st = style(theme)
+    wins.forEach { if $0.overrideUserInterfaceStyle != st { $0.overrideUserInterfaceStyle = st } }
+  }
+  /// Entry point for user actions: snapshot BEFORE any state changes.
   static func set(_ theme: String, store: Store, from point: CGPoint? = nil) {
     guard store.theme != theme else { return }
     let wins = appWindows()
-    guard let win = wins.first(where: \.isKeyWindow) ?? wins.first, let scene = win.windowScene,
-          !UIAccessibility.isReduceMotionEnabled, overlay == nil else {
-      store.theme = theme; wins.forEach { $0.overrideUserInterfaceStyle = style(theme) }; return
+    let key = wins.first(where: \.isKeyWindow) ?? wins.first
+    let screenSnap: UIView? = key?.windowScene?.screen.snapshotView(afterScreenUpdates: false)
+    let snapOpt: UIView? = screenSnap ?? key?.snapshotView(afterScreenUpdates: false)
+    let haptic = UIImpactFeedbackGenerator(style: .light)
+    haptic.prepare()
+    guard let win = key, let scene = win.windowScene,
+          !UIAccessibility.isReduceMotionEnabled, overlay == nil, let snap = snapOpt else {
+      commit(theme, store: store, wins); haptic.impactOccurred(); return
     }
-    let b = win.bounds
-    let fmt = UIGraphicsImageRendererFormat(for: win.traitCollection); fmt.opaque = true
-    let img = UIGraphicsImageRenderer(bounds: b, format: fmt).image { _ in win.drawHierarchy(in: b, afterScreenUpdates: false) }
+    let b = scene.screen.bounds
     let ov = UIWindow(windowScene: scene)
-    ov.frame = win.frame; ov.windowLevel = .statusBar + 1; ov.isUserInteractionEnabled = false
+    ov.frame = b; ov.windowLevel = .statusBar + 1; ov.isUserInteractionEnabled = false
     ov.backgroundColor = .clear
-    let iv = UIImageView(image: img); iv.frame = b; ov.addSubview(iv)
-    ov.isHidden = false; overlay = ov
+    let holder = UIView(frame: b)
+    holder.isUserInteractionEnabled = false
+    snap.frame = b
+    holder.addSubview(snap)
+    ov.addSubview(holder)
+
     let c = point ?? origin ?? CGPoint(x: b.maxX - 40, y: b.minY + 70)
     let r = hypot(max(c.x, b.width - c.x), max(c.y, b.height - c.y)) + 4
     func hole(_ rad: CGFloat) -> CGPath {
@@ -220,31 +242,39 @@ extension View {
       p.append(UIBezierPath(arcCenter: c, radius: rad, startAngle: 0, endAngle: .pi * 2, clockwise: true))
       return p.cgPath
     }
-    let mask = CAShapeLayer(); mask.fillRule = .evenOdd; mask.path = hole(0.5)
-    iv.layer.mask = mask
-    // Let the overlay reach the screen first, then flip and re-render underneath it.
-    DispatchQueue.main.async {
-      var tx = Transaction(); tx.disablesAnimations = true
-      withTransaction(tx) { store.theme = theme }
-      wins.forEach { $0.overrideUserInterfaceStyle = style(theme) }
-      DispatchQueue.main.async {
-        let a = CABasicAnimation(keyPath: "path")
-        a.fromValue = hole(0.5); a.toValue = hole(r)
-        a.duration = 0.5
-        a.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)
-        CATransaction.begin()
-        CATransaction.setCompletionBlock { ov.isHidden = true; overlay = nil }
-        mask.path = hole(r)
-        mask.add(a, forKey: "reveal")
-        CATransaction.commit()
-      }
-    }
+    let mask = CAShapeLayer(); mask.fillRule = .evenOdd; mask.frame = b
+    holder.layer.mask = mask
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    mask.path = hole(r)
+    ov.isHidden = false; overlay = ov
+    commit(theme, store: store, wins)
+
+    let a = CABasicAnimation(keyPath: "path")
+    a.fromValue = hole(0.5); a.toValue = hole(r)
+    a.duration = 0.52
+    a.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0, 1)   // fast out, long settle
+    a.fillMode = .backwards
+    let d = RevealDelegate()
+    d.started = { haptic.impactOccurred() }
+    d.finished = { ov.isHidden = true; ov.subviews.forEach { $0.removeFromSuperview() }; if overlay === ov { overlay = nil } }
+    a.delegate = d
+    mask.add(a, forKey: "reveal")
+    CATransaction.commit()
   }
-  /// Keeps windows in sync with the stored theme (launch, Settings picker).
+  /// Keeps windows in sync with the stored theme (launch, external changes). No-op when equal.
   static func apply(_ theme: String) {
     let st = style(theme)
     appWindows().forEach { if $0.overrideUserInterfaceStyle != st { $0.overrideUserInterfaceStyle = st } }
   }
+}
+
+final class RevealDelegate: NSObject, CAAnimationDelegate {
+  var started: (() -> Void)?
+  var finished: (() -> Void)?
+  func animationDidStart(_ anim: CAAnimation) { started?(); started = nil }
+  func animationDidStop(_ anim: CAAnimation, finished flag: Bool) { finished?(); finished = nil }
 }
 
 /// Records where a control sits on screen, so the theme reveal starts from it.
