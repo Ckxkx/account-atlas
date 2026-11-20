@@ -1,10 +1,12 @@
 name: Build Android APK
 
+# Push trigger paused: builds run on the public runner Ckxkx/atlas-build (see /workspace/work/atlas-build-trigger.sh).
+# To restore, re-add under on:
+#   push:
+#     branches: [main]
+#     paths: <see git history>
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['android/**', 'icons/**', '.github/workflows/android.yml']
 
 permissions:
   contents: write

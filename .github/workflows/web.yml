@@ -3,11 +3,13 @@ name: Deploy web app to the public repo (gh-pages)
 # The source lives in this private repo. The web app is served by GitHub Pages from the
 # PUBLIC repo Ckxkx/account-atlas, branch gh-pages, at https://huichen.dev/account-atlas/
 # (huichen.dev is the user site's custom domain; the project path follows the repo name).
+# Push trigger paused: builds run on the public runner Ckxkx/atlas-build (see /workspace/work/atlas-build-trigger.sh).
+# To restore, re-add under on:
+#   push:
+#     branches: [main]
+#     paths: <see git history>
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['index.html', 'app.js', 'styles.css', 'sw.js', 'manifest.webmanifest', 'logo.svg', 'icon.png', 'icon-512.png', 'icons/**', '.github/workflows/web.yml']
 
 permissions:
   contents: read
