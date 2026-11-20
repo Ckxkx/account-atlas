@@ -22,7 +22,7 @@ jobs:
           mkdir -p "$APP/www" build
           xcrun -sdk iphoneos swiftc -parse-as-library -O -swift-version 5 -target arm64-apple-ios17.0 -sdk "$SDK" native/*.swift -o "$APP/Atlas" 2>&1 | tee build/swiftc.log
           test -f "$APP/Atlas"
-          rmdir "$APP/www"; cp -R icons "$APP/icons"
+          rmdir "$APP/www"; cp -R icons "$APP/icons"; cp -R native/lproj/*.lproj "$APP/"; for f in "$APP"/*.lproj/InfoPlist.strings; do plutil -convert binary1 "$f"; done
           VER=$(grep -oE 'app.js\?v=[0-9]+' index.html | grep -oE '[0-9]+$')
           sed -e "s/__VERSION__/2.0/" -e "s/__BUILD__/$VER/" native/Info.plist > "$APP/Info.plist"
           xcrun actool ios/Assets.xcassets --compile "$APP" --platform iphoneos --minimum-deployment-target 17.0 \
@@ -68,7 +68,7 @@ jobs:
           APP=sim/Atlas.app
           mkdir -p "$APP" shots
           xcrun -sdk iphonesimulator swiftc -parse-as-library -Onone -swift-version 5 -target arm64-apple-ios17.0-simulator -sdk "$SDK" native/*.swift -o "$APP/Atlas"
-          cp -R icons "$APP/icons"
+          cp -R icons "$APP/icons"; cp -R native/lproj/*.lproj "$APP/"
           sed -e "s/__VERSION__/2.0/" -e "s/__BUILD__/1/" native/Info.plist > "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleSupportedPlatforms" "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c "Add :CFBundleSupportedPlatforms array" -c "Add :CFBundleSupportedPlatforms:0 string iPhoneSimulator" "$APP/Info.plist"
