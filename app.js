@@ -1115,7 +1115,7 @@
       const paths = [];
       for (const p of pos) for (const a of accountsOf(p.i.id)) {
         const y1 = p.y, y2 = ay[a.id], mx = (L + R) / 2;
-        paths.push(`<path pathLength="1" data-i="${p.i.id}" data-a="${a.id}" style="--c:${p.i.color}" d="M${L} ${y1.toFixed(1)}C${mx} ${y1.toFixed(1)} ${mx} ${y2.toFixed(1)} ${R - 6} ${y2.toFixed(1)}"/>`);
+        paths.push(`<path data-i="${p.i.id}" data-a="${a.id}" style="--c:${p.i.color}" d="M${L} ${y1.toFixed(1)}C${mx} ${y1.toFixed(1)} ${mx} ${y2.toFixed(1)} ${R - 6} ${y2.toFixed(1)}"/>`);
       }
       box.style.height = H + 'px';
       box.innerHTML = `<svg class="threads" viewBox="0 0 ${W} ${H}" style="width:${W}px;height:${H}px" aria-hidden="true">${paths.join('')}</svg>
@@ -1125,10 +1125,13 @@
       built = dataVer + ':' + W;
       apply(); if (running) draw();
     }
-    // threads draw in with pathLength=1, so no getTotalLength() layout read per path
+    // lengths are measured once per path (geometry only) and cached for revisits
     function draw() {
       if (drawn) return; drawn = true;
-      $$('#mapBox .threads path').forEach((p, k) => p.animate([{ strokeDasharray: 1, strokeDashoffset: 1 }, { strokeDasharray: 1, strokeDashoffset: 0 }], { duration: 700, delay: 60 + Math.min(k, 20) * 18, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }));
+      // wait two frames so the tab is actually visible (content-visibility) before the threads start drawing
+      const ps = $$('#mapBox .threads path');
+      ps.forEach(p => { const len = p._len || (p._len = Math.ceil(p.getTotalLength()) + 2); p.style.strokeDasharray = `${len}px ${len}px`; p.style.strokeDashoffset = `${len}px`; });   // hidden until the draw starts, no flash
+      requestAnimationFrame(() => requestAnimationFrame(() => { ps.forEach((p, k) => { const len = p._len; p.style.strokeDasharray = p.style.strokeDashoffset = ''; if (!running) return; p.animate([{ strokeDasharray: `${len}px ${len}px`, strokeDashoffset: `${len}px` }, { strokeDasharray: `${len}px ${len}px`, strokeDashoffset: '0px' }], { duration: 700, delay: 60 + Math.min(k, 20) * 18, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }); }); }));
     }
     function apply() {
       const box = $('#mapBox'); if (!box) return;
