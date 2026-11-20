@@ -1,6 +1,7 @@
 <p align="center"><img src="icon-512.png" width="112" alt="账号星图"></p>
 <h1 align="center">账号星图 · Atlas</h1>
 <p align="center">这个邮箱注册过什么？那个手机号绑了哪些 App？一眼看清。</p>
+<p align="center">网页 · iOS · 安卓 三端可用，iOS 用 SwiftUI、安卓用 Jetpack Compose 原生编写，数据加密同步互通</p>
 <p align="center">
   <a href="https://huichen.dev/account-atlas/">在线使用</a> ·
   <a href="https://github.com/Ckxkx/account-atlas/releases/latest">下载 App（安卓 APK · iOS IPA）</a>
@@ -24,7 +25,7 @@
 ## 下载
 最新版在 [Releases](https://github.com/Ckxkx/account-atlas/releases/latest)，同一个版本里有两个文件：
 - **Atlas.apk**：安卓（Android 8.0+）原生版，下载后直接安装；以后的版本签名相同，覆盖安装，数据保留
-- **Atlas.ipa**：iOS 原生版（未签名），用爱思助手 / Sideloadly 等自签后安装
+- **Atlas.ipa**：iOS 原生版（未签名），用 SideStore / 爱思助手 / Sideloadly 等自签后安装
 
 ## 不想自签？用网页版装到桌面（PWA）
 网页版本身就能“安装”成 App：有桌面图标，全屏打开没有地址栏，断网也能用。
