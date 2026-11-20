@@ -3,6 +3,15 @@
   'use strict';
 
   const KEY = 'atlas.v1';
+  // reduced motion: one cached query, and every element.animate() collapses to its end state
+  // (the CSS @media rule can't reach WAAPI animations). onfinish/finished still fire.
+  const RM = matchMedia('(prefers-reduced-motion: reduce)');
+  const calm = () => RM.matches;
+  const _animate = Element.prototype.animate;
+  Element.prototype.animate = function (k, o) {
+    if (RM.matches && !(o && o.timeline)) o = typeof o === 'number' ? 0 : { ...o, duration: 0, delay: 0, endDelay: 0 };
+    return _animate.call(this, k, o);
+  };
   // card skins: the key colour (used for threads, tags, glow) and the gradient the card is painted with
   const SKINS = {
     '#0a84ff': ['深海', '#56c6ff 0%, #0a84ff 42%, #3b2fd0 100%'],
@@ -185,11 +194,11 @@
   const idIcon = (i, size = '') => `<span class="icon ${size}" style="--c:${i.color}">${ICON[i.type]}</span>`;
   function favIcon(a, size = '') {
     const loc = localIcon(a);
-    if (loc) return `<span class="icon fav full ${size}"><img alt="" loading="lazy" src="${loc}"></span>`;
+    if (loc) return `<span class="icon fav full ${size}"><img alt="" loading="lazy" decoding="async" width="64" height="64" src="${loc}"></span>`;
     const src = favSources(a.domain), letter = esc((a.name || '?').trim().slice(0, 1).toUpperCase());
     const b = brand(a), style = `style="--lc1:color-mix(in srgb,${b} 78%,#fff);--lc2:${b}"`;
     if (!src.length) return `<span class="icon fav letter ${size}" ${style}>${letter}</span>`;
-    return `<span class="icon fav ${size}" ${style}><img alt="" loading="lazy" src="${src[0]}" data-rest='${JSON.stringify(src.slice(1))}' data-letter="${letter}" onerror="AtlasFav(this)"></span>`;
+    return `<span class="icon fav ${size}" ${style}><img alt="" loading="lazy" decoding="async" width="64" height="64" src="${src[0]}" data-rest='${JSON.stringify(src.slice(1))}' data-letter="${letter}" onerror="AtlasFav(this)"></span>`;
   }
   window.AtlasFav = img => {
     const rest = JSON.parse(img.dataset.rest || '[]');
@@ -208,7 +217,7 @@
       const a = list[k % Math.max(1, list.length)];
       if (!a) { tiles.push('<b style="--pc:transparent"></b>'); continue; }
       const src = localIcon(a) || favSources(a.domain)[0];
-      tiles.push(`<b style="--pc:${brand(a)};position:relative">${src && k < list.length ? `<img alt="" src="${src}" onerror="this.remove()" style="position:absolute;inset:18%;width:64%;height:64%;object-fit:contain">` : ''}</b>`);
+      tiles.push(`<b style="--pc:${brand(a)};position:relative">${src && k < list.length ? `<img alt="" decoding="async" width="64" height="64" src="${src}" onerror="this.remove()" style="position:absolute;inset:18%;width:64%;height:64%;object-fit:contain">` : ''}</b>`);
     }
     return `<div class="${cls}" aria-hidden="true">${tiles.join('')}</div>`;
   }
@@ -268,7 +277,10 @@
     fixStack(w);
     $('#dots').innerHTML = [...d, 0].map((_, k) => `<i class="${k === ui.active ? 'on' : ''}"></i>`).join('');
     ui.active = Math.min(ui.active, d.length);
+    if (geo) geo.ok = false;
+    if (ui.tab === 'home') measureCards();
     requestAnimationFrame(() => {
+      if (ui.tab !== 'home') return;
       const cards = $$('.wcard', w), c = cards[ui.active];
       if (c) w.scrollLeft = cardX(w, c);
       coverflow();
@@ -295,33 +307,76 @@
   }
   const cardX = (w, c) => c.offsetLeft - w.offsetLeft - (w.clientWidth - c.offsetWidth) / 2;
   function centerCard(w, c) { w.scrollTo({ left: cardX(w, c), behavior: 'smooth' }); }
-  let rafCF = 0;
+  // Coverflow runs once per frame while the wallet scrolls. Card geometry is measured once per
+  // render/resize (geo), so a frame only reads scrollLeft and then writes transforms: no layout
+  // thrash, and nothing is written to a card whose pose didn't change.
+  let rafCF = 0, geo = null, moving = false, settleT = 0, gridStale = false, cfAnims = [];
+  // Where the browser has scroll-driven animations (Chrome/Edge/Android 115+, Safari 26+), each card's pose is a
+  // WAAPI animation on a ScrollTimeline of the wallet: rotation, scale, opacity and sheen are then interpolated by
+  // the compositor at the display's refresh rate and no JS runs per frame. Elsewhere coverflow() writes the same
+  // poses from a rAF. The pose is piecewise linear in scrollLeft, so keyframes at d = +1.6, 0, -1.6 are exact.
+  const SCROLL_TL = typeof ScrollTimeline === 'function';
+  const pose = d => {
+    const ad = Math.min(1.6, Math.abs(d));
+    return { t: `perspective(1100px) rotateY(${(Math.max(-1.6, Math.min(1.6, d)) * -16).toFixed(3)}deg) scale(${(1 - ad * .12).toFixed(4)})`, o: (1 - ad * .35).toFixed(4), s: `translateX(${(-60 + d * -120).toFixed(2)}%)` };
+  };
+  function measureCards() {
+    const w = $('#wallet');
+    if (ui.tab !== 'home') return (geo = null);
+    const cards = $$('.wcard', w), base = w.offsetLeft + w.clientWidth / 2, max = w.scrollWidth - w.clientWidth;
+    const next = cards.map(c => ({ c, sheen: c.querySelector('.sheen'), mid: c.offsetLeft + c.offsetWidth / 2 - base, wd: c.offsetWidth || 1, t: '', o: '', s: '' }));
+    const same = geo && geo.max === max && geo.length === next.length && geo.every((g, k) => g.c === next[k].c && g.mid === next[k].mid && g.wd === next[k].wd);
+    if (same && (geo.tl || !SCROLL_TL)) return;
+    geo = next; geo.max = max; geo.tl = false;
+    cfAnims.forEach(a => a.cancel()); cfAnims = [];
+    if (!SCROLL_TL || max <= 0) return;
+    const tl = new ScrollTimeline({ source: w, axis: 'x' });
+    const opts = { timeline: tl, fill: 'both', easing: 'linear' };
+    for (const g of geo) {
+      const xs = [0, max, ...[1.6, 0, -1.6].map(d => g.mid - d * g.wd).filter(x => x > 0 && x < max)].sort((a, b) => a - b);
+      const ps = xs.map(x => [x / max, pose((g.mid - x) / g.wd)]);
+      g.c.style.transform = ''; g.c.style.opacity = '';
+      cfAnims.push(g.c.animate(ps.map(([offset, p]) => ({ offset, transform: p.t, opacity: p.o })), opts));
+      if (g.sheen) { g.sheen.style.transform = ''; cfAnims.push(g.sheen.animate([ps[0], ps[ps.length - 1]].map(([offset, p]) => ({ offset, transform: p.s })), opts)); }
+    }
+    geo.tl = true;
+  }
   function coverflow() {
     rafCF = 0;
-    const w = $('#wallet'); if (!w.offsetParent) return;
-    const mid = w.scrollLeft + w.offsetLeft + w.clientWidth / 2;
+    if (ui.tab !== 'home') return;
+    if (!geo || !geo.ok) { measureCards(); if (!geo) return; geo.ok = true; }
+    const x = $('#wallet').scrollLeft;
     let best = 0, bestD = 1e9;
-    $$('.wcard', w).forEach((c, k) => {
-      const d = (c.offsetLeft + c.offsetWidth / 2 - mid) / c.offsetWidth;
-      const ad = Math.min(1.6, Math.abs(d));
-      c.style.transform = `perspective(1100px) rotateY(${Math.max(-1.6, Math.min(1.6, d)) * -16}deg) scale(${1 - ad * .12})`;
-      c.style.opacity = 1 - ad * .35;
-      c.style.setProperty('--sx', `${-60 + d * -120}%`);
+    for (let k = 0; k < geo.length; k++) {
+      const g = geo[k], d = (g.mid - x) / g.wd;
+      if (!geo.tl) {   // fallback: same pose, written only when it changed
+        const p = pose(d);
+        if (p.t !== g.t) g.c.style.transform = g.t = p.t;
+        if (p.o !== g.o) g.c.style.opacity = g.o = p.o;
+        if (g.sheen && p.s !== g.s) g.sheen.style.transform = g.s = p.s;
+      }
       if (Math.abs(d) < bestD) { bestD = Math.abs(d); best = k; }
-    });
-    if (best !== ui.active) { ui.active = best; onActiveChange(); }
+    }
+    if (best !== ui.active) { ui.active = best; onActiveChange(moving); }
   }
-  function onActiveChange() {
+  function onActiveChange(deferGrid = false) {
     $$('#dots i').forEach((d, k) => d.classList.toggle('on', k === ui.active));
     const i = cur();
-    document.documentElement.style.setProperty('--accent', i ? i.color : '#3a3a3c');
     animateGlow(i ? i.color : '#3a3a3c');
-    renderGrid();
+    // rebuilding the icon grid mid-swipe costs a long frame; do it once the wallet comes to rest
+    if (deferGrid) gridStale = true; else { gridStale = false; renderGrid(); }
+  }
+  function walletSettled() {
+    clearTimeout(settleT); if (!moving) return;
+    moving = false; $('#wallet').classList.remove('moving');
+    if (gridStale) { gridStale = false; renderGrid(); }
   }
   let glowColor = null;
   function animateGlow(col) {
     const g = $('#glow');
     if (glowColor === col) return; glowColor = col;
+    // --accent lives on the glow (its only user): setting it on <html> restyled the whole page
+    g.style.setProperty('--accent', col);
     g.animate([{ opacity: .35 }, { opacity: .75 }], { duration: 600, easing: 'ease-out' });
   }
 
@@ -332,18 +387,20 @@
     $('#gridSub').textContent = i ? `用它注册或绑定的 ${accountsOf(i.id).length} 个网站与 App` : '';
     const list = i ? accountsOf(i.id) : state.accounts.slice().sort((a, b) => zh(a.name, b.name));
     // FLIP: remember where each icon was
-    const before = {};
-    $$('.app[data-account]', g).forEach(el => before[el.dataset.account] = el.getBoundingClientRect());
+    const before = {}, live = ui.tab === 'home';
+    if (live) $$('.app[data-account]', g).forEach(el => before[el.dataset.account] = el.getBoundingClientRect());
     const more = list.length > 11 ? list.length - 11 : 0;
     const shown = more ? list.slice(0, 11) : list;
     g.innerHTML = shown.map(a => `<button class="app" data-account="${a.id}">${favIcon(a)}<span>${esc(a.handle ? hd(a.handle) : a.name)}</span></button>`).join('') +
       (more ? `<button class="app add" data-identity="${i ? i.id : ''}"><span class="icon more">+${more}</span><span>全部</span></button>` : i ? `<button class="app add" data-new="account" data-preset="${i.id}"><span class="icon">${ICON.plus}</span><span>添加</span></button>` : '') +
       (!list.length && !i ? '<div class="grid-empty">还没有网站，从右上角的 + 开始。</div>' : '');
+    if (!live) return;
     let k = 0;
-    $$('.app', g).forEach(el => {
+    const els = $$('.app', g), after = els.map(el => before[el.dataset.account] ? el.getBoundingClientRect() : null);   // all reads first
+    els.forEach((el, n) => {
       const r0 = before[el.dataset.account];
       if (r0) {
-        const r1 = el.getBoundingClientRect(), dx = r0.left - r1.left, dy = r0.top - r1.top;
+        const r1 = after[n], dx = r0.left - r1.left, dy = r0.top - r1.top;
         if (dx || dy) el.animate([{ transform: `translate(${dx}px,${dy}px)` }, { transform: 'none' }], { duration: 520, easing: 'cubic-bezier(.32,.72,0,1)' });
       } else {
         el.animate([{ opacity: 0, transform: 'scale(.4)' }, { opacity: 1, transform: 'none' }], { duration: 480, delay: Math.min(k++, 12) * 22, easing: 'cubic-bezier(.34,1.45,.64,1)', fill: 'backwards' });
@@ -391,14 +448,15 @@
     $$('#siteList .reel').forEach((el, k) => el.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 420, delay: Math.min(k, 10) * 25, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }));
   }
 
+  let dataVer = 0;   // bumps on every full render; the map rebuilds only when this (or its width) changed
   function render() {
+    dataVer++;
     renderSummary(); renderWallet(); renderGrid(); renderTimeline(); renderSites();
     $('#menu [data-act="privacy"] span').textContent = ui.privacy ? '显示完整号码' : '隐藏号码';
-    if (ui.tab === 'graph') Graph.rebuild();
+    if (ui.tab === 'graph') Graph.rebuild(); else Graph.prebuild();
   }
 
   // ---------- appearance ----------
-  const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   function setTheme(t, from) {
     const root = document.documentElement;
     const apply = () => { if (t === 'light') root.dataset.theme = 'light'; else delete root.dataset.theme; localStorage.setItem('atlas.theme', t); paintTheme(); };
@@ -421,8 +479,9 @@
   };
   function tapFx(b) {
     if (calm()) return;
-    b.classList.remove('ping'); void b.offsetWidth; b.classList.add('ping');
-    clearTimeout(b._ping); b._ping = setTimeout(() => b.classList.remove('ping'), 650);
+    // same ring as before, started with WAAPI on ::after instead of class + forced reflow (void offsetWidth)
+    const rc = document.documentElement.dataset.theme === 'light' ? '0,122,255' : '255,255,255', ra = rc[0] === '0' ? .3 : .45;
+    b.animate([{ opacity: .9, boxShadow: `0 0 0 0 rgba(${rc},${ra})` }, { opacity: 0, boxShadow: `0 0 0 11px rgba(${rc},0)` }], { duration: 600, easing: 'cubic-bezier(.2,.8,.3,1)', pseudoElement: '::after' });
     const m = MOTION[b.id], ease = 'cubic-bezier(.34,1.45,.64,1)';
     if (m) (b.id === 'themeBtn' ? b : b.querySelector('svg')).animate(m[0], { duration: m[1], easing: ease });
     if (b.id === 'menuBtn') b.querySelectorAll('circle').forEach((c, k) => c.animate([{ transform: 'none' }, { transform: 'translateY(-3.5px)', offset: .4 }, { transform: 'none' }], { duration: 420, delay: k * 60, easing: ease }));
@@ -448,8 +507,9 @@
     $$('.view').forEach(v => { const on = v.dataset.view === tab; v.classList.toggle('active', on); v.classList.toggle('from-r', on && idx > from); v.classList.toggle('from-l', on && idx < from); });
     $('#topTitle').textContent = { home: '账号', sites: '网站与 App', graph: '关系图' }[tab];
     scrollTo(0, 0);
-    tab === 'graph' ? Graph.start() : Graph.stop();
-    if (tab === 'home') requestAnimationFrame(coverflow);
+    // first paint of the tab change goes out before the map is (re)built, so the two never share a frame
+    if (tab === 'graph') requestAnimationFrame(() => { if (ui.tab === 'graph') Graph.start(); }); else Graph.stop();
+    if (tab === 'home') { if (geo) geo.ok = false; if (!rafCF) rafCF = requestAnimationFrame(coverflow); if (gridStale) { gridStale = false; renderGrid(); } }
   }
 
   // ---------- sheet ----------
@@ -499,12 +559,12 @@
       if (!dy && (raw < 0 || Math.abs(e.touches[0].clientX - x0) > Math.abs(raw))) { y0 = null; sheet.classList.remove('dragging'); return; }   // scrolling up: let the list scroll
       e.preventDefault();
       dy = Math.max(0, raw);
-      sheet.style.transform = `translateY(${dy < 0 ? 0 : dy}px)`;
+      if (!sheet._raf) sheet._raf = requestAnimationFrame(() => { sheet._raf = 0; if (y0 !== null) sheet.style.transform = `translateY(${dy}px)`; });
     }, { passive: false });
     $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: false });
     sheet.addEventListener('touchend', () => {
       if (y0 === null) return;
-      sheet.classList.remove('dragging'); y0 = null;
+      sheet.classList.remove('dragging'); y0 = null; cancelAnimationFrame(sheet._raf); sheet._raf = 0;
       if (dy > 110) closeSheet(); else sheet.style.transform = '';
     });
   })();
@@ -709,11 +769,22 @@
     const sub = (k, h) => handles[k] ? `<small class="hd-on">@${esc(handles[k])}</small>` : h ? `<small>已记 ${h} 个</small>` : '';
     const paintSub = (tile, k) => { const html = sub(k, have(ALL[k][0])); tile.querySelector('small')?.remove(); if (html) tile.querySelector('span:not(.icon)').insertAdjacentHTML('afterend', html); };
     // tapping a tile opens a small drawer under its row for the username
+    // the drawer opens/closes without animating height: it is revealed with clip-path + opacity and the
+    // rows under it slide by its height with transforms (FLIP), so no frame re-lays-out the grid
+    const rowsBelow = x => {
+      const grid = x.parentElement, cs = getComputedStyle(grid), cols = cs.gridTemplateColumns.split(' ').length;
+      const shift = x.offsetHeight + parseFloat(getComputedStyle(x).marginTop) + parseFloat(cs.rowGap || 0);
+      const out = []; for (let t = x.nextElementSibling; t && out.length < cols * 8; t = t.nextElementSibling) out.push(t);   // ~the rows on screen
+      return { shift, out };
+    };
     const shut = (anim = true) => {
       const x = $('#pkExp'); if (!x) return; x.removeAttribute('id');
       $$('#pkGrid .pk.open').forEach(t => t.classList.remove('open'));
       if (!anim) return x.remove();
-      x.animate([{ height: x.offsetHeight + 'px', opacity: 1 }, { height: '0px', opacity: 0, marginTop: '-18px' }], { duration: 260, easing: 'cubic-bezier(.4,0,.2,1)' }).onfinish = () => x.remove();
+      const { shift, out } = rowsBelow(x), ease = 'cubic-bezier(.4,0,.2,1)';
+      const slides = out.map(t => t.animate([{ transform: 'none' }, { transform: `translateY(${-shift}px)` }], { duration: 260, easing: ease, fill: 'forwards' }));
+      x.animate([{ opacity: 1, clipPath: 'inset(0 0 0 0)' }, { opacity: 0, clipPath: 'inset(0 0 100% 0)' }], { duration: 260, easing: ease, fill: 'forwards' })
+        .onfinish = () => { x.remove(); slides.forEach(a => a.cancel()); };
     };
     const expand = (tile, anim = true) => {
       const grid = $('#pkGrid'), k = +tile.dataset.pk, p = ALL[k];
@@ -733,8 +804,9 @@
       inp.onkeydown = e => { if (e.key === 'Enter') done(); };
       $('#pkHdOk').onclick = e => { e.stopPropagation(); done(); };
       if (anim) {
-        const h = x.offsetHeight;
-        x.animate([{ height: '0px', opacity: 0, marginTop: '-18px' }, { height: h + 'px', opacity: 1 }], { duration: 380, easing: 'cubic-bezier(.2,.9,.25,1)' });
+        const { shift, out } = rowsBelow(x), ease = 'cubic-bezier(.2,.9,.25,1)';
+        out.forEach(t => t.animate([{ transform: `translateY(${-shift}px)` }, { transform: 'none' }], { duration: 380, easing: ease }));
+        x.animate([{ opacity: 0, clipPath: 'inset(0 0 100% 0)' }, { opacity: 1, clipPath: 'inset(0 0 0 0)' }], { duration: 380, easing: ease });
         x.firstChild.animate([{ transform: 'translateY(-10px) scale(.97)' }, { transform: 'none' }], { duration: 460, easing: 'cubic-bezier(.34,1.3,.64,1)' });
         setTimeout(() => { const body = $('.sheet-body', sheet); if (!body || !x.isConnected) return; const r = x.getBoundingClientRect(), br = body.getBoundingClientRect(); if (r.bottom > br.bottom - 8) body.scrollBy({ top: r.bottom - br.bottom + 24, behavior: 'smooth' }); }, 200);
       }
@@ -990,14 +1062,28 @@
       if (c) centerCard(w, c);
     }
   });
-  $('#wallet').addEventListener('scroll', () => { if (!rafCF) rafCF = requestAnimationFrame(coverflow); }, { passive: true });
+  {
+    const w = $('#wallet');
+    // will-change only while the cards are moving; scrollend (or 140 ms of quiet) ends it
+    w.addEventListener('scroll', () => {
+      if (!moving) { moving = true; w.classList.add('moving'); }
+      clearTimeout(settleT); settleT = setTimeout(walletSettled, 140);
+      if (!rafCF) rafCF = requestAnimationFrame(coverflow);
+    }, { passive: true });
+    w.addEventListener('scrollend', walletSettled, { passive: true });
+    if (window.ResizeObserver) new ResizeObserver(() => { if (geo) geo.ok = false; if (!rafCF) rafCF = requestAnimationFrame(coverflow); }).observe(w);
+  }
   const top = $('#top');
-  addEventListener('scroll', () => top.classList.toggle('scrolled', scrollY > 30), { passive: true });
-  addEventListener('resize', () => { Graph.resize(); coverflow(); });
+  let topOn = false, rafTop = 0;
+  addEventListener('scroll', () => {
+    if (rafTop) return;
+    rafTop = requestAnimationFrame(() => { rafTop = 0; const on = scrollY > 30; if (on !== topOn) top.classList.toggle('scrolled', topOn = on); });
+  }, { passive: true });
+  addEventListener('resize', () => { Graph.resize(); if (geo) geo.ok = false; if (!rafCF) rafCF = requestAnimationFrame(coverflow); });
 
   // ---------- relationship map: identities on the left, apps on the right, threads between ----------
   const Graph = (() => {
-    let sel = null, running = false, drawn = false;
+    let sel = null, running = false, drawn = false, built = '', pre = 0;
     const ROW = 54;
     function layout() {
       const ids = [...state.identities].sort((p, q) => (p.type === 'phone') - (q.type === 'phone'));
@@ -1029,15 +1115,20 @@
       const paths = [];
       for (const p of pos) for (const a of accountsOf(p.i.id)) {
         const y1 = p.y, y2 = ay[a.id], mx = (L + R) / 2;
-        paths.push(`<path data-i="${p.i.id}" data-a="${a.id}" style="--c:${p.i.color}" d="M${L} ${y1.toFixed(1)}C${mx} ${y1.toFixed(1)} ${mx} ${y2.toFixed(1)} ${R - 6} ${y2.toFixed(1)}"/>`);
+        paths.push(`<path pathLength="1" data-i="${p.i.id}" data-a="${a.id}" style="--c:${p.i.color}" d="M${L} ${y1.toFixed(1)}C${mx} ${y1.toFixed(1)} ${mx} ${y2.toFixed(1)} ${R - 6} ${y2.toFixed(1)}"/>`);
       }
       box.style.height = H + 'px';
       box.innerHTML = `<svg class="threads" viewBox="0 0 ${W} ${H}" style="width:${W}px;height:${H}px" aria-hidden="true">${paths.join('')}</svg>
         ${pos.map((p, k) => (k === 0 || k === brk) ? `<span class="mgroup" style="top:${p.y - 31 - 24}px;width:${L}px">${p.i.type === 'phone' ? ICON.phone + '手机号' : ICON.email + '邮箱'}</span>` : '').join('')}
         ${pos.map(p => { const c = accountsOf(p.i.id).length; return `<button class="mcard" data-map-identity="${p.i.id}" style="top:${p.y - 31}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${ICON[p.i.type]}<b>${c}</b></span><span class="mv">${esc(p.i.label || display(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
         ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}${handle(a)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
-      apply();
-      if (!drawn) { drawn = true; $$('.threads path', box).forEach((p, k) => { const len = p.getTotalLength(); p.animate([{ strokeDasharray: len, strokeDashoffset: len }, { strokeDasharray: len, strokeDashoffset: 0 }], { duration: 700, delay: 60 + Math.min(k, 20) * 18, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }); }); }
+      built = dataVer + ':' + W;
+      apply(); if (running) draw();
+    }
+    // threads draw in with pathLength=1, so no getTotalLength() layout read per path
+    function draw() {
+      if (drawn) return; drawn = true;
+      $$('#mapBox .threads path').forEach((p, k) => p.animate([{ strokeDasharray: 1, strokeDashoffset: 1 }, { strokeDasharray: 1, strokeDashoffset: 0 }], { duration: 700, delay: 60 + Math.min(k, 20) * 18, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }));
     }
     function apply() {
       const box = $('#mapBox'); if (!box) return;
@@ -1055,8 +1146,18 @@
     });
     let rz;
     return {
-      start() { running = true; drawn = false; sel = null; render(); },
+      // coming back to an unchanged map reuses its DOM and only replays the thread draw-in
+      start() {
+        running = true; drawn = false; sel = null;
+        const box = $('#mapBox');
+        if (box && built && built === dataVer + ':' + (box.clientWidth || 350)) { apply(); draw(); } else render();
+      },
       stop() { running = false; },
+      // build the map while the browser is idle and the tab is hidden, so the first visit only plays the draw-in
+      prebuild() {
+        clearTimeout(pre); const idle = window.requestIdleCallback || (f => setTimeout(f, 300));
+        pre = setTimeout(() => idle(() => { const box = $('#mapBox'); if (!running && box && built !== dataVer + ':' + (box.clientWidth || 350)) render(); }, { timeout: 2000 }), 400);
+      },
       rebuild() { if (running) render(); },
       resize() { if (running) { clearTimeout(rz); rz = setTimeout(render, 120); } },
     };
@@ -1282,9 +1383,9 @@
 
   paintTheme(); render(); Sync.init(); Sync.listeners.forEach(f => f());
   const first = cur();
-  document.documentElement.style.setProperty('--accent', first ? first.color : '#3a3a3c');
+  $('#glow').style.setProperty('--accent', first ? first.color : '#3a3a3c'); glowColor = first ? first.color : '#3a3a3c';
   // one orchestrated entrance: the cards deal in from the right
   const W = $('#wallet'); W.style.scrollSnapType = 'none';
-  $$('#wallet .wcard').forEach((c, k) => c.animate([{ translate: '60px 0', opacity: 0 }, { translate: '0 0', opacity: 1 }], { duration: 800, delay: 80 + k * 70, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }));
-  setTimeout(() => { W.style.scrollSnapType = ''; const c = $$('.wcard', W)[ui.active]; if (c) W.scrollLeft = cardX(W, c); coverflow(); }, 80 + $$('.wcard', W).length * 70 + 820);
+  const deal = $$('#wallet .wcard').map((c, k) => c.animate([{ translate: '60px 0', opacity: 0 }, { translate: '0 0', opacity: 1 }], { duration: 800, delay: 80 + k * 70, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'backwards' }).finished);
+  Promise.allSettled(deal).then(() => { W.style.scrollSnapType = ''; const c = $$('.wcard', W)[ui.active]; if (c && ui.tab === 'home') W.scrollLeft = cardX(W, c); if (geo) geo.ok = false; coverflow(); });
 })();
