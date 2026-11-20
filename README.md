@@ -48,7 +48,7 @@
 | | 网页版 | iOS 原生版 | 安卓原生版 |
 |---|---|---|---|
 | 技术 | 纯 HTML/CSS/JS，零依赖 | SwiftUI，iOS 17+ | Kotlin + Jetpack Compose，Android 8.0+ |
-| 安装 | 打开网址，Safari「添加到主屏幕」 | 从 Releases 下载 IPA，用爱思助手 / Sideloadly 等自签安装 | 从 Releases 下载 APK 直接安装 |
+| 安装 | 打开网址，Safari「添加到主屏幕」 | 从 Releases 下载 IPA，用SideStore / 爱思助手 / Sideloadly 等自签安装 | 从 Releases 下载 APK 直接安装 |
 | 代码 | 根目录 `index.html` `app.js` `styles.css` | `native/` | `android/` |
 
 三个版本的数据格式相同，可以通过同步或 JSON 互通。
@@ -57,6 +57,11 @@
 - 网页版：`python3 -m http.server 8080`，打开 `http://localhost:8080`
 - 安卓版：`cd android && ./gradlew assembleRelease`（JDK 17 + Android SDK）；推送 `android/` 的改动后，`.github/workflows/android.yml` 会构建签名 APK 并发布到 Releases。启动图标只有一个源文件 `android/icon-src/icon-1024.png`，换图后重新构建即可
 - iOS 版：推送 `native/` 的改动后，GitHub Actions（`.github/workflows/ios.yml`，macOS runner）会用 `swiftc` 编译并发布未签名 IPA 到 Releases
+
+## 请我吃包花生米
+觉得好用的话，可以用微信扫码赞赏，随意就好。
+
+<p align="center"><img src="docs/wechat-reward.jpg" width="240" alt="微信赞赏码"></p>
 
 ## 许可
 [MIT](LICENSE)，随便用，欢迎 PR 和 Issue。
