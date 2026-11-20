@@ -86,8 +86,30 @@ import kotlin.math.hypot
 import kotlin.math.max
 
 class MainActivity : ComponentActivity() {
+
+  override fun onResume() {
+    super.onResume()
+    requestHighRefreshRate()
+  }
+
+  /** Ask for the panel's fastest mode at the current resolution (120/144Hz).
+   *  Many ROMs keep apps at 60Hz unless the window requests a higher mode. */
+  @Suppress("DEPRECATION")
+  private fun requestHighRefreshRate() {
+    val display = (if (android.os.Build.VERSION.SDK_INT >= 30) display else windowManager.defaultDisplay) ?: return
+    val cur = display.mode
+    val best = display.supportedModes
+      .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
+      .maxByOrNull { it.refreshRate } ?: return
+    val lp = window.attributes
+    lp.preferredDisplayModeId = best.modeId
+    lp.preferredRefreshRate = best.refreshRate
+    window.attributes = lp
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    requestHighRefreshRate()
     Store.init(applicationContext)
     Sync.init()
     Store.onSaved = { Sync.schedule() }
