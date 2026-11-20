@@ -127,14 +127,14 @@ fun SettingsMain(go: (String) -> Unit) {
       }
       FormGroup {
         SettingRow(Icons.Outlined.VisibilityOff, "隐藏号码", trailing = {
-          Switch(Store.privacy, { Store.setPrivacy(it) }, colors = SwitchDefaults.colors(checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
-        }) { Store.setPrivacy(!Store.privacy) }
+          Switch(Store.privacy, { Store.putPrivacy(it) }, colors = SwitchDefaults.colors(checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
+        }) { Store.putPrivacy(!Store.privacy) }
         Divider()
         Box {
           SettingRow(Icons.Outlined.Contrast, "外观", trailing = { T(mapOf("dark" to "深色", "light" to "浅色", "system" to "跟随系统")[Store.theme] ?: "深色", 17f, color = pal.secondary) }) { themeMenu = true }
           DropdownMenu(themeMenu, { themeMenu = false }, Modifier.align(Alignment.TopEnd)) {
             listOf("dark" to "深色", "light" to "浅色", "system" to "跟随系统").forEach { (k, n) ->
-              DropdownMenuItem({ Text(n) }, { themeMenu = false; Store.setTheme(k) })
+              DropdownMenuItem({ Text(n) }, { themeMenu = false; Store.putTheme(k) })
             }
           }
         }

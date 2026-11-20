@@ -81,7 +81,7 @@ fun TopButtons() {
     val light = Store.theme == "light"
     RoundButton(Modifier.onGloballyPositioned { ThemeFX.origin = it.boundsInRoot().center }, onClick = {
       hap(TICK); val t = if (Store.theme == "light") "dark" else "light"
-      ThemeFX.request?.invoke(t) ?: Store.setTheme(t)
+      ThemeFX.request?.invoke(t) ?: Store.putTheme(t)
     }) {
       AnimatedContent(light, transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.6f)) togetherWith fadeOut() }, label = "sun") { l ->
         Icon(if (l) Icons.Filled.DarkMode else Icons.Filled.LightMode, "外观", Modifier.size(20.dp), tint = pal.accent)

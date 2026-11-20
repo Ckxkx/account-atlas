@@ -69,8 +69,8 @@ object Store {
   }
   fun prefs() = prefs
 
-  fun setPrivacy(v: Boolean) { privacy = v; prefs.edit().putBoolean("atlas.privacy", v).apply() }
-  fun setTheme(v: String) { theme = v; prefs.edit().putString("atlas.theme", v).apply() }
+  fun putPrivacy(v: Boolean) { privacy = v; prefs.edit().putBoolean("atlas.privacy", v).apply() }
+  fun putTheme(v: String) { theme = v; prefs.edit().putString("atlas.theme", v).apply() }
   private fun setKindPref(v: String) { kind = v; prefs.edit().putString("atlas.kind", v).apply() }
 
   fun push(r: Route) { routes = routes + Entry(nextKey++, r) }

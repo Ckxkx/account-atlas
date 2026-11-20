@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
     Sync.init()
     Store.onSaved = { Sync.schedule() }
     // launch extras used by the CI emulator screenshots
-    intent?.getStringExtra("atlasTheme")?.let { Store.setTheme(it) }
+    intent?.getStringExtra("atlasTheme")?.let { Store.putTheme(it) }
     val startTab = intent?.getIntExtra("atlasTab", 0) ?: 0
     when (intent?.getStringExtra("atlasRoute")) {
       "picker" -> Store.push(Route.Picker(Store.active?.id))
@@ -136,7 +136,7 @@ fun AtlasRoot(startTab: Int) {
   ThemeFX.request = { t ->
     if (snap == null) scope.launch {
       snap = runCatching { layer.toImageBitmap() }.getOrNull()
-      Store.setTheme(t)
+      Store.putTheme(t)
       reveal.snapTo(0f)
       reveal.animateTo(1f, tween(550, easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)))
       snap = null
