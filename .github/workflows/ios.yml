@@ -32,7 +32,7 @@ jobs:
             /usr/libexec/PlistBuddy -c "Add :${k%%:*} string ${k#*:}" "$APP/Info.plist"; done
           plutil -convert binary1 "$APP/Info.plist"
           echo -n 'APPL????' > "$APP/PkgInfo"
-          cd build && zip -qry "../Atlas-$VER.ipa" Payload && cd ..
+          cd build && zip -qX -D "../Atlas-$VER.ipa" "Payload/Atlas.app/Info.plist" && zip -qrXy "../Atlas-$VER.ipa" Payload -x "Payload/Atlas.app/Info.plist" && cd ..   # Info.plist first: sign tools that scan local headers (全能签 etc.) find it even on a partial download
           ls -la *.ipa; file "$APP/Atlas"
       - uses: actions/upload-artifact@v4
         with:
