@@ -87,11 +87,6 @@ import kotlin.math.max
 
 class MainActivity : ComponentActivity() {
 
-  override fun onResume() {
-    super.onResume()
-    requestHighRefreshRate()
-  }
-
   /** Ask for the panel's fastest mode at the current resolution (120/144Hz).
    *  Many ROMs keep apps at 60Hz unless the window requests a higher mode. */
   @Suppress("DEPRECATION")
@@ -131,7 +126,8 @@ class MainActivity : ComponentActivity() {
     enableEdgeToEdge(SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
     setContent { AtlasRoot(startTab) }
   }
-  override fun onResume() { super.onResume(); Sync.runNow() }
+  override fun onResume() { super.onResume()
+    requestHighRefreshRate(); Sync.runNow() }
 }
 
 object ThemeFX { var origin = Offset.Zero; var request: ((String) -> Unit)? = null }
