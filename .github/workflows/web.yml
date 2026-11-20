@@ -1,0 +1,39 @@
+name: Deploy web app to the public repo (gh-pages)
+
+# The source lives in this private repo. The web app is served by GitHub Pages from the
+# PUBLIC repo Ckxkx/account-atlas, branch gh-pages, at https://huichen.dev/account-atlas/
+# (huichen.dev is the user site's custom domain; the project path follows the repo name).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['index.html', 'app.js', 'styles.css', 'sw.js', 'manifest.webmanifest', 'logo.svg', 'icon.png', 'icon-512.png', 'icons/**', '.github/workflows/web.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push web files to Ckxkx/account-atlas@gh-pages
+        env:
+          TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN" || { echo "::error::PUBLIC_REPO_TOKEN secret missing"; exit 1; }
+          mkdir site
+          cp index.html app.js styles.css sw.js manifest.webmanifest logo.svg icon.png icon-512.png site/
+          cp -R icons site/icons
+          touch site/.nojekyll
+          cd site
+          git init -q -b gh-pages
+          git add -A
+          git -c user.name=Ckxkx -c user.email=138646608+Ckxkx@users.noreply.github.com commit -qm "Deploy web app"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/Ckxkx/account-atlas.git" gh-pages
+          echo "deployed $(git rev-parse --short HEAD) to Ckxkx/account-atlas@gh-pages"

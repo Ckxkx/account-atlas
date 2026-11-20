@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['ios/**', 'native/**', '.github/workflows/ios.yml']
+    paths: ['ios/**', 'native/**', 'icons/**', '.github/workflows/ios.yml']
+
+concurrency:
+  group: ios
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -43,19 +47,28 @@ jobs:
           mkdir out && cp *.ipa out/ && cd out
           git init -q -b ipa && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "IPA $(ls *.ipa)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ipa
-      - name: Publish GitHub Release
+      - name: Publish release to the public repo
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          PUB: Ckxkx/account-atlas
+          SRC_TOKEN: ${{ github.token }}
         run: |
-          F=$(ls *.ipa); B=${F#Atlas-}; B=${B%.ipa}
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo "::error::PUBLIC_REPO_TOKEN secret missing"; exit 1; }
+          F=$(ls Atlas-*.ipa); cp "$F" Atlas.ipa
+          N=$(( ${{ github.run_number }} + 100 ))   # continue the old public numbering (old repo ended at r19)
           MSG=$(git log -1 --format=%s)
-          cp "$F" Atlas.ipa
-          gh release create "v2.0-r${{ github.run_number }}" Atlas.ipa --repo "${{ github.repository }}" --target "${{ github.sha }}" \
-            --title "账号星图 2.0 · 构建 ${{ github.run_number }}" --notes "Atlas.ipa：未签名 iOS 包，用爱思助手或 Sideloadly 自签后安装。Atlas.apk：安卓包，直接安装。本次：$MSG" --latest
-          # carry the newest Android APK too (from the apk branch), so the latest release has both files
-          if curl -fsSL -o Atlas.apk "https://raw.githubusercontent.com/${{ github.repository }}/apk/Atlas.apk"; then
-            gh release upload "v2.0-r${{ github.run_number }}" Atlas.apk --repo "${{ github.repository }}" --clobber
-          fi
+          # releases and tags point at the public repo's own main, never at private source
+          TARGET=$(gh api "repos/$PUB/commits/main" -q .sha)
+          # carry the newest Android APK too (from this private repo's apk branch), so the latest release has both files
+          FILES="Atlas.ipa"
+          if git clone -q --depth 1 -b apk "https://x-access-token:${SRC_TOKEN}@github.com/${{ github.repository }}.git" apkb && [ -f apkb/Atlas.apk ]; then
+            cp apkb/Atlas.apk Atlas.apk; FILES="Atlas.ipa Atlas.apk"
+          else echo "::warning::no APK on the apk branch yet"; fi
+          gh release create "v2.0-r$N" $FILES --repo "$PUB" --target "$TARGET" --latest \
+            --title "账号星图 2.0 · 构建 $N" \
+            --notes "Atlas.ipa：未签名 iOS 包，用 SideStore / 爱思助手 / Sideloadly 自签后安装。Atlas.apk：安卓包，直接安装。本次：$MSG"
+          gh release view "v2.0-r$N" --repo "$PUB" --json url,assets -q '.url, (.assets[].name)'
 
   preview:
     runs-on: macos-15
@@ -111,7 +124,7 @@ jobs:
         run: |
           mkdir out && cp shots/*.png out/ && cp clips/*.mp4 out/
           # keep the Android screenshots that live in the same branch
-          git clone -q --depth 1 -b shots "https://github.com/${{ github.repository }}.git" prev 2>/dev/null && [ -d prev/android ] && cp -R prev/android out/ || true
+          git clone -q --depth 1 -b shots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" prev 2>/dev/null && [ -d prev/android ] && cp -R prev/android out/ || true
           cd out
           git init -q -b shots && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "shots"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" shots

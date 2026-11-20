@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Build number (old public repo ended at r4; offset keeps versionCode increasing)
+        run: echo "BUILD=$(( GITHUB_RUN_NUMBER + 100 ))" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -34,7 +36,7 @@ jobs:
         env:
           ATLAS_KEYSTORE: ${{ runner.temp }}/atlas.jks
           ATLAS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ATLAS_BUILD: ${{ github.run_number }}
+          ATLAS_BUILD: ${{ env.BUILD }}
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon --stacktrace testReleaseUnitTest assembleRelease
@@ -50,20 +52,26 @@ jobs:
       - name: Publish APK to the apk branch
         run: |
           mkdir out && cp Atlas.apk out/ && cd out
-          git init -q -b apk && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "APK r${{ github.run_number }} ($(git -C .. log -1 --format=%h))"
+          git init -q -b apk && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "APK r${{ env.BUILD }} ($(git -C .. log -1 --format=%h))"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" apk
-      - name: Publish GitHub Releases
+      - name: Publish release to the public repo
         env:
-          GH_TOKEN: ${{ github.token }}
-          R: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          PUB: Ckxkx/account-atlas
         run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo "::error::PUBLIC_REPO_TOKEN secret missing"; exit 1; }
+          N=${{ env.BUILD }}
           MSG=$(git log -1 --format=%s)
-          gh release create "android-v1.0-r${{ github.run_number }}" Atlas.apk --repo "$R" --target "${{ github.sha }}" \
-            --title "账号星图 安卓版 1.0 · 构建 ${{ github.run_number }}" --latest=false \
+          TARGET=$(gh api "repos/$PUB/commits/main" -q .sha)   # public main, never private source
+          gh release create "android-v1.0-r$N" Atlas.apk --repo "$PUB" --target "$TARGET" \
+            --title "账号星图 安卓版 1.0 · 构建 $N" --latest=false \
             --notes "安卓 APK（Android 8.0+），直接下载 Atlas.apk 安装；以后的版本会覆盖安装，数据保留。本次：$MSG"
-          # also attach the APK to the newest iOS release, so the latest release carries both files
-          IOS=$(gh release list --repo "$R" --limit 100 --json tagName,createdAt -q '[.[] | select(.tagName | startswith("v2.0-r"))] | sort_by(.createdAt) | reverse | .[0].tagName // empty')
-          if [ -n "$IOS" ]; then gh release upload "$IOS" Atlas.apk --repo "$R" --clobber && echo "attached to $IOS"; fi
+          # also put the APK on the latest release, so the latest release always carries both files
+          LATEST=$(gh api "repos/$PUB/releases/latest" -q .tag_name 2>/dev/null || true)
+          if [ -n "$LATEST" ] && [ "$LATEST" != "android-v1.0-r$N" ]; then
+            gh release upload "$LATEST" Atlas.apk --repo "$PUB" --clobber && echo "attached to $LATEST"
+          fi
 
   shots:
     needs: apk
@@ -72,6 +80,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - name: Build number (old public repo ended at r4; offset keeps versionCode increasing)
+        run: echo "BUILD=$(( GITHUB_RUN_NUMBER + 100 ))" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           name: Atlas-apk
@@ -97,7 +107,7 @@ jobs:
             rm -rf sb
             if git clone -q --depth 1 -b shots "$URL" sb; then :; else mkdir sb && git -C sb init -q -b shots; fi
             rm -rf sb/android && mkdir -p sb/android && cp shots/*.png shots/*.log sb/android/ 2>/dev/null || true
-            cd sb && git add -A && (git commit -qm "android shots r${{ github.run_number }}" || true)
+            cd sb && git add -A && (git commit -qm "android shots r${{ env.BUILD }}" || true)
             if git push -q "$URL" HEAD:shots; then exit 0; fi
             cd ..; sleep 5
           done
