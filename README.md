@@ -64,4 +64,6 @@
 <p align="center"><img src="docs/wechat-reward.jpg" width="240" alt="微信赞赏码"></p>
 
 ## 许可
-[MIT](LICENSE)，随便用，欢迎 PR 和 Issue。
+[PolyForm Noncommercial 1.0.0](LICENSE)：个人学习、自用、非营利用途免费，可以修改和分享；**禁止任何商业用途**（包括售卖、付费分发、集成进商业产品）。想商用请先联系作者。欢迎 PR 和 Issue。
+
+2026 年 11 月 20 日之前发布的版本仍按当时的 MIT 许可。
