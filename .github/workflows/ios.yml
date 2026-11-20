@@ -51,7 +51,11 @@ jobs:
           MSG=$(git log -1 --format=%s)
           cp "$F" Atlas.ipa
           gh release create "v2.0-r${{ github.run_number }}" Atlas.ipa --repo "${{ github.repository }}" --target "${{ github.sha }}" \
-            --title "账号星图 2.0 · 构建 ${{ github.run_number }}" --notes "未签名 IPA，用爱思助手或 Sideloadly 自签后安装。本次：$MSG" --latest
+            --title "账号星图 2.0 · 构建 ${{ github.run_number }}" --notes "Atlas.ipa：未签名 iOS 包，用爱思助手或 Sideloadly 自签后安装。Atlas.apk：安卓包，直接安装。本次：$MSG" --latest
+          # carry the newest Android APK too (from the apk branch), so the latest release has both files
+          if curl -fsSL -o Atlas.apk "https://raw.githubusercontent.com/${{ github.repository }}/apk/Atlas.apk"; then
+            gh release upload "v2.0-r${{ github.run_number }}" Atlas.apk --repo "${{ github.repository }}" --clobber
+          fi
 
   preview:
     runs-on: macos-15
@@ -105,6 +109,9 @@ jobs:
           ls -la clips
       - name: Publish screenshots
         run: |
-          mkdir out && cp shots/*.png out/ && cp clips/*.mp4 out/ && cd out
+          mkdir out && cp shots/*.png out/ && cp clips/*.mp4 out/
+          # keep the Android screenshots that live in the same branch
+          git clone -q --depth 1 -b shots "https://github.com/${{ github.repository }}.git" prev 2>/dev/null && [ -d prev/android ] && cp -R prev/android out/ || true
+          cd out
           git init -q -b shots && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "shots"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" shots

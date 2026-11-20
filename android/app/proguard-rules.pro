@@ -1,0 +1,8 @@
+-keepattributes *Annotation*, InnerClasses, Signature
+-keep,includedescriptorclasses class dev.huichen.atlas.**$$serializer { *; }
+-keepclassmembers class dev.huichen.atlas.** { *** Companion; }
+-keepclasseswithmembers class dev.huichen.atlas.** { kotlinx.serialization.KSerializer serializer(...); }
+-dontwarn okhttp3.internal.platform.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**

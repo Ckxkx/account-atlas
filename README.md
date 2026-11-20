@@ -3,7 +3,7 @@
 <p align="center">这个邮箱注册过什么？那个手机号绑了哪些 App？一眼看清。</p>
 <p align="center">
   <a href="https://huichen.dev/account-atlas/">在线使用</a> ·
-  <a href="https://github.com/Ckxkx/account-atlas/releases/latest">下载 iOS 版（IPA）</a>
+  <a href="https://github.com/Ckxkx/account-atlas/releases/latest">下载 App（安卓 APK · iOS IPA）</a>
 </p>
 
 <p align="center">
@@ -20,6 +20,11 @@
 - **隐私模式**：号码和账号名一键打码，截图分享也安心
 - **加密同步（可选）**：数据用你的同步密码在本地 AES-GCM 加密后，存进你自己的 Gitee（国内直连）或 GitHub 私密 Gist
 - 拖动排序、撤销删除、JSON 导入导出、离线可用
+
+## 下载
+最新版在 [Releases](https://github.com/Ckxkx/account-atlas/releases/latest)，同一个版本里有两个文件：
+- **Atlas.apk**：安卓（Android 8.0+）原生版，下载后直接安装；以后的版本签名相同，覆盖安装，数据保留
+- **Atlas.ipa**：iOS 原生版（未签名），用爱思助手 / Sideloadly 等自签后安装
 
 ## 不想自签？用网页版装到桌面（PWA）
 网页版本身就能“安装”成 App：有桌面图标，全屏打开没有地址栏，断网也能用。
@@ -38,17 +43,18 @@
 ## 隐私
 数据默认只存在你自己的设备上，没有任何服务器。**不记录密码**。开启同步时，云端只有加密后的文件。
 
-## 两个版本
-| | 网页版 | iOS 原生版 |
-|---|---|---|
-| 技术 | 纯 HTML/CSS/JS，零依赖 | SwiftUI，iOS 17+ |
-| 安装 | 打开网址，Safari「添加到主屏幕」 | 从 Releases 下载 IPA，用爱思助手 / Sideloadly 等自签安装 |
-| 代码 | 根目录 `index.html` `app.js` `styles.css` | `native/` |
+## 三个版本
+| | 网页版 | iOS 原生版 | 安卓原生版 |
+|---|---|---|---|
+| 技术 | 纯 HTML/CSS/JS，零依赖 | SwiftUI，iOS 17+ | Kotlin + Jetpack Compose，Android 8.0+ |
+| 安装 | 打开网址，Safari「添加到主屏幕」 | 从 Releases 下载 IPA，用爱思助手 / Sideloadly 等自签安装 | 从 Releases 下载 APK 直接安装 |
+| 代码 | 根目录 `index.html` `app.js` `styles.css` | `native/` | `android/` |
 
-两边的数据格式相同，可以通过同步或 JSON 互通。
+三个版本的数据格式相同，可以通过同步或 JSON 互通。
 
 ## 自己运行 / 构建
 - 网页版：`python3 -m http.server 8080`，打开 `http://localhost:8080`
+- 安卓版：`cd android && ./gradlew assembleRelease`（JDK 17 + Android SDK）；推送 `android/` 的改动后，`.github/workflows/android.yml` 会构建签名 APK 并发布到 Releases。启动图标只有一个源文件 `android/icon-src/icon-1024.png`，换图后重新构建即可
 - iOS 版：推送 `native/` 的改动后，GitHub Actions（`.github/workflows/ios.yml`，macOS runner）会用 `swiftc` 编译并发布未签名 IPA 到 Releases
 
 ## 许可
