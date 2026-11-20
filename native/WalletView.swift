@@ -99,7 +99,7 @@ struct TopButtons: ToolbarContent {
   var body: some ToolbarContent {
     ToolbarItemGroup(placement: .topBarTrailing) {
       Button {
-        store.theme = store.theme == "light" ? "dark" : "light"
+        ThemeFX.set(store.theme == "light" ? "dark" : "light", store: store)
       } label: {
         Image(systemName: store.theme == "light" ? "moon.fill" : "sun.max.fill")
           .contentTransition(.symbolEffect(.replace.downUp))

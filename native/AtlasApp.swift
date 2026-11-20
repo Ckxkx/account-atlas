@@ -12,7 +12,7 @@ struct AtlasApp: App {
         .environmentObject(store)
         .environmentObject(sync)
         .onAppear {
-          ThemeFX.apply(store.theme, animated: false)
+          ThemeFX.apply(store.theme)
           sync.store = store
           let s = sync
           store.onSaved = { [weak s] in s?.schedule() }
@@ -42,7 +42,7 @@ struct RootView: View {
     }
     .environment(\.selectedTab, tab)
     .sensoryFeedback(.selection, trigger: tab)
-    .onChange(of: store.theme) { _, t in ThemeFX.apply(t, animated: true) }
+    .onChange(of: store.theme) { _, t in ThemeFX.apply(t) }
     .sheet(item: $store.route) { r in sheet(r) }
     .overlay(alignment: .top) { ToastView() }
     .onAppear {
@@ -81,10 +81,10 @@ struct RootView: View {
       if store.data.identities.count > 2 { store.demoFocus = store.data.identities[2].id; await wait(1.6) }
       store.demoFocus = "none"
     case "theme":
-      store.theme = "light"; await wait(1.8)
-      store.theme = "dark"; await wait(1.8)
+      ThemeFX.set("light", store: store); await wait(1.8)
+      ThemeFX.set("dark", store: store); await wait(1.8)
       go(2); await wait(1.4)
-      store.theme = "light"
+      ThemeFX.set("light", store: store)
     case "tabs":
       go(1); await wait(1.4); go(2); await wait(2.2); go(0)
     case "picker":
@@ -187,42 +187,63 @@ extension View {
   func tabEnter(_ index: Int, tab: Int, dir: CGFloat) -> some View { modifier(TabEnter(index: index, tab: tab, dir: dir)) }
 }
 
-/// Theme switch done the way iOS apps do it smoothly: freeze a snapshot of the window, flip the
-/// window's interface style underneath in one go, then open a circular hole in the snapshot
-/// from the button with Core Animation. Nothing in SwiftUI re-renders per frame.
+/// Theme switch: render the current screen into an image shown in a separate overlay window
+/// (outside SwiftUI, unaffected by the style flip), commit that frame, then flip the app
+/// windows' interface style underneath and open a circular hole in the overlay from the button.
 @MainActor enum ThemeFX {
   static var origin: CGPoint? = nil
+  static var overlay: UIWindow? = nil
   static func style(_ t: String) -> UIUserInterfaceStyle { t == "light" ? .light : t == "system" ? .unspecified : .dark }
-  static func apply(_ theme: String, animated: Bool) {
-    let wins = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
-    guard let win = wins.first(where: \.isKeyWindow) ?? wins.first else { return }
-    let st = style(theme)
-    guard animated, win.overrideUserInterfaceStyle != st, !UIAccessibility.isReduceMotionEnabled,
-          let snap = win.snapshotView(afterScreenUpdates: false) else {
-      wins.forEach { $0.overrideUserInterfaceStyle = st }; return
+  static func appWindows() -> [UIWindow] {
+    UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).filter { $0 !== overlay }
+  }
+  /// Entry point for user actions: snapshot BEFORE any SwiftUI state changes.
+  static func set(_ theme: String, store: Store, from point: CGPoint? = nil) {
+    guard store.theme != theme else { return }
+    let wins = appWindows()
+    guard let win = wins.first(where: \.isKeyWindow) ?? wins.first, let scene = win.windowScene,
+          !UIAccessibility.isReduceMotionEnabled, overlay == nil else {
+      store.theme = theme; wins.forEach { $0.overrideUserInterfaceStyle = style(theme) }; return
     }
-    win.addSubview(snap)
-    wins.forEach { $0.overrideUserInterfaceStyle = st }
     let b = win.bounds
-    let c = origin ?? CGPoint(x: b.midX, y: b.minY + 60)
+    let fmt = UIGraphicsImageRendererFormat(for: win.traitCollection); fmt.opaque = true
+    let img = UIGraphicsImageRenderer(bounds: b, format: fmt).image { _ in win.drawHierarchy(in: b, afterScreenUpdates: false) }
+    let ov = UIWindow(windowScene: scene)
+    ov.frame = win.frame; ov.windowLevel = .statusBar + 1; ov.isUserInteractionEnabled = false
+    ov.backgroundColor = .clear
+    let iv = UIImageView(image: img); iv.frame = b; ov.addSubview(iv)
+    ov.isHidden = false; overlay = ov
+    let c = point ?? origin ?? CGPoint(x: b.maxX - 40, y: b.minY + 70)
     let r = hypot(max(c.x, b.width - c.x), max(c.y, b.height - c.y)) + 4
     func hole(_ rad: CGFloat) -> CGPath {
       let p = UIBezierPath(rect: b)
       p.append(UIBezierPath(arcCenter: c, radius: rad, startAngle: 0, endAngle: .pi * 2, clockwise: true))
       return p.cgPath
     }
-    let mask = CAShapeLayer()
-    mask.fillRule = .evenOdd
-    mask.path = hole(r)
-    snap.layer.mask = mask
-    let a = CABasicAnimation(keyPath: "path")
-    a.fromValue = hole(0.5); a.toValue = hole(r)
-    a.duration = 0.55
-    a.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)
-    CATransaction.begin()
-    CATransaction.setCompletionBlock { snap.removeFromSuperview() }
-    mask.add(a, forKey: "reveal")
-    CATransaction.commit()
+    let mask = CAShapeLayer(); mask.fillRule = .evenOdd; mask.path = hole(0.5)
+    iv.layer.mask = mask
+    // Let the overlay reach the screen first, then flip and re-render underneath it.
+    DispatchQueue.main.async {
+      var tx = Transaction(); tx.disablesAnimations = true
+      withTransaction(tx) { store.theme = theme }
+      wins.forEach { $0.overrideUserInterfaceStyle = style(theme) }
+      DispatchQueue.main.async {
+        let a = CABasicAnimation(keyPath: "path")
+        a.fromValue = hole(0.5); a.toValue = hole(r)
+        a.duration = 0.5
+        a.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { ov.isHidden = true; overlay = nil }
+        mask.path = hole(r)
+        mask.add(a, forKey: "reveal")
+        CATransaction.commit()
+      }
+    }
+  }
+  /// Keeps windows in sync with the stored theme (launch, Settings picker).
+  static func apply(_ theme: String) {
+    let st = style(theme)
+    appWindows().forEach { if $0.overrideUserInterfaceStyle != st { $0.overrideUserInterfaceStyle = st } }
   }
 }
 

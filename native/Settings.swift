@@ -32,7 +32,7 @@ struct SettingsSheet: View {
         }
         Section {
           Toggle(isOn: $store.privacy.animation()) { Label("隐藏号码", systemImage: "eye.slash") }
-          Picker(selection: $store.theme) {
+          Picker(selection: Binding(get: { store.theme }, set: { ThemeFX.set($0, store: store) })) {
             Text("深色").tag("dark")
             Text("浅色").tag("light")
             Text("跟随系统").tag("system")
