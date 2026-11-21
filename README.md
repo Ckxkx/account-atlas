@@ -75,6 +75,15 @@ GitHub 下载慢的话，可以从 huichen.dev/downloads 下载：[Atlas.apk](ht
 
 <p align="center"><img src="docs/wechat-reward.jpg" width="240" alt="微信赞赏码"></p>
 
+## Star History
+<a href="https://www.star-history.com/#Ckxkx/account-atlas&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ckxkx/account-atlas&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ckxkx/account-atlas&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ckxkx/account-atlas&type=Date" />
+  </picture>
+</a>
+
 ## 许可
 代码采用 [GPL-3.0](LICENSE)，版权所有 © 2026 Ckxkx（阿chen）。
 - ✅ 可以：使用、修改、二次创作、再分发，包括商用
