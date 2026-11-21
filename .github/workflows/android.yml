@@ -7,7 +7,7 @@ on:
   pull_request:
     paths: ['android/**', 'icons/**', '.github/workflows/android.yml']
   push:
-    branches: [main]
+    branches: [main, dev]
     paths: ['android/**', 'icons/**', '.github/workflows/android.yml']
   workflow_call:
     inputs:
