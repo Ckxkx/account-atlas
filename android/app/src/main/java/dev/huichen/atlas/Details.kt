@@ -138,7 +138,7 @@ fun AccountDetail(id: String) {
   SheetScroll(aura = {
     Box(Modifier.fillMaxWidth().height(360.dp).fadeDown().blur(90.dp).graphicsLayer { alpha = 0.45f }.background(Brush.verticalGradient(listOf(b, b.copy(alpha = 0.3f), Color.Transparent))))
   }) {
-    AppIcon(a.name, a.domain, 96.dp, Modifier.padding(top = 10.dp).shadow(24.dp, squircle(96.dp), ambientColor = b, spotColor = b))
+    AppIcon(a, 96.dp, Modifier.padding(top = 10.dp).shadow(24.dp, squircle(96.dp), ambientColor = b, spotColor = b))
     T(a.name, 26f, FontWeight.Bold, modifier = Modifier.padding(top = 14.dp))
     a.handle?.let { T(Store.handleText(it), 15f, color = pal.secondary, modifier = Modifier.padding(top = 2.dp)) }
     Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

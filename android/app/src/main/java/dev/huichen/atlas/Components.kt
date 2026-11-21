@@ -39,6 +39,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -215,8 +216,26 @@ object IconCache {
   }
 }
 
+/** Account icon: its own custom / App Store icon first, then the preset, favicon, letter. */
 @Composable
-fun AppIcon(name: String, domain: String, size: Dp = 52.dp, modifier: Modifier = Modifier) {
+fun AppIcon(a: Account, size: Dp = 52.dp, modifier: Modifier = Modifier) = AppIcon(a.name, a.domain, size, modifier, a.icon, a.id)
+
+@Composable
+fun AppIcon(name: String, domain: String, size: Dp = 52.dp, modifier: Modifier = Modifier, icon: String? = null, iconKey: String = "") {
+  val shape = squircle(size)
+  val ck = remember(iconKey, icon) { icon?.takeIf { it.startsWith("data:image") }?.let { CustomIcon.key(iconKey, it) } }
+  var custom by remember(ck) { androidx.compose.runtime.mutableStateOf(ck?.let { CustomIcon.cached(it) }) }
+  if (ck != null && custom == null) androidx.compose.runtime.LaunchedEffect(ck) { custom = CustomIcon.decode(ck, icon!!) }
+  val c = custom
+  if (c != null) {
+    Box(modifier.size(size).clip(shape).border(0.5.dp, Color.White.copy(alpha = 0.12f), shape)) {
+      Image(c, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    }
+  } else PresetIcon(name, domain, size, modifier)
+}
+
+@Composable
+private fun PresetIcon(name: String, domain: String, size: Dp, modifier: Modifier) {
   val ctx = LocalContext.current
   val shape = squircle(size)
   val preset = remember(name, domain) { IconCache.preset(name, domain) }
@@ -331,7 +350,7 @@ fun AutoSizeText(text: String, max: Float, weight: FontWeight, color: Color) {
 fun IconStack(accounts: List<Account>) {
   Row(verticalAlignment = Alignment.CenterVertically) {
     accounts.take(4).forEachIndexed { k, a ->
-      AppIcon(a.name, a.domain, 28.dp, Modifier.offset(x = (-9 * k).dp).border(1.5.dp, Color.White.copy(alpha = 0.55f), squircle(28.dp)))
+      AppIcon(a, 28.dp, Modifier.offset(x = (-9 * k).dp).border(1.5.dp, Color.White.copy(alpha = 0.55f), squircle(28.dp)))
     }
     if (accounts.size > 4) {
       val shift = (-9 * (minOf(accounts.size, 4) - 1)).dp
@@ -368,7 +387,7 @@ fun ReelRow(a: Account, meta: String? = null, onClick: () -> Unit) {
       .padding(horizontal = 12.dp, vertical = 10.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    AppIcon(a.name, a.domain, 44.dp)
+    AppIcon(a, 44.dp)
     Spacer(Modifier.width(12.dp))
     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
       Row(verticalAlignment = Alignment.CenterVertically) {

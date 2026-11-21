@@ -239,7 +239,7 @@ fun AppGrid(modifier: Modifier) {
     AnimatedContent(i?.id, transitionSpec = { (fadeIn(calm()) + scaleIn(calm(), 0.92f)) togetherWith fadeOut(calm()) }, label = "grid") { _ ->
       val tiles: List<@Composable () -> Unit> = shown.map { a -> @Composable {
         Column(Modifier.press(0.9f) { Store.push(Route.AccountR(a.id)) }, horizontalAlignment = Alignment.CenterHorizontally) {
-          AppIcon(a.name, a.domain, 58.dp, Modifier.shadow(8.dp, squircle(58.dp), ambientColor = brandColor(a.name, a.domain), spotColor = brandColor(a.name, a.domain)))
+          AppIcon(a, 58.dp, Modifier.shadow(8.dp, squircle(58.dp), ambientColor = brandColor(a.name, a.domain), spotColor = brandColor(a.name, a.domain)))
           T(a.handle?.let { Store.handleText(it) } ?: a.name, 12f, lines = 1, modifier = Modifier.padding(top = 6.dp))
         }
       } } + (if (i != null) listOf(@Composable {

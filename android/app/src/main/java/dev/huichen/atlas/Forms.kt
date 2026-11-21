@@ -1,5 +1,8 @@
 package dev.huichen.atlas
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
@@ -57,7 +60,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,6 +81,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // MARK: - form kit (grouped, like an iOS Form)
 
@@ -222,6 +230,32 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
 
 // MARK: - account form
 
+/** App Store artwork thumbnail (artworkUrl100) for suggestion lists, letter/favicon until it loads. */
+@Composable
+fun HitThumb(hit: AppHit, size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+  val url = hit.artworkUrl100
+  var bmp by remember(url) { mutableStateOf(url?.let { AppStore.thumbCached(it) }) }
+  if (url != null && bmp == null) LaunchedEffect(url) { bmp = AppStore.thumb(url) }
+  val b = bmp
+  if (b != null) {
+    val shape = squircle(size)
+    Box(modifier.size(size).clip(shape).border(0.5.dp, Color.White.copy(alpha = 0.12f), shape)) {
+      androidx.compose.foundation.Image(b, null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+    }
+  } else AppIcon(hit.name, hit.domain, size, modifier)
+}
+
+@Composable
+private fun SuggestRow(title: String, sub: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
+  Row(Modifier.fillMaxWidth().press(1f, onClick = onClick).padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+    icon(); Spacer(Modifier.width(12.dp))
+    Column(Modifier.weight(1f)) {
+      T(title, 16f, lines = 1)
+      if (sub.isNotEmpty()) T(sub, 12f, color = pal.secondary, lines = 1)
+    }
+  }
+}
+
 @Composable
 fun AccountForm(existing: Account) {
   var name by remember { mutableStateOf(existing.name) }
@@ -230,22 +264,87 @@ fun AccountForm(existing: Account) {
   var handle by remember { mutableStateOf(existing.handle ?: "") }
   var notes by remember { mutableStateOf(existing.notes) }
   var ids by remember { mutableStateOf(existing.identityIds) }
+  var icon by remember { mutableStateOf(existing.icon) }
   var catMenu by remember { mutableStateOf(false) }
+  var iconMenu by remember { mutableStateOf(false) }
+  // suggestions show only while the user is typing a name
+  var typed by remember { mutableStateOf(false) }
+  var hits by remember { mutableStateOf(listOf<AppHit>()) }
+  var pending by remember { mutableStateOf<AppHit?>(null) }   // App Store pick whose icon is downloading
+  var token by remember { mutableIntStateOf(0) }
+  val scope = rememberCoroutineScope()
+  val ctx = androidx.compose.ui.platform.LocalContext.current
+  val hap = haptics()
+
+  val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    if (uri != null) { val t = ++token; pending = null; scope.launch { CustomIcon.fromUri(ctx, uri)?.let { if (t == token) { icon = it; hap(TICK) } } } }
+  }
+
+  val q = name.trim().lowercase()
+  LaunchedEffect(q, typed) {
+    if (!typed || q.isEmpty()) { hits = emptyList(); return@LaunchedEffect }
+    delay(350)
+    hits = AppStore.search(q)   // a newer query cancels this one, so late results are dropped
+  }
+  val presetHits = if (!typed || q.isEmpty()) emptyList() else
+    (Store.customApps + Presets.all).filter { it.name.lowercase().contains(q) || (it.domain.isNotEmpty() && it.domain.contains(q)) }.distinctBy { it.name.lowercase() }.take(4)
+  val shownNames = presetHits.map { it.name.lowercase() }.toSet()
+  val storeHits = if (!typed || q.isEmpty()) emptyList() else hits.filter { it.name.lowercase() !in shownNames }.distinctBy { it.name.lowercase() }
+
+  fun pickPreset(p: Preset) {
+    hap(TICK); token++; pending = null
+    name = p.name; if (p.domain.isNotEmpty()) domain = p.domain; category = p.category; icon = null; typed = false
+  }
+  fun pickHit(h: AppHit) {
+    hap(TICK); val t = ++token
+    name = h.name; if (h.domain.isNotEmpty()) domain = h.domain; category = h.category; typed = false; pending = h
+    scope.launch { val ic = AppStore.icon(h); if (t == token) { icon = ic; pending = null } }
+  }
+
   Column {
     SheetBar("取消", "编辑", "保存", name.isNotBlank()) {
       Store.mutate("已保存") { s -> s.copy(accounts = s.accounts.map {
-        if (it.id == existing.id) it.copy(name = name.trim(), domain = cleanDomain(domain), category = category, notes = notes.trim(), handle = handle.trim().ifEmpty { null }, identityIds = ids) else it
+        if (it.id == existing.id) it.copy(name = name.trim(), domain = cleanDomain(domain), category = category, notes = notes.trim(), handle = handle.trim().ifEmpty { null }, identityIds = ids,
+          icon = icon?.ifBlank { null }) else it
       }) }
       Store.pop()
     }
     FormScroll {
       FormGroup {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-          AppIcon(name, domain, 54.dp)
+          Box {
+            Column(Modifier.press(0.92f) { iconMenu = true }, horizontalAlignment = Alignment.CenterHorizontally) {
+              val pd = pending
+              if (pd != null) HitThumb(pd, 54.dp) else AppIcon(name, domain, 54.dp, icon = icon, iconKey = existing.id)
+              T("更换图标", 11f, FontWeight.Medium, pal.accent, Modifier.padding(top = 4.dp))
+            }
+            DropdownMenu(iconMenu, { iconMenu = false }) {
+              DropdownMenuItem({ Text("从相册选择") }, {
+                iconMenu = false
+                photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+              })
+              if (icon != null) DropdownMenuItem({ Text("使用默认图标") }, { iconMenu = false; token++; pending = null; icon = null; hap(TICK) })
+            }
+          }
           Spacer(Modifier.width(14.dp))
           Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Field(name, { name = it }, "名称", size = 18f, weight = FontWeight.SemiBold, raw = true)
+            Field(name, { name = it; typed = true }, "名称", size = 18f, weight = FontWeight.SemiBold, raw = true)
             Field(domain, { domain = it }, "域名（可选）", KeyboardType.Uri, color = pal.secondary, raw = true)
+          }
+        }
+        AnimatedVisibility(presetHits.isNotEmpty() || storeHits.isNotEmpty()) {
+          Column {
+            presetHits.forEach { p ->
+              Divider()
+              SuggestRow(p.name, listOf(p.category, p.domain).filter { it.isNotEmpty() }.joinToString(" · "), { pickPreset(p) }) { AppIcon(p.name, p.domain, 32.dp) }
+            }
+            if (storeHits.isNotEmpty()) {
+              Divider()
+              T("App Store", 13f, FontWeight.Medium, pal.secondary, Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp))
+              storeHits.forEach { h ->
+                SuggestRow(h.name, listOf(h.category, h.domain).filter { it.isNotEmpty() }.joinToString(" · "), { pickHit(h) }) { HitThumb(h, 32.dp) }
+              }
+            }
           }
         }
         Divider()
@@ -280,13 +379,40 @@ fun PickerSheet(presetIdentity: String?) {
   val hap = haptics()
   fun key(p: Preset) = p.name.lowercase()
   val custom = Store.customApps
+  // App Store results for the search box, and the icons of the ones picked
+  var hits by remember { mutableStateOf(listOf<AppHit>()) }
+  val hitOf = remember { mutableStateMapOf<String, AppHit>() }
+  val icons = remember { mutableStateMapOf<String, String>() }
+  val scope = rememberCoroutineScope()
+  val accIcons = remember(Store.data.accounts) { Store.data.accounts.filter { it.icon != null }.associateBy { it.name.lowercase() } }
+  fun ownIcon(p: Preset): Account? = if (Presets.all.any { key(it) == key(p) }) null else accIcons[key(p)]
+  LaunchedEffect(query.trim()) {
+    val q = query.trim()
+    if (q.isEmpty()) { hits = emptyList(); return@LaunchedEffect }
+    delay(350)
+    hits = AppStore.search(q)
+  }
+  @Composable fun PickedIcon(p: Preset, size: androidx.compose.ui.unit.Dp) {
+    val k = key(p); val h = hitOf[k]; val own = ownIcon(p)
+    if (icons[k] == null && h != null) HitThumb(h, size)
+    else AppIcon(p.name, p.domain, size, icon = icons[k] ?: own?.icon, iconKey = if (icons[k] != null) "pick-$k" else own?.id ?: "")
+  }
 
   fun save() {
     val now = nowMS()
     val made = picked.mapIndexed { k, p ->
-      Account(newID(), p.name, p.domain, p.category, ids, handle = handles[key(p)]?.trim()?.ifEmpty { null }, createdAt = now - k)
+      Account(newID(), p.name, p.domain, p.category, ids, handle = handles[key(p)]?.trim()?.ifEmpty { null }, createdAt = now - k,
+        icon = icons[key(p)] ?: ownIcon(p)?.icon)
     }
     Store.mutate(if (made.size == 1) "已添加 ${made[0].name}" else "已添加 ${made.size} 个网站与 App") { s -> s.copy(accounts = s.accounts + made) }
+    // App Store icons still downloading: attach them when they arrive
+    made.filter { it.icon == null }.forEach { a ->
+      val h = hitOf[a.name.lowercase()] ?: return@forEach
+      Store.scope.launch {
+        val ic = AppStore.icon(h) ?: return@launch
+        if (Store.account(a.id)?.icon == null) { Store.data = Store.data.copy(accounts = Store.data.accounts.map { if (it.id == a.id && it.icon == null) it.copy(icon = ic) else it }); Store.save() }
+      }
+    }
     Store.pop()
   }
 
@@ -316,13 +442,42 @@ fun PickerSheet(presetIdentity: String?) {
               val sc by animateFloatAsState(if (on) 0.92f else 1f, calm(), label = "pk")
               Column(Modifier.press(1f) { hap(TICK); if (on) picked.removeAll { key(it) == key(p) } else picked.add(p) }, horizontalAlignment = Alignment.CenterHorizontally) {
                 Box {
-                  AppIcon(p.name, p.domain, 60.dp, Modifier.graphicsLayer { scaleX = sc; scaleY = sc })
+                  val own = ownIcon(p)
+                  AppIcon(p.name, p.domain, 60.dp, Modifier.graphicsLayer { scaleX = sc; scaleY = sc }, own?.icon, own?.id ?: "")
                   androidx.compose.animation.AnimatedVisibility(on, Modifier.align(Alignment.TopEnd).offset(7.dp, (-7).dp), enter = scaleIn(calm()) + fadeIn(), exit = scaleOut(calm()) + fadeOut()) {
                     Box(Modifier.size(24.dp).clip(CircleShape).background(Color.White).padding(1.dp)) { Icon(Icons.Filled.CheckCircle, null, tint = pal.accent) }
                   }
                 }
                 T(p.name, 12f, lines = 1, modifier = Modifier.padding(top = 6.dp))
                 if (has) T("已记录", 9.5f, FontWeight.Medium, pal.secondary)
+              }
+            }
+            val names = list.map { key(it) }.toSet() + Presets.all.map { key(it) }
+            val store = if (q.isEmpty()) emptyList() else hits.filter { it.name.lowercase() !in names }.distinctBy { it.name.lowercase() }
+            if (store.isNotEmpty()) item(key = "as-head", span = { GridItemSpan(maxLineSpan) }) {
+              T("App Store", 13f, FontWeight.Medium, pal.secondary, Modifier.padding(start = 6.dp, top = 4.dp))
+            }
+            items(store, key = { "as-" + it.name.lowercase() }) { h ->
+              val p = Preset(h.name, h.domain, h.category, "")
+              val k = key(p)
+              val on = picked.any { key(it) == k }
+              val sc by animateFloatAsState(if (on) 0.92f else 1f, calm(), label = "pk")
+              Column(Modifier.press(1f) {
+                hap(TICK)
+                if (on) { picked.removeAll { key(it) == k }; icons.remove(k) }
+                else {
+                  picked.add(p); hitOf[k] = h
+                  scope.launch { AppStore.icon(h)?.let { if (picked.any { key(it) == k }) icons[k] = it } }
+                }
+              }, horizontalAlignment = Alignment.CenterHorizontally) {
+                Box {
+                  HitThumb(h, 60.dp, Modifier.graphicsLayer { scaleX = sc; scaleY = sc })
+                  androidx.compose.animation.AnimatedVisibility(on, Modifier.align(Alignment.TopEnd).offset(7.dp, (-7).dp), enter = scaleIn(calm()) + fadeIn(), exit = scaleOut(calm()) + fadeOut()) {
+                    Box(Modifier.size(24.dp).clip(CircleShape).background(Color.White).padding(1.dp)) { Icon(Icons.Filled.CheckCircle, null, tint = pal.accent) }
+                  }
+                }
+                T(h.name, 12f, lines = 1, modifier = Modifier.padding(top = 6.dp))
+                T("App Store", 9.5f, FontWeight.Medium, pal.secondary)
               }
             }
             item(key = "manual") {
@@ -336,7 +491,7 @@ fun PickerSheet(presetIdentity: String?) {
         AnimatedVisibility(picked.isNotEmpty(), Modifier.align(Alignment.BottomCenter), enter = slideInVertically(calm()) { it } + fadeIn(), exit = slideOutVertically(calm()) { it } + fadeOut()) {
           Row(Modifier.fillMaxWidth().background(if (pal.dark) hex("#1c1c1e").copy(alpha = 0.96f) else Color.White.copy(alpha = 0.96f))
             .navigationBarsPadding().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            picked.forEach { p -> AppIcon(p.name, p.domain, 38.dp) }
+            picked.forEach { p -> PickedIcon(p, 38.dp) }
           }
         }
       }
@@ -354,7 +509,7 @@ fun PickerSheet(presetIdentity: String?) {
             picked.forEachIndexed { k, p ->
               if (k > 0) Divider()
               Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                AppIcon(p.name, p.domain, 36.dp); Spacer(Modifier.width(12.dp))
+                PickedIcon(p, 36.dp); Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                   T(p.name, 16f, FontWeight.SemiBold)
                   Field(handles[key(p)] ?: "", { handles[key(p)] = it }, "账号名（可选）", size = 14f, raw = true)
