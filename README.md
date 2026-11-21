@@ -76,12 +76,10 @@ GitHub 下载慢的话，可以从 huichen.dev/downloads 下载：[Atlas.apk](ht
 <p align="center"><img src="docs/wechat-reward.jpg" width="240" alt="微信赞赏码"></p>
 
 ## 许可
-[PolyForm Strict 1.0.0](LICENSE)，版权所有 © 2026 阿chen。
-- ✅ 可以：下载、安装，个人非商业使用
-- ❌ 不可以：修改、二次创作或基于它做衍生作品
-- ❌ 不可以：转载、重新打包或分发（包括上传到其他平台）
-- ❌ 不可以：任何商业用途
+代码采用 [GPL-3.0](LICENSE)，版权所有 © 2026 Ckxkx（阿chen）。
+- ✅ 可以：使用、修改、二次创作、再分发，包括商用
+- ⚠️ 条件：分发修改版或衍生作品时，必须同样以 GPL-3.0 开源、公开完整源码，并保留版权和许可声明
+- ❌ 例外：项目自己的 Logo 和应用图标（`logo.svg`、`icon.png`、`icon-512.png`、安卓 `android/icon-src/icon-1024.png` 及生成的启动图标、iOS `AppIcon`）不在 GPL 范围内，保留所有权利。二次创作请换成你自己的 Logo 和图标
+- `icons/` 下的第三方网站、App 图标归各自所有者
 
-分享请直接发本仓库链接或 huichen.dev。其他用途请先联系作者。
-
-2026 年 11 月 20 日之前发布的版本按当时的 MIT 许可。
+详见 [NOTICE](NOTICE.md)。之前发布的版本沿用发布时附带的许可。
