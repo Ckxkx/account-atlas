@@ -692,7 +692,9 @@ html[data-theme=light] .ord::after{box-shadow:0 14px 30px rgba(0,0,0,.16),0 0 0 
 .ord+.ord::before{content:"";position:absolute;top:0;right:0;left:74px;height:.5px;background:var(--separator);transition:opacity .15s}
 .ord-list.sorting .ord::before{opacity:0}
 .ord-list.sorting{overflow:visible}
-.ord.lift{z-index:3;transition:border-radius .22s,scale .22s;scale:1.035;border-radius:14px}
+.ord.lift{z-index:3;transition:border-radius .22s,scale .22s;scale:1.035;border-radius:14px;will-change:transform}
+.ord-list.sorting .ord{will-change:transform}
+.ord-list.ord-commit .ord,.ord-list.ord-commit .ord::before{transition:none!important}
 .ord-sw{flex:none;width:48px;height:32px;border-radius:7px;background:var(--g);display:grid;place-items:center;color:rgba(255,255,255,.92);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.22),0 3px 10px color-mix(in srgb,var(--c) 35%,transparent)}
 .ord-sw.sim{clip-path:polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,0 100%)}
 .ord-sw svg{width:15px;height:15px}

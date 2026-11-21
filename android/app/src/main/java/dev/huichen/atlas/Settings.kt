@@ -5,6 +5,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -184,55 +194,97 @@ fun OrderGroup(type: String, title: String, footer: String?) {
   val list = Store.data.identities.filter { it.type == type }
   if (list.isEmpty()) return
   val hap = haptics()
+  val scope = rememberCoroutineScope()
   val rowH = 58.dp
-  val px = with(LocalDensity.current) { rowH.toPx() }
+  val slot = with(LocalDensity.current) { rowH.toPx() }
+  val ids = list.map { it.id }
+  // Local order; rows never move in the layout while a finger is down. Neighbours slide out of the
+  // way with a translation, the lifted row follows the finger, and the new order is committed once,
+  // after the lifted row has settled into its slot (same frame the translations are dropped).
+  var order by remember { mutableStateOf(ids) }
   var dragId by remember { mutableStateOf<String?>(null) }
+  var settling by remember { mutableStateOf(false) }
+  var from by remember { mutableIntStateOf(0) }
+  var to by remember { mutableIntStateOf(0) }
   var dy by remember { mutableFloatStateOf(0f) }
-  var order by remember(list.map { it.id }) { mutableStateOf(list.map { it.id }) }
+  LaunchedEffect(ids) { if (dragId == null) order = ids }
   FormGroup(title, footer ?: if (Store.data.identities.none { it.type == "phone" }) "长按拖动排序，排在第一位的卡会在卡包里最先出现。" else null) {
     order.forEachIndexed { k, id ->
-      val i = list.firstOrNull { it.id == id } ?: return@forEachIndexed
-      val dragging = dragId == id
-      val lift by animateFloatAsState(if (dragging) 1.03f else 1f, calm(), label = "lift")
-      if (k > 0) Divider()
-      Row(Modifier.fillMaxWidth().height(rowH)
-        .graphicsLayer { translationY = if (dragging) dy else 0f; scaleX = lift; scaleY = lift; shadowElevation = if (dragging) 12f else 0f }
-        .background(if (dragging) pal.field else Color.Transparent)
-        .pointerInput(id) {
-          detectDragGesturesAfterLongPress(
-            onDragStart = { dragId = id; dy = 0f; hap(android.view.HapticFeedbackConstants.LONG_PRESS) },
-            onDragEnd = {
-              dragId = null; dy = 0f
-              val ids = order
-              Store.mutate(null) { s ->
-                val ranked = ids.mapIndexed { n, x -> x to n.toDouble() }.toMap()
-                val updated = s.identities.map { if (it.id in ranked) it.copy(order = ranked[it.id]) else it }
-                val grp = ids.mapNotNull { x -> updated.firstOrNull { it.id == x } }
-                val others = updated.filter { it.type != type }
-                val emails = if (type == "email") grp else others.filter { it.type == "email" }
-                val phones = if (type == "phone") grp else others.filter { it.type == "phone" }
-                s.copy(identities = emails + phones + others.filter { it.type != "email" && it.type != "phone" })
-              }
-            },
-            onDragCancel = { dragId = null; dy = 0f },
-          ) { ch, d ->
-            ch.consume(); dy += d.y
-            val cur = order.indexOf(id)
-            val target = (cur + (dy / px).roundToInt()).coerceIn(0, order.size - 1)
-            if (target != cur) {
-              order = order.toMutableList().apply { removeAt(cur); add(target, id) }
-              dy -= (target - cur) * px; hap(TICK)
+      key(id) {
+        val i = list.firstOrNull { it.id == id }
+        if (i != null) {
+          val dragging = dragId == id
+          val target = when {
+            dragId == null || dragging -> 0f
+            k in (from + 1)..to -> -slot
+            k in to until from -> slot
+            else -> 0f
+          }
+          val shift = remember { Animatable(0f) }
+          LaunchedEffect(target, dragId) { if (dragId == null) shift.snapTo(0f) else shift.animateTo(target, calm(Spring.StiffnessMedium)) }
+          val lift by animateFloatAsState(if (dragging && !settling) 1.03f else 1f, calm(), label = "lift")
+          val shadow by animateFloatAsState(if (dragging && !settling) 14f else 0f, calm(), label = "shadow")
+          val sep = pal.stroke
+          Row(Modifier.fillMaxWidth().height(rowH).zIndex(if (dragging) 1f else 0f)
+            .graphicsLayer {
+              translationY = if (dragId == null) 0f else if (dragging) dy else shift.value
+              scaleX = lift; scaleY = lift
+              shadowElevation = shadow; shape = RoundedCornerShape(12.dp); clip = false
             }
+            .background(if (dragging) pal.field else Color.Transparent, RoundedCornerShape(12.dp))
+            .drawBehind { if (k > 0 && dragId == null) drawRect(sep, Offset(16.dp.toPx(), 0f), Size(size.width - 16.dp.toPx(), 0.5.dp.toPx())) }
+            .pointerInput(id) {
+              detectDragGesturesAfterLongPress(
+                onDragStart = {
+                  if (dragId == null && !settling) {
+                    from = order.indexOf(id); to = from; dy = 0f; dragId = id
+                    hap(android.view.HapticFeedbackConstants.LONG_PRESS)
+                  }
+                },
+                onDragEnd = {
+                  if (dragId == id && !settling) {
+                    settling = true
+                    scope.launch {
+                      animate(dy, (to - from) * slot, animationSpec = calm(Spring.StiffnessMedium)) { v, _ -> dy = v }
+                      val next = order.toMutableList().apply { removeAt(from); add(to, id) }
+                      val moved = from != to
+                      order = next; dragId = null; dy = 0f; settling = false
+                      if (moved) Store.mutate(null) { s ->
+                        val ranked = next.mapIndexed { n, x -> x to n.toDouble() }.toMap()
+                        val updated = s.identities.map { if (it.id in ranked) it.copy(order = ranked[it.id]) else it }
+                        val grp = next.mapNotNull { x -> updated.firstOrNull { it.id == x } }
+                        val others = updated.filter { it.type != type }
+                        val emails = if (type == "email") grp else others.filter { it.type == "email" }
+                        val phones = if (type == "phone") grp else others.filter { it.type == "phone" }
+                        s.copy(identities = emails + phones + others.filter { it.type != "email" && it.type != "phone" })
+                      }
+                    }
+                  }
+                },
+                onDragCancel = {
+                  if (dragId == id && !settling) {
+                    settling = true
+                    scope.launch { animate(dy, 0f, animationSpec = calm(Spring.StiffnessMedium)) { v, _ -> dy = v }; to = from; dragId = null; dy = 0f; settling = false }
+                  }
+                },
+              ) { ch, d ->
+                if (dragId != id || settling) return@detectDragGesturesAfterLongPress
+                ch.consume()
+                dy = (dy + d.y).coerceIn(-from * slot, (order.size - 1 - from) * slot)
+                val n = (from + (dy / slot).roundToInt()).coerceIn(0, order.size - 1)
+                if (n != to) { to = n; hap(TICK) }
+              }
+            }
+            .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            SmallCard(i, if (i.isPhone) Icons.Filled.SimCard else Icons.Filled.Email, 46.dp, 30.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+              T(Store.title(i), 16f, FontWeight.Medium, lines = 1)
+              if (i.label.isNotEmpty()) T(Store.display(i), 13f, color = pal.secondary, lines = 1)
+            }
+            Icon(Icons.Filled.DragHandle, "拖动", tint = pal.tertiary)
           }
         }
-        .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        SmallCard(i, if (i.isPhone) Icons.Filled.SimCard else Icons.Filled.Email, 46.dp, 30.dp)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-          T(Store.title(i), 16f, FontWeight.Medium, lines = 1)
-          if (i.label.isNotEmpty()) T(Store.display(i), 13f, color = pal.secondary, lines = 1)
-        }
-        Icon(Icons.Filled.DragHandle, "拖动", tint = pal.tertiary)
       }
     }
   }

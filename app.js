@@ -912,31 +912,51 @@
       const h = e.target.closest('.ord-h'); if (!h || !/ArrowUp|ArrowDown/.test(e.key)) return;
       e.preventDefault(); const r = h.closest('.ord'); move(r, rows().indexOf(r) + (e.key === 'ArrowUp' ? -1 : 1)); h.focus();
     });
+    let busy = false;   // a drag or its settle is in progress; a second finger can't start another
     list.addEventListener('pointerdown', e => {
-      const h = e.target.closest('.ord-h'); if (!h || e.button > 0) return;
-      e.preventDefault();
+      const h = e.target.closest('.ord-h'); if (!h || e.button > 0 || busy) return;
+      e.preventDefault(); busy = true;
       const r = h.closest('.ord'), rs = rows(), from = rs.indexOf(r);
-      const step = r.offsetHeight, y0 = e.clientY;
-      let to = from;
+      // real slot positions (rows can differ in height: with or without a second line)
+      const tops = rs.map(x => x.offsetTop), hts = rs.map(x => x.offsetHeight), H = hts[from], y0 = e.clientY;
+      const minDy = tops[0] - tops[from], maxDy = tops[rs.length - 1] + hts[rs.length - 1] - H - tops[from];
+      const slotDy = t => t > from ? tops[t] + hts[t] - H - tops[from] : tops[t] - tops[from];
+      let to = from, dy = 0, raf = 0;
       h.setPointerCapture(e.pointerId);
       list.classList.add('sorting'); r.classList.add('lift');
+      const paint = () => { raf = 0; r.style.transform = `translate3d(0,${dy}px,0)`; };
       const mv = ev => {
-        const dy = Math.max(-from * step, Math.min((rs.length - 1 - from) * step, ev.clientY - y0));
-        r.style.transform = `translateY(${dy}px)`;
-        const n = Math.max(0, Math.min(rs.length - 1, from + Math.round(dy / step)));
+        dy = Math.max(minDy, Math.min(maxDy, ev.clientY - y0));
+        if (!raf) raf = requestAnimationFrame(paint);   // one write per frame, however fast the pointer reports
+        const mid = tops[from] + dy + H / 2;
+        let n = from;
+        for (let k = from + 1; k < rs.length; k++) if (mid > tops[k] + hts[k] / 2) n = k;
+        for (let k = from - 1; k >= 0; k--) if (mid < tops[k] + hts[k] / 2) n = k;
         if (n === to) return; to = n;
-        rs.forEach((x, k) => { if (x === r) return; const s = k > from && k <= to ? -step : k < from && k >= to ? step : 0; x.style.transform = s ? `translateY(${s}px)` : ''; });
+        if (navigator.vibrate) try { navigator.vibrate(4); } catch {}
+        rs.forEach((x, k) => { if (x === r) return; const s = k > from && k <= to ? -H : k < from && k >= to ? H : 0; x.style.transform = s ? `translate3d(0,${s}px,0)` : ''; });
       };
       const up = () => {
         h.removeEventListener('pointermove', mv); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up);
-        // settle the lifted row into its slot, then commit the DOM order
-        r.style.transform = `translateY(${(to - from) * step}px)`;
+        if (raf) { cancelAnimationFrame(raf); raf = 0; }
+        // settle the lifted row into its slot, then commit the DOM order in one frame with transitions off,
+        // so no row animates back from its old offset after it has moved in the DOM
         r.classList.remove('lift');
-        setTimeout(() => {
-          list.classList.remove('sorting');
+        r.style.transform = `translate3d(0,${slotDy(to)}px,0)`;
+        const commit = () => {
+          list.classList.add('ord-commit');
           rs.forEach(x => x.style.transform = '');
           if (to !== from) to > from ? rs[to].after(r) : rs[to].before(r);
-        }, calm() ? 0 : 220);
+          void list.offsetHeight;
+          list.classList.remove('ord-commit', 'sorting');
+          busy = false;
+        };
+        if (calm()) return commit();
+        let done = false;
+        const onEnd = ev => { if (ev.target === r && ev.propertyName === 'transform') fin(); };
+        const fin = () => { if (done) return; done = true; r.removeEventListener('transitionend', onEnd); commit(); };
+        r.addEventListener('transitionend', onEnd);
+        setTimeout(fin, 320);
       };
       h.addEventListener('pointermove', mv); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
     });
