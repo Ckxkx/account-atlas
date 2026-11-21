@@ -156,11 +156,22 @@ final class IconEntry { let image: UIImage; let favicon: Bool; init(_ i: UIImage
     keyCache[ck] = k
     return k
   }
+  /// "c:<len>:<hash>" for an account's own icon (data URL); the string is kept to decode on demand
+  private var custom: [String: String] = [:]
+  func key(name: String, domain: String, icon: String?) -> String {
+    guard let icon, !icon.isEmpty else { return key(name: name, domain: domain) }
+    let k = "c:\(icon.utf8.count):\(icon.hashValue)"
+    if custom[k] == nil { custom[k] = icon }
+    return k
+  }
+  /// "u:<https url>" for a remote image (App Store artwork in suggestions), memory only
+  func key(url: String) -> String { url.isEmpty ? "" : "u:" + url }
+
   func cached(_ key: String) -> IconEntry? { mem[key] }
   func hasFailed(_ key: String) -> Bool { failed.contains(key) }
 
   func prefetch(_ accounts: [Account]) {
-    for a in accounts { load(key(name: a.name, domain: a.domain)) { _ in } }
+    for a in accounts { load(key(name: a.name, domain: a.domain, icon: a.icon)) { _ in } }
   }
 
   func load(_ key: String, _ done: @escaping (IconEntry?) -> Void) {
@@ -169,6 +180,26 @@ final class IconEntry { let image: UIImage; let favicon: Bool; init(_ i: UIImage
     if waiting[key] != nil { waiting[key]!.append(done); return }
     waiting[key] = [done]
     let body = String(key.dropFirst(2)), disk = self.disk
+    if key.hasPrefix("c:") {
+      let src = custom[key] ?? ""
+      work.async {
+        let img = IconCodec.data(fromDataURL: src).flatMap { IconStore.decode(data: $0) }
+        Task { @MainActor in self.finish(key, img.map { IconEntry($0, false) }) }
+      }
+      return
+    }
+    if key.hasPrefix("u:") {
+      guard let u = URL(string: body) else { finish(key, nil); return }
+      URLSession.shared.dataTask(with: u) { data, resp, _ in
+        let ok = ((resp as? HTTPURLResponse)?.statusCode ?? 0) == 200
+        let img = ok ? data.flatMap { IconStore.decode(data: $0) } : nil
+        Task { @MainActor in
+          // a failed remote load may succeed later (offline now), so don't remember it as failed
+          if img == nil { self.waiting.removeValue(forKey: key)?.forEach { $0(nil) } } else { self.finish(key, IconEntry(img!, false)) }
+        }
+      }.resume()
+      return
+    }
     if key.hasPrefix("b:") {
       work.async {
         let path = Bundle.main.path(forResource: body, ofType: "png", inDirectory: "icons")
@@ -224,6 +255,8 @@ final class IconEntry { let image: UIImage; let favicon: Bool; init(_ i: UIImage
 struct AppIcon: View {
   let name: String
   let domain: String
+  var icon: String? = nil       // account.icon: wins over preset / favicon / letter
+  var url: String? = nil        // remote artwork (App Store suggestions)
   var size: CGFloat = 52
   @State private var loaded = 0   // bumps when an async load lands, to re-read the cache
   @State private var drew = Drew() // what the last body pass showed (plain box, never invalidates)
@@ -231,7 +264,7 @@ struct AppIcon: View {
 
   var body: some View {
     let r = RoundedRectangle(cornerRadius: size * 0.235, style: .continuous)
-    let key = IconStore.shared.key(name: name, domain: domain)
+    let key = url.map { IconStore.shared.key(url: $0) } ?? IconStore.shared.key(name: name, domain: domain, icon: icon)
     let _ = loaded
     let entry = IconStore.shared.cached(key)
     let _ = { drew.image = entry != nil }()
@@ -393,7 +426,7 @@ struct IconStack: View {
   var body: some View {
     HStack(spacing: -9) {
       ForEach(accounts.prefix(4)) { a in
-        AppIcon(name: a.name, domain: a.domain, size: 28)
+        AppIcon(name: a.name, domain: a.domain, icon: a.icon, size: 28)
           .overlay(RoundedRectangle(cornerRadius: 28 * 0.235, style: .continuous).stroke(.white.opacity(0.55), lineWidth: 1.5))
       }
       if accounts.count > 4 {
@@ -433,7 +466,7 @@ struct ReelRow: View {
   var body: some View {
     let a = account, b = brandColor(name: a.name, domain: a.domain)
     HStack(spacing: 12) {
-      AppIcon(name: a.name, domain: a.domain, size: 44)
+      AppIcon(name: a.name, domain: a.domain, icon: a.icon, size: 44)
       VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 6) {
           Text(a.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)

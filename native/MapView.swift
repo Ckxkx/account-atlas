@@ -94,7 +94,7 @@ struct MapView: View {
         let j = e.offset, a = e.element
         Button { store.route = .account(a.id) } label: {
           HStack(spacing: 8) {
-            AppIcon(name: a.name, domain: a.domain, size: 30)
+            AppIcon(name: a.name, domain: a.domain, icon: a.icon, size: 30)
             Text(a.handle.map { store.handleText($0) } ?? a.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
             Spacer(minLength: 0)
           }

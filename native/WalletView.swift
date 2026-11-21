@@ -188,7 +188,7 @@ struct AppGrid: View {
         ForEach(shown) { a in
           Button { store.route = .account(a.id) } label: {
             VStack(spacing: 6) {
-              AppIcon(name: a.name, domain: a.domain, size: 58)
+              AppIcon(name: a.name, domain: a.domain, icon: a.icon, size: 58)
                 .bakedShadow(RoundedRectangle(cornerRadius: 58 * 0.235, style: .continuous), key: "icon58" + a.name + a.domain,
                              color: brandColor(name: a.name, domain: a.domain).opacity(0.35), radius: 8, y: 4)
               Text(a.handle.map { store.handleText($0) } ?? a.name).font(.system(size: 12)).lineLimit(1).foregroundStyle(.primary)

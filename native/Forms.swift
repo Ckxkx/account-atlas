@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct IdentityForm: View {
   @Environment(Store.self) var store
@@ -103,12 +104,33 @@ struct AccountForm: View {
   @State private var handle: String
   @State private var notes: String
   @State private var ids: [String]
+  @State private var icon: String?
+  @State private var art: String? = nil          // App Store artwork shown while its icon downloads
+  @State private var iconJob = 0                 // newest icon change wins over a slower download
+  @State private var typed = false               // suggestions only after the user edits the name
+  @State private var appResults: [AppStoreApp] = []
+  @State private var iconMenu = false
+  @State private var photos = false
+  @State private var photoItem: PhotosPickerItem? = nil
+  @FocusState private var nameFocused: Bool
 
   init(existing: Account) {
     self.existing = existing
     _name = State(initialValue: existing.name); _domain = State(initialValue: existing.domain)
     _category = State(initialValue: existing.category); _handle = State(initialValue: existing.handle ?? "")
     _notes = State(initialValue: existing.notes); _ids = State(initialValue: existing.identityIds)
+    _icon = State(initialValue: existing.icon)
+  }
+
+  var query: String { typed && nameFocused ? name.trimmingCharacters(in: .whitespaces) : "" }
+  var presetHits: [Preset] {
+    let q = query.lowercased()
+    guard !q.isEmpty else { return [] }
+    return Array(Presets.all.filter { $0.name.lowercased().contains(q) || $0.domain.contains(q) }.prefix(4))
+  }
+  var storeHits: [AppStoreApp] {
+    let shown = Set(presetHits.map { $0.name.lowercased() })
+    return appResults.filter { !shown.contains($0.cleanName.lowercased()) && !shown.contains($0.trackName.lowercased()) }
   }
 
   var body: some View {
@@ -116,19 +138,61 @@ struct AccountForm: View {
       Form {
         Section {
           HStack(spacing: 14) {
-            AppIcon(name: name, domain: domain, size: 54)
+            Button { iconMenu = true } label: {
+              AppIcon(name: name, domain: domain, icon: icon, url: icon == nil ? art : nil, size: 54)
+                .overlay(alignment: .bottomTrailing) {
+                  Image(systemName: "camera.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 20, height: 20).background(Circle().fill(Color.accentColor)).overlay(Circle().stroke(.background, lineWidth: 2))
+                    .offset(x: 5, y: 5)
+                }
+            }
+            .buttonStyle(PressStyle(scale: 0.92))
+            .accessibilityLabel("更换图标")
             VStack(spacing: 8) {
-              TextField("名称", text: $name).font(.system(size: 18, weight: .semibold))
+              TextField("名称", text: $name).font(.system(size: 18, weight: .semibold)).focused($nameFocused)
               TextField("域名（可选）", text: $domain).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled().foregroundStyle(.secondary)
             }
           }.padding(.vertical, 4)
           TextField("账号名（可选）", text: $handle).textInputAutocapitalization(.never).autocorrectionDisabled()
           Picker("分类", selection: $category) { ForEach(CATS, id: \.self) { Text($0).tag($0) } }
         }
+        if !presetHits.isEmpty || !storeHits.isEmpty {
+          Section {
+            ForEach(presetHits, id: \.name) { p in
+              suggestion(AppIcon(name: p.name, domain: p.domain, size: 32), p.name, p.domain) { pick(p) }
+            }
+            if !storeHits.isEmpty {
+              AppStoreBadge().padding(.top, presetHits.isEmpty ? 0 : 4)
+              ForEach(storeHits) { a in
+                suggestion(AppIcon(name: a.cleanName, domain: a.domain, url: a.thumbURL, size: 32), a.cleanName, a.domain.isEmpty ? a.category : a.domain) { pick(a) }
+              }
+            }
+          } header: { Text("建议") }
+          .transition(.opacity)
+        }
         Section("用的邮箱和手机号") {
           IdentityToggles(selected: $ids)
         }
         Section("备注") { TextField("两步验证、找回方式…", text: $notes, axis: .vertical).lineLimit(2...6) }
+      }
+      .animation(Motion.snappy, value: presetHits.count + storeHits.count)
+      .onChange(of: name) { if nameFocused { typed = true } }
+      .appStoreResults(for: query, into: $appResults)
+      .confirmationDialog("更换图标", isPresented: $iconMenu, titleVisibility: .visible) {
+        Button("从相册选择") { photos = true }
+        if icon != nil || art != nil { Button("使用默认图标") { setIcon(nil) } }
+        Button("取消", role: .cancel) {}
+      }
+      .photosPicker(isPresented: $photos, selection: $photoItem, matching: .images)
+      .onChange(of: photoItem) {
+        guard let item = photoItem else { return }
+        photoItem = nil
+        iconJob &+= 1; let job = iconJob
+        Task {
+          let u = await IconCodec.dataURL(from: item)
+          guard job == iconJob else { return }
+          if let u { withAnimation(Motion.snappy) { icon = u; art = nil } } else { store.show("这张图片读不出来") }
+        }
       }
       .navigationTitle("编辑").navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -141,12 +205,50 @@ struct AccountForm: View {
                 s.accounts[k].category = category; s.accounts[k].notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
                 let h = handle.trimmingCharacters(in: .whitespaces); s.accounts[k].handle = h.isEmpty ? nil : h
                 s.accounts[k].identityIds = ids
+                s.accounts[k].icon = icon
               }
             }
+            IconStore.shared.prefetch(store.data.accounts.filter { $0.id == existing.id })
             dismiss()
           }.bold().disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
         }
       }
+    }
+  }
+
+  func suggestion(_ icon: some View, _ title: String, _ sub: String, _ action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack(spacing: 12) {
+        icon
+        VStack(alignment: .leading, spacing: 1) {
+          Text(title).foregroundStyle(.primary).lineLimit(1)
+          if !sub.isEmpty { Text(sub).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1) }
+        }
+        Spacer(minLength: 0)
+      }
+    }
+  }
+
+  func setIcon(_ v: String?) {
+    iconJob &+= 1
+    withAnimation(Motion.snappy) { icon = v; art = nil }
+  }
+  func pick(_ p: Preset) {
+    typed = false; nameFocused = false
+    name = p.name; domain = p.domain; category = p.category
+    setIcon(nil)
+  }
+  func pick(_ a: AppStoreApp) {
+    typed = false; nameFocused = false
+    name = a.cleanName
+    if !a.domain.isEmpty { domain = a.domain }
+    category = a.category
+    iconJob &+= 1; let job = iconJob
+    withAnimation(Motion.snappy) { icon = nil; art = a.thumbURL.isEmpty ? nil : a.thumbURL }
+    Task {
+      let u = await a.iconDataURL()
+      guard job == iconJob else { return }
+      withAnimation(Motion.snappy) { icon = u; art = nil }
     }
   }
 }
@@ -193,6 +295,12 @@ struct PickerSheet: View {
   @State private var manual = false
   @State private var mName = ""
   @State private var mDomain = ""
+  @State private var appResults: [AppStoreApp] = []
+  @State private var art: [String: String] = [:]      // App Store artwork per picked key, until its icon lands
+  @State private var iconFor: String? = nil           // picked key whose icon menu is open
+  @State private var uploadFor: String? = nil         // picked key the photo picker is choosing for
+  @State private var photos = false
+  @State private var photoItem: PhotosPickerItem? = nil
 
   var cats: [String] {
     (store.customApps.isEmpty ? [] : ["我添加的"]) + ["常用"] + CATS.filter { c in Presets.all.contains { $0.category == c } }
@@ -208,6 +316,16 @@ struct PickerSheet: View {
     }
   }
   func key(_ p: Preset) -> String { p.name.lowercased() }
+  var storeHits: [AppStoreApp] {
+    guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+    let shown = Set(list.map(key))
+    return appResults.filter { !shown.contains($0.cleanName.lowercased()) && !shown.contains($0.trackName.lowercased()) }
+  }
+  func preset(_ a: AppStoreApp) -> Preset { Preset(name: a.cleanName, domain: a.domain, category: a.category, color: "") }
+  func setIcon(_ k: String, _ v: String?) {
+    if let i = picked.firstIndex(where: { key($0) == k }) { picked[i].icon = v }
+    art[k] = nil
+  }
 
   var body: some View {
     NavigationStack {
@@ -241,9 +359,17 @@ struct PickerSheet: View {
             }
           }.buttonStyle(PressStyle(scale: 0.9))
         }.padding(.horizontal, 12)
+        if !storeHits.isEmpty {
+          AppStoreBadge().padding(.horizontal, 18).padding(.top, 4)
+          LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6, alignment: .top), count: 4), spacing: 18) {
+            ForEach(storeHits) { a in storeTile(a) }
+          }.padding(.horizontal, 12)
+          .transition(.opacity)
+        }
       }.padding(.top, 6).padding(.bottom, 90)
     }
     .scrollIndicators(.hidden)
+    .appStoreResults(for: query, into: $appResults)
     .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索 App 或网站")
     .navigationTitle("添加网站或 App").navigationBarTitleDisplayMode(.inline)
     .toolbar {
@@ -290,11 +416,45 @@ struct PickerSheet: View {
     }.buttonStyle(.plain)
   }
 
+  func storeTile(_ a: AppStoreApp) -> some View {
+    let p = preset(a), k = key(p)
+    let on = picked.contains { key($0) == k }
+    return Button {
+      withAnimation(Motion.snappy) {
+        if on { picked.removeAll { key($0) == k }; art[k] = nil; return }
+        picked.append(p)
+        if !a.thumbURL.isEmpty { art[k] = a.thumbURL }
+      }
+      Task {
+        let u = await a.iconDataURL()
+        // only if it's still picked and the user hasn't chosen another icon meanwhile
+        guard art[k] != nil, let u else { art[k] = nil; return }
+        setIcon(k, u)
+      }
+    } label: {
+      VStack(spacing: 6) {
+        AppIcon(name: p.name, domain: p.domain, url: a.thumbURL, size: 60)
+          .overlay(alignment: .topTrailing) {
+            if on {
+              Image(systemName: "checkmark.circle.fill").font(.system(size: 22)).symbolRenderingMode(.palette)
+                .foregroundStyle(.white, Color.accentColor).background(Circle().fill(.white).padding(3)).offset(x: 7, y: -7)
+                .transition(.scale.combined(with: .opacity))
+            }
+          }
+          .scaleEffect(on ? 0.92 : 1)
+        Text(p.name).font(.system(size: 12)).lineLimit(1).foregroundStyle(.primary)
+      }
+    }.buttonStyle(.plain)
+  }
+  func pickedIcon(_ p: Preset, size: CGFloat) -> AppIcon {
+    AppIcon(name: p.name, domain: p.domain, icon: p.icon, url: p.icon == nil ? art[key(p)] : nil, size: size)
+  }
+
   var pickedBar: some View {
     ScrollView(.horizontal) {
       HStack(spacing: 10) {
-        ForEach(picked, id: \.self) { p in
-          AppIcon(name: p.name, domain: p.domain, size: 38).transition(.scale.combined(with: .opacity))
+        ForEach(picked, id: \.name) { p in
+          pickedIcon(p, size: 38).transition(.scale.combined(with: .opacity))
         }
       }.padding(.horizontal, 16).padding(.vertical, 10)
     }
@@ -305,9 +465,10 @@ struct PickerSheet: View {
   var chooseIdentities: some View {
     Form {
       Section {
-        ForEach(picked, id: \.self) { p in
+        ForEach(picked, id: \.name) { p in
           HStack(spacing: 12) {
-            AppIcon(name: p.name, domain: p.domain, size: 36)
+            Button { iconFor = key(p) } label: { pickedIcon(p, size: 36) }
+              .buttonStyle(PressStyle(scale: 0.9)).accessibilityLabel("更换图标")
             VStack(alignment: .leading, spacing: 2) {
               Text(p.name).font(.system(size: 16, weight: .semibold))
               TextField("账号名（可选）", text: Binding(get: { handles[key(p)] ?? "" }, set: { handles[key(p)] = $0 }))
@@ -315,10 +476,26 @@ struct PickerSheet: View {
             }
           }
         }
-      } header: { Text("\(picked.count) 个网站与 App") } footer: { Text("同一个网站有几个账号，可以分别记一条，用账号名区分。") }
+      } header: { Text("\(picked.count) 个网站与 App") } footer: { Text("同一个网站有几个账号，可以分别记一条，用账号名区分。点图标可以换成相册里的图片。") }
       Section("用哪个邮箱或手机号注册、绑定的") {
         if store.data.identities.isEmpty { Text("还没有邮箱或手机号，先保存，之后再关联也行。").foregroundStyle(.secondary) }
         IdentityToggles(selected: $ids)
+      }
+    }
+    .confirmationDialog("更换图标", isPresented: Binding(get: { iconFor != nil }, set: { if !$0 { iconFor = nil } }), titleVisibility: .visible) {
+      Button("从相册选择") { uploadFor = iconFor; iconFor = nil; photos = true }
+      if let k = iconFor, let p = picked.first(where: { key($0) == k }), p.icon != nil || art[k] != nil {
+        Button("使用默认图标") { withAnimation(Motion.snappy) { setIcon(k, nil) }; iconFor = nil }
+      }
+      Button("取消", role: .cancel) { iconFor = nil }
+    }
+    .photosPicker(isPresented: $photos, selection: $photoItem, matching: .images)
+    .onChange(of: photoItem) {
+      guard let item = photoItem, let k = uploadFor else { return }
+      photoItem = nil
+      art[k] = nil   // a pending App Store download no longer applies
+      Task {
+        if let u = await IconCodec.dataURL(from: item) { withAnimation(Motion.snappy) { setIcon(k, u) } } else { store.show("这张图片读不出来") }
       }
     }
     .navigationTitle("选择身份").navigationBarTitleDisplayMode(.inline)
@@ -334,11 +511,12 @@ struct PickerSheet: View {
       let k = e.offset, p = e.element
       return Account(name: p.name, domain: p.domain, category: p.category, identityIds: ids,
               handle: (handles[key(p)] ?? "").trimmingCharacters(in: .whitespaces).isEmpty ? nil : handles[key(p)]!.trimmingCharacters(in: .whitespaces),
-              createdAt: now - Double(k))
+              createdAt: now - Double(k), icon: p.icon)
     }
     store.mutate(made.count == 1 ? "已添加 \(made[0].name)" : "已添加 \(made.count) 个网站与 App") { s in
       s.accounts.append(contentsOf: made)
     }
+    IconStore.shared.prefetch(made)
     dismiss()
   }
 }

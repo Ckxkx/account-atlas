@@ -89,7 +89,7 @@ struct AccountDetail: View {
       NavigationStack {
         ScrollView {
           VStack(spacing: 0) {
-            AppIcon(name: a.name, domain: a.domain, size: 96)
+            AppIcon(name: a.name, domain: a.domain, icon: a.icon, size: 96)
               .bakedShadow(RoundedRectangle(cornerRadius: 96 * 0.235, style: .continuous), key: "icon96" + a.name + a.domain, color: b.opacity(0.5), radius: 24, y: 10).padding(.top, 10)
             Text(a.name).font(.system(size: 26, weight: .bold)).padding(.top, 14)
             if let h = a.handle { Text(store.handleText(h)).font(.system(size: 15)).foregroundStyle(.secondary).padding(.top, 2) }

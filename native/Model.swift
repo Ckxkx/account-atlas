@@ -42,9 +42,12 @@ struct Account: Codable, Identifiable, Hashable {
   var handle: String? = nil
   var createdAt: Double = nowMS()
   var updatedAt: Double? = nil
+  /// custom / App Store icon: a data:image/png|jpeg;base64 URL (square, ≤128 px). nil = preset/favicon.
+  var icon: String? = nil
 
-  init(id: String = newID(), name: String, domain: String, category: String, identityIds: [String], notes: String = "", handle: String? = nil, createdAt: Double = nowMS()) {
+  init(id: String = newID(), name: String, domain: String, category: String, identityIds: [String], notes: String = "", handle: String? = nil, createdAt: Double = nowMS(), icon: String? = nil) {
     self.id = id; self.name = name; self.domain = domain; self.category = category; self.identityIds = identityIds; self.notes = notes; self.handle = handle; self.createdAt = createdAt
+    self.icon = (icon?.isEmpty ?? true) ? nil : icon
   }
   init(from d: Decoder) throws {
     let c = try d.container(keyedBy: CodingKeys.self)
@@ -58,6 +61,22 @@ struct Account: Codable, Identifiable, Hashable {
     handle = (h?.isEmpty ?? true) ? nil : h
     createdAt = (try? c.decode(Double.self, forKey: .createdAt)) ?? nowMS()
     updatedAt = try? c.decode(Double.self, forKey: .updatedAt)
+    let ic = try? c.decode(String.self, forKey: .icon)
+    icon = (ic?.isEmpty ?? true) ? nil : ic
+  }
+  // written by hand so an empty icon is never written (old clients just see the key missing)
+  func encode(to e: Encoder) throws {
+    var c = e.container(keyedBy: CodingKeys.self)
+    try c.encode(id, forKey: .id)
+    try c.encode(name, forKey: .name)
+    try c.encode(domain, forKey: .domain)
+    try c.encode(category, forKey: .category)
+    try c.encode(identityIds, forKey: .identityIds)
+    try c.encode(notes, forKey: .notes)
+    try c.encodeIfPresent(handle, forKey: .handle)
+    try c.encode(createdAt, forKey: .createdAt)
+    try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
+    if let icon, !icon.isEmpty { try c.encode(icon, forKey: .icon) }
   }
 }
 
@@ -88,7 +107,7 @@ func nowMS() -> Double { (Date().timeIntervalSince1970 * 1000).rounded() }
 
 let CATS = ["社交", "购物", "支付金融", "开发", "AI", "娱乐", "游戏", "出行", "工具", "加密", "其他"]
 
-struct Preset: Hashable { let name: String; let domain: String; let category: String; let color: String }
+struct Preset: Hashable { let name: String; let domain: String; let category: String; let color: String; var icon: String? = nil }
 
 // MARK: - helpers
 
