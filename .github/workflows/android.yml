@@ -1,12 +1,10 @@
 name: Build Android APK
 
-# Push trigger paused: builds run on the public runner Ckxkx/atlas-build (see /workspace/work/atlas-build-trigger.sh).
-# To restore, re-add under on:
-#   push:
-#     branches: [main]
-#     paths: <see git history>
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['android/**', 'icons/**', '.github/workflows/android.yml']
 
 permissions:
   contents: write
@@ -20,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build number (old public repo ended at r4; offset keeps versionCode increasing)
-        run: echo "BUILD=$(( GITHUB_RUN_NUMBER + 100 ))" >> "$GITHUB_ENV"
+      - name: Build number (offset +300: earlier builds reached r202; keeps tags and versionCode increasing)
+        run: echo "BUILD=$(( GITHUB_RUN_NUMBER + 300 ))" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -56,23 +54,21 @@ jobs:
           mkdir out && cp Atlas.apk out/ && cd out
           git init -q -b apk && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "APK r${{ env.BUILD }} ($(git -C .. log -1 --format=%h))"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" apk
-      - name: Publish release to the public repo
+      - name: Publish GitHub Releases
         env:
-          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
-          PUB: Ckxkx/account-atlas
+          GH_TOKEN: ${{ github.token }}
+          R: ${{ github.repository }}
         run: |
           set -euo pipefail
-          test -n "$GH_TOKEN" || { echo "::error::PUBLIC_REPO_TOKEN secret missing"; exit 1; }
           N=${{ env.BUILD }}
           MSG=$(git log -1 --format=%s)
-          TARGET=$(gh api "repos/$PUB/commits/main" -q .sha)   # public main, never private source
-          gh release create "android-v1.0-r$N" Atlas.apk --repo "$PUB" --target "$TARGET" \
+          gh release create "android-v1.0-r$N" Atlas.apk --repo "$R" --target "${{ github.sha }}" \
             --title "账号星图 安卓版 1.0 · 构建 $N" --latest=false \
             --notes "安卓 APK（Android 8.0+），直接下载 Atlas.apk 安装；以后的版本会覆盖安装，数据保留。本次：$MSG"
           # also put the APK on the latest release, so the latest release always carries both files
-          LATEST=$(gh api "repos/$PUB/releases/latest" -q .tag_name 2>/dev/null || true)
+          LATEST=$(gh api "repos/$R/releases/latest" -q .tag_name 2>/dev/null || true)
           if [ -n "$LATEST" ] && [ "$LATEST" != "android-v1.0-r$N" ]; then
-            gh release upload "$LATEST" Atlas.apk --repo "$PUB" --clobber && echo "attached to $LATEST"
+            gh release upload "$LATEST" Atlas.apk --repo "$R" --clobber && echo "attached to $LATEST"
           fi
 
   shots:
@@ -82,8 +78,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Build number (old public repo ended at r4; offset keeps versionCode increasing)
-        run: echo "BUILD=$(( GITHUB_RUN_NUMBER + 100 ))" >> "$GITHUB_ENV"
+      - name: Build number (offset +300: earlier builds reached r202; keeps tags and versionCode increasing)
+        run: echo "BUILD=$(( GITHUB_RUN_NUMBER + 300 ))" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           name: Atlas-apk

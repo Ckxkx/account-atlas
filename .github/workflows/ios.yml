@@ -1,12 +1,10 @@
 name: Build iOS IPA
 
-# Push trigger paused: builds run on the public runner Ckxkx/atlas-build (see /workspace/work/atlas-build-trigger.sh).
-# To restore, re-add under on:
-#   push:
-#     branches: [main]
-#     paths: <see git history>
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['ios/**', 'native/**', 'icons/**', '.github/workflows/ios.yml']
 
 concurrency:
   group: ios
@@ -39,6 +37,7 @@ jobs:
           plutil -convert binary1 "$APP/Info.plist"
           echo -n 'APPL????' > "$APP/PkgInfo"
           cd build && zip -qX -D "../Atlas-$VER.ipa" "Payload/Atlas.app/Info.plist" && zip -qrXy "../Atlas-$VER.ipa" Payload -x "Payload/Atlas.app/Info.plist" && cd ..   # Info.plist first: sign tools that scan local headers (全能签 etc.) find it even on a partial download
+          test "$(unzip -Z1 "Atlas-$VER.ipa" | head -1)" = "Payload/Atlas.app/Info.plist"
           ls -la *.ipa; file "$APP/Atlas"
       - uses: actions/upload-artifact@v4
         with:
@@ -49,28 +48,24 @@ jobs:
           mkdir out && cp *.ipa out/ && cd out
           git init -q -b ipa && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "IPA $(ls *.ipa)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ipa
-      - name: Publish release to the public repo
+      - name: Publish GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
-          PUB: Ckxkx/account-atlas
-          SRC_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          R: ${{ github.repository }}
         run: |
           set -euo pipefail
-          test -n "$GH_TOKEN" || { echo "::error::PUBLIC_REPO_TOKEN secret missing"; exit 1; }
           F=$(ls Atlas-*.ipa); cp "$F" Atlas.ipa
-          N=$(( ${{ github.run_number }} + 100 ))   # continue the old public numbering (old repo ended at r19)
+          N=$(( ${{ github.run_number }} + 300 ))   # offset: earlier builds reached r202; keeps tags increasing
           MSG=$(git log -1 --format=%s)
-          # releases and tags point at the public repo's own main, never at private source
-          TARGET=$(gh api "repos/$PUB/commits/main" -q .sha)
-          # carry the newest Android APK too (from this private repo's apk branch), so the latest release has both files
+          # carry the newest Android APK too (from the apk branch), so the latest release has both files
           FILES="Atlas.ipa"
-          if git clone -q --depth 1 -b apk "https://x-access-token:${SRC_TOKEN}@github.com/${{ github.repository }}.git" apkb && [ -f apkb/Atlas.apk ]; then
+          if git clone -q --depth 1 -b apk "https://x-access-token:${GH_TOKEN}@github.com/${R}.git" apkb && [ -f apkb/Atlas.apk ]; then
             cp apkb/Atlas.apk Atlas.apk; FILES="Atlas.ipa Atlas.apk"
           else echo "::warning::no APK on the apk branch yet"; fi
-          gh release create "v2.0-r$N" $FILES --repo "$PUB" --target "$TARGET" --latest \
+          gh release create "v2.0-r$N" $FILES --repo "$R" --target "${{ github.sha }}" --latest \
             --title "账号星图 2.0 · 构建 $N" \
             --notes "Atlas.ipa：未签名 iOS 包，用 SideStore / 爱思助手 / Sideloadly 自签后安装。Atlas.apk：安卓包，直接安装。本次：$MSG"
-          gh release view "v2.0-r$N" --repo "$PUB" --json url,assets -q '.url, (.assets[].name)'
+          gh release view "v2.0-r$N" --repo "$R" --json url,assets -q '.url, (.assets[].name)'
 
   preview:
     runs-on: macos-15
