@@ -1,5 +1,6 @@
 name: Deploy web app (gh-pages)
 
+# Triggered by pushes that touch the web files.
 # The web app is served by GitHub Pages from this repo's gh-pages branch (Pages source = gh-pages / root)
 # at https://huichen.dev/account-atlas/ (huichen.dev is the user site's custom domain).
 on:

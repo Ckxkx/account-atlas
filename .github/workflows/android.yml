@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build number (offset +300: earlier builds reached r202; keeps tags and versionCode increasing)
+      - name: Build number (offset +300 so tags and versionCode stay above r202)
         run: echo "BUILD=$(( GITHUB_RUN_NUMBER + 300 ))" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
@@ -78,7 +78,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Build number (offset +300: earlier builds reached r202; keeps tags and versionCode increasing)
+      - name: Build number (offset +300 so tags and versionCode stay above r202)
         run: echo "BUILD=$(( GITHUB_RUN_NUMBER + 300 ))" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
