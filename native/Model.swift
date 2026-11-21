@@ -64,6 +64,7 @@ struct Account: Codable, Identifiable, Hashable {
     let ic = try? c.decode(String.self, forKey: .icon)
     icon = (ic?.isEmpty ?? true) ? nil : ic
   }
+  enum CodingKeys: String, CodingKey { case id, name, domain, category, identityIds, notes, handle, createdAt, updatedAt, icon }
   // written by hand so an empty icon is never written (old clients just see the key missing)
   func encode(to e: Encoder) throws {
     var c = e.container(keyedBy: CodingKeys.self)
