@@ -82,30 +82,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.withFrameNanos
 import kotlin.math.hypot
 import kotlin.math.max
 
 class MainActivity : ComponentActivity() {
 
-  /** Ask for the panel's fastest mode at the current resolution (120/144Hz).
-   *  Many ROMs keep apps at 60Hz unless the window requests a higher mode. */
-  @Suppress("DEPRECATION")
-  private fun requestHighRefreshRate() {
-    val display = (if (android.os.Build.VERSION.SDK_INT >= 30) display else windowManager.defaultDisplay) ?: return
-    val cur = display.mode
-    val best = display.supportedModes
-      .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
-      .maxByOrNull { it.refreshRate } ?: return
-    val lp = window.attributes
-    lp.preferredDisplayModeId = best.modeId
-    lp.preferredRefreshRate = best.refreshRate
-    window.attributes = lp
-  }
-
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    requestHighRefreshRate()
+    // No forced refresh-rate mode: the system's adaptive rate (60/90/120 Hz) is left alone, which saves
+    // battery and avoids mode-switch hitches on some ROMs. Smoothness comes from the animations instead.
     Store.init(applicationContext)
+    IconCache.prewarm(applicationContext)
     Sync.init()
     Store.onSaved = { Sync.schedule() }
     // launch extras used by the CI emulator screenshots
@@ -126,8 +114,7 @@ class MainActivity : ComponentActivity() {
     enableEdgeToEdge(SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
     setContent { AtlasRoot(startTab) }
   }
-  override fun onResume() { super.onResume()
-    requestHighRefreshRate(); Sync.runNow() }
+  override fun onResume() { super.onResume(); Sync.runNow() }
 }
 
 object ThemeFX { var origin = Offset.Zero; var request: ((String) -> Unit)? = null }
@@ -262,13 +249,21 @@ fun Sheets() {
   }
 }
 
+private val SheetShape = RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp)
+
 @Composable
 fun SheetFrame(leaving: Boolean, covered: Boolean, onGone: () -> Unit, content: @Composable () -> Unit) {
   val y = remember { Animatable(1f) }
   var h by remember { mutableStateOf(1f) }
   val scope = rememberCoroutineScope()
   LaunchedEffect(leaving) {
-    if (leaving) { y.animateTo(1f, calm(420f)); onGone() } else y.animateTo(0f, calm(320f))
+    if (leaving) { y.animateTo(1f, calm(420f)); onGone() }
+    else {
+      // Let the sheet's first (heaviest) frame compose and draw off-screen before the clock starts,
+      // so the slide-up begins from its first position instead of skipping the opening frames.
+      if (y.value == 1f) { withFrameNanos { }; withFrameNanos { } }
+      y.animateTo(0f, calm(320f))
+    }
   }
   val coverScale by animateFloatAsState(if (covered) 0.94f else 1f, calm(), label = "cover")
   Box(Modifier.fillMaxSize()) {
@@ -277,9 +272,11 @@ fun SheetFrame(leaving: Boolean, covered: Boolean, onGone: () -> Unit, content: 
     BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().padding(top = 10.dp)) {
       h = constraints.maxHeight.toFloat()
       Box(Modifier.fillMaxSize()
-        .graphicsLayer { translationY = y.value * h; scaleX = coverScale; scaleY = coverScale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f) }
-        .shadow(20.dp, RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp))
-        .clip(RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp))
+        // one layer does the move, the shadow and the rounded clip (no separate shadow + clip layers)
+        .graphicsLayer {
+          translationY = y.value * h; scaleX = coverScale; scaleY = coverScale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+          shadowElevation = 20.dp.toPx(); shape = SheetShape; clip = true
+        }
         .background(if (pal.dark) hex("#0b0b0d") else hex("#f2f2f7"))
         .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {}
       ) {

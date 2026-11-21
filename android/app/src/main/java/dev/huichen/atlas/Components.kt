@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -182,15 +183,23 @@ fun T(text: String, size: Float, weight: FontWeight = FontWeight.Normal, color: 
 // MARK: - app icon
 
 object IconCache {
-  val bitmaps = HashMap<String, ImageBitmap?>()
+  /** Decoded preset icons. Filled off the main thread (prewarm at launch, or on first use) so a sheet
+   *  full of icons never decodes PNGs inside the frame that opens it. */
+  val bitmaps = java.util.concurrent.ConcurrentHashMap<String, ImageBitmap>()
   val remote = mutableStateMapOf<String, ImageBitmap?>()
   private val http = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
-  fun local(ctx: Context, name: String, domain: String): ImageBitmap? {
+  fun preset(name: String, domain: String): Preset? {
     val d = cleanDomain(domain); val n = name.lowercase()
-    val p = Presets.all.firstOrNull { (d.isNotEmpty() && (d == it.domain || d.endsWith("." + it.domain))) || (d.isEmpty() && it.name.lowercase() == n) } ?: return null
-    return bitmaps.getOrPut(p.domain) {
-      runCatching { ctx.assets.open("icons/${p.domain}.png").use { BitmapFactory.decodeStream(it)?.asImageBitmap() } }.getOrNull()
-    }
+    return Presets.all.firstOrNull { (d.isNotEmpty() && (d == it.domain || d.endsWith("." + it.domain))) || (d.isEmpty() && it.name.lowercase() == n) }
+  }
+  private fun decode(ctx: Context, p: Preset): ImageBitmap? = bitmaps[p.domain] ?: runCatching {
+    ctx.assets.open("icons/${p.domain}.png").use { BitmapFactory.decodeStream(it) }?.asImageBitmap()?.also { it.prepareToDraw(); bitmaps[p.domain] = it }
+  }.getOrNull()
+  suspend fun load(ctx: Context, p: Preset): ImageBitmap? = bitmaps[p.domain] ?: withContext(Dispatchers.IO) { decode(ctx, p) }
+  /** Decode every preset icon in the background right after launch. */
+  fun prewarm(ctx: Context) {
+    val app = ctx.applicationContext
+    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { Presets.all.forEach { decode(app, it) } }
   }
   suspend fun fetch(domain: String) {
     if (remote.containsKey(domain)) return
@@ -210,11 +219,14 @@ object IconCache {
 fun AppIcon(name: String, domain: String, size: Dp = 52.dp, modifier: Modifier = Modifier) {
   val ctx = LocalContext.current
   val shape = squircle(size)
-  val local = remember(name, domain) { IconCache.local(ctx, name, domain) }
-  val d = cleanDomain(domain)
+  val preset = remember(name, domain) { IconCache.preset(name, domain) }
+  val local by androidx.compose.runtime.produceState(preset?.let { IconCache.bitmaps[it.domain] }, preset) {
+    if (value == null && preset != null) value = IconCache.load(ctx, preset)
+  }
+  val d = if (preset != null) "" else cleanDomain(domain)
   Box(modifier.size(size).clip(shape).border(0.5.dp, Color.White.copy(alpha = 0.12f), shape), contentAlignment = Alignment.Center) {
     if (local != null) {
-      Image(local, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+      Image(local!!, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     } else {
       if (d.isNotEmpty()) androidx.compose.runtime.LaunchedEffect(d) { IconCache.fetch(d) }
       val r = if (d.isNotEmpty()) IconCache.remote[d] else null
