@@ -63,7 +63,7 @@ GitHub 下载慢的话，可以从 huichen.dev/downloads 下载：[Atlas.apk](ht
 - 网页版：`python3 -m http.server 8080`，打开 `http://localhost:8080`
 - 安卓版：`cd android && ./gradlew assembleRelease`（JDK 17 + Android SDK）；没有配置签名密钥（`ATLAS_KEYSTORE`）时会自动用调试密钥签名。启动图标只有一个源文件 `android/icon-src/icon-1024.png`，换图后重新构建即可
 - iOS 版：需要 macOS + Xcode，用 `swiftc` 编译 `native/*.swift`，步骤见 `.github/workflows/ios.yml`
-- 本仓库推送到 `main` 后，GitHub Actions 会自动构建：`web.yml` 部署网页版，`android.yml` 构建签名 APK，`ios.yml` 构建未签名 IPA，并发布到 Releases
+- 推送到 `main` 后，GitHub Actions 只做构建检查：`web.yml` 部署网页版，`android.yml` / `ios.yml` 构建 APK 和 IPA（放在 Actions 产物里，不发 Release）。发版只在打版本标签时进行，规则见 [RELEASING.md](RELEASING.md)
 
 二次创作或自己打包发布时，请把 Logo 和应用图标换成你自己的（见[许可](#许可)）。
 

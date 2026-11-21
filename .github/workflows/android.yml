@@ -1,25 +1,38 @@
 name: Build Android APK
+# Push to main / PR: build + test only, the APK is kept as an Actions artifact (no release, no branch).
+# Releases are made by release.yml, which calls this workflow with a version (2.1, 2.2, ...).
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths: ['android/**', 'icons/**', '.github/workflows/android.yml']
   push:
     branches: [main]
     paths: ['android/**', 'icons/**', '.github/workflows/android.yml']
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: android
-  cancel-in-progress: false
+  group: android-${{ inputs.version || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build number (offset +300 so tags and versionCode stay above r202)
-        run: echo "BUILD=$(( GITHUB_RUN_NUMBER + 300 ))" >> "$GITHUB_ENV"
+        with:
+          fetch-depth: 0
+      - name: Version (versionName = release version, versionCode = commit count + 1000, always increasing)
+        run: |
+          echo "BUILD=$(( $(git rev-list --count HEAD) + 1000 ))" >> "$GITHUB_ENV"
+          echo "VERSION=${{ inputs.version || 'dev' }}" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -37,6 +50,7 @@ jobs:
           ATLAS_KEYSTORE: ${{ runner.temp }}/atlas.jks
           ATLAS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ATLAS_BUILD: ${{ env.BUILD }}
+          ATLAS_VERSION: ${{ env.VERSION }}
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon --stacktrace testReleaseUnitTest assembleRelease
@@ -49,37 +63,15 @@ jobs:
         with:
           name: Atlas-apk
           path: Atlas.apk
-      - name: Publish APK to the apk branch
-        run: |
-          mkdir out && cp Atlas.apk out/ && cd out
-          git init -q -b apk && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "APK r${{ env.BUILD }} ($(git -C .. log -1 --format=%h))"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" apk
-      - name: Publish GitHub Releases
-        env:
-          GH_TOKEN: ${{ github.token }}
-          R: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          N=${{ env.BUILD }}
-          MSG=$(git log -1 --format=%s)
-          gh release create "android-v1.0-r$N" Atlas.apk --repo "$R" --target "${{ github.sha }}" \
-            --title "账号星图 安卓版 1.0 · 构建 $N" --latest=false \
-            --notes "安卓 APK（Android 8.0+），直接下载 Atlas.apk 安装；以后的版本会覆盖安装，数据保留。本次：$MSG"
-          # also put the APK on the latest release, so the latest release always carries both files
-          LATEST=$(gh api "repos/$R/releases/latest" -q .tag_name 2>/dev/null || true)
-          if [ -n "$LATEST" ] && [ "$LATEST" != "android-v1.0-r$N" ]; then
-            gh release upload "$LATEST" Atlas.apk --repo "$R" --clobber && echo "attached to $LATEST"
-          fi
 
   shots:
     needs: apk
+    if: ${{ !inputs.version }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Build number (offset +300 so tags and versionCode stay above r202)
-        run: echo "BUILD=$(( GITHUB_RUN_NUMBER + 300 ))" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           name: Atlas-apk
@@ -96,17 +88,11 @@ jobs:
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: bash android/ci/shots.sh Atlas.apk shots
-      - name: Publish screenshots to the shots branch (android/)
-        run: |
-          set -e
-          git config --global user.name atlas-bot; git config --global user.email bot@users.noreply.github.com
-          URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          for try in 1 2 3; do
-            rm -rf sb
-            if git clone -q --depth 1 -b shots "$URL" sb; then :; else mkdir sb && git -C sb init -q -b shots; fi
-            rm -rf sb/android && mkdir -p sb/android && cp shots/*.png shots/*.log sb/android/ 2>/dev/null || true
-            cd sb && git add -A && (git commit -qm "android shots r${{ env.BUILD }}" || true)
-            if git push -q "$URL" HEAD:shots; then exit 0; fi
-            cd ..; sleep 5
-          done
-          exit 1
+      - name: Keep screenshots as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-shots
+          path: shots/
+          retention-days: 14
+          if-no-files-found: ignore

@@ -1,25 +1,35 @@
 name: Build iOS IPA
-# Runs on push to main in this repo; publishes releases with GITHUB_TOKEN (tags v2.0-r<run+300>).
+# Push to main: build only, the IPA is kept as an Actions artifact (no release, no branch).
+# Releases are made by release.yml, which calls this workflow with a version (2.1, 2.2, ...).
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths: ['ios/**', 'native/**', 'icons/**', '.github/workflows/ios.yml']
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
 
 concurrency:
-  group: ios
-  cancel-in-progress: false
+  group: ios-${{ inputs.version || github.ref }}
+  cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   ipa:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Build unsigned IPA
+        env:
+          VERSION: ${{ inputs.version || '0.0' }}
         run: |
           set -euo pipefail
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
@@ -28,8 +38,8 @@ jobs:
           xcrun -sdk iphoneos swiftc -parse-as-library -O -swift-version 5 -target arm64-apple-ios17.0 -sdk "$SDK" native/*.swift -o "$APP/Atlas" 2>&1 | tee build/swiftc.log
           test -f "$APP/Atlas"
           rmdir "$APP/www"; cp -R icons "$APP/icons"; cp -R native/lproj/*.lproj "$APP/"; for f in "$APP"/*.lproj/InfoPlist.strings; do plutil -convert binary1 "$f"; done
-          VER=$(grep -oE 'app.js\?v=[0-9]+' index.html | grep -oE '[0-9]+$')
-          sed -e "s/__VERSION__/2.0/" -e "s/__BUILD__/$VER/" native/Info.plist > "$APP/Info.plist"
+          BUILD=$(( $(git rev-list --count HEAD) + 1000 ))   # same build number as the Android versionCode
+          sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" native/Info.plist > "$APP/Info.plist"
           xcrun actool ios/Assets.xcassets --compile "$APP" --platform iphoneos --minimum-deployment-target 17.0 \
             --app-icon AppIcon --output-partial-info-plist build/partial.plist --target-device iphone
           /usr/libexec/PlistBuddy -c "Merge build/partial.plist" "$APP/Info.plist"
@@ -37,38 +47,16 @@ jobs:
             /usr/libexec/PlistBuddy -c "Add :${k%%:*} string ${k#*:}" "$APP/Info.plist"; done
           plutil -convert binary1 "$APP/Info.plist"
           echo -n 'APPL????' > "$APP/PkgInfo"
-          cd build && zip -qX -D "../Atlas-$VER.ipa" "Payload/Atlas.app/Info.plist" && zip -qrXy "../Atlas-$VER.ipa" Payload -x "Payload/Atlas.app/Info.plist" && cd ..   # Info.plist first: sign tools that scan local headers (全能签 etc.) find it even on a partial download
-          test "$(unzip -Z1 "Atlas-$VER.ipa" | head -1)" = "Payload/Atlas.app/Info.plist"
-          ls -la *.ipa; file "$APP/Atlas"
+          cd build && zip -qX -D ../Atlas.ipa "Payload/Atlas.app/Info.plist" && zip -qrXy ../Atlas.ipa Payload -x "Payload/Atlas.app/Info.plist" && cd ..   # Info.plist first: sign tools that scan local headers (全能签 etc.) find it even on a partial download
+          test "$(unzip -Z1 Atlas.ipa | head -1)" = "Payload/Atlas.app/Info.plist"
+          ls -la Atlas.ipa; file "$APP/Atlas"
       - uses: actions/upload-artifact@v4
         with:
           name: Atlas-ipa
-          path: '*.ipa'
-      - name: Publish IPA to the ipa branch
-        run: |
-          mkdir out && cp *.ipa out/ && cd out
-          git init -q -b ipa && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "IPA $(ls *.ipa)"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ipa
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          R: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          F=$(ls Atlas-*.ipa); cp "$F" Atlas.ipa
-          N=$(( ${{ github.run_number }} + 300 ))   # offset: earlier builds reached r202; keeps tags increasing
-          MSG=$(git log -1 --format=%s)
-          # carry the newest Android APK too (from the apk branch), so the latest release has both files
-          FILES="Atlas.ipa"
-          if git clone -q --depth 1 -b apk "https://x-access-token:${GH_TOKEN}@github.com/${R}.git" apkb && [ -f apkb/Atlas.apk ]; then
-            cp apkb/Atlas.apk Atlas.apk; FILES="Atlas.ipa Atlas.apk"
-          else echo "::warning::no APK on the apk branch yet"; fi
-          gh release create "v2.0-r$N" $FILES --repo "$R" --target "${{ github.sha }}" --latest \
-            --title "账号星图 2.0 · 构建 $N" \
-            --notes "Atlas.ipa：未签名 iOS 包，用 SideStore / 爱思助手 / Sideloadly 自签后安装。Atlas.apk：安卓包，直接安装。本次：$MSG"
-          gh release view "v2.0-r$N" --repo "$R" --json url,assets -q '.url, (.assets[].name)'
+          path: Atlas.ipa
 
   preview:
+    if: ${{ !inputs.version }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -118,11 +106,11 @@ jobs:
           clip tabs 7 -atlas.theme dark
           clip picker 5.5 -atlas.theme dark
           ls -la clips
-      - name: Publish screenshots
-        run: |
-          mkdir out && cp shots/*.png out/ && cp clips/*.mp4 out/
-          # keep the Android screenshots that live in the same branch
-          git clone -q --depth 1 -b shots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" prev 2>/dev/null && [ -d prev/android ] && cp -R prev/android out/ || true
-          cd out
-          git init -q -b shots && git add . && git -c user.name=atlas-bot -c user.email=bot@users.noreply.github.com commit -qm "shots"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" shots
+      - name: Keep screenshots and clips as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-shots
+          path: |
+            shots/
+            clips/
+          retention-days: 14

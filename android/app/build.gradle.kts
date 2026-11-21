@@ -23,7 +23,7 @@ android {
     minSdk = 26
     targetSdk = 36
     versionCode = (System.getenv("ATLAS_BUILD") ?: "1").toInt()
-    versionName = "1.0." + (System.getenv("ATLAS_BUILD") ?: "0")
+    versionName = System.getenv("ATLAS_VERSION") ?: "dev"
   }
 
   signingConfigs {
