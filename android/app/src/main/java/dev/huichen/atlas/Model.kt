@@ -59,6 +59,8 @@ data class Account(
   val handle: String? = null,
   @Serializable(with = MsSerializer::class) val createdAt: Double = nowMS(),
   @Serializable(with = MsSerializer::class) val updatedAt: Double? = null,
+  /** Custom / App Store icon: data:image/png|jpeg;base64 URL of a square image (<= 128 px). Omitted when absent. */
+  val icon: String? = null,
 )
 
 @Serializable
@@ -79,7 +81,12 @@ val JSON = Json {
 
 fun decodeAtlas(text: String): AtlasData {
   val d = JSON.decodeFromString(AtlasData.serializer(), text)
-  return d.copy(accounts = d.accounts.map { if (it.handle != null && it.handle.isEmpty()) it.copy(handle = null) else it })
+  return d.copy(accounts = d.accounts.map { a ->
+    var x = a
+    if (x.handle != null && x.handle!!.isEmpty()) x = x.copy(handle = null)
+    if (x.icon != null && x.icon!!.isBlank()) x = x.copy(icon = null)
+    x
+  })
 }
 fun encodeAtlas(d: AtlasData): String = JSON.encodeToString(AtlasData.serializer(), d)
 
@@ -126,6 +133,68 @@ fun carrier(v: String): String {
   if (p3 == "192") return "中国广电"
   return ""
 }
+
+// MARK: App Store search (itunes.apple.com/search) — mirrors app.js / the iOS app
+
+data class AppHit(
+  val trackName: String,
+  val sellerUrl: String? = null,
+  val primaryGenreName: String = "",
+  val genres: List<String> = emptyList(),
+  val genreIds: List<String> = emptyList(),
+  val artworkUrl100: String? = null,
+  val artworkUrl512: String? = null,
+) {
+  /** "支付宝-你的AI生活伙伴" -> "支付宝"; only when what is left before the dash is >= 2 chars. */
+  val name: String get() = appStoreName(trackName)
+  val domain: String get() = sellerUrl?.let { cleanDomain(it) } ?: ""
+  val category: String get() = appStoreCategory(primaryGenreName, genres, genreIds)
+  /** big artwork to download for the stored icon */
+  val artwork: String? get() = artworkUrl512?.takeIf { it.isNotBlank() } ?: artworkUrl100?.replace("100x100", "256x256")
+}
+
+fun appStoreURL(term: String): String =
+  "https://itunes.apple.com/search?term=" + java.net.URLEncoder.encode(term.trim(), "UTF-8") + "&country=cn&entity=software&limit=8"
+
+fun appStoreName(raw: String): String {
+  val t = raw.trim()
+  val m = Regex("""\s*[-–—]""").find(t) ?: return t
+  val head = t.substring(0, m.range.first).trim()
+  return if (head.length >= 2) head else t
+}
+
+fun appStoreCategory(primary: String, genres: List<String>, ids: List<String> = emptyList()): String {
+  val byName = mapOf(
+    "Social Networking" to "社交", "社交" to "社交",
+    "Shopping" to "购物", "购物" to "购物",
+    "Finance" to "支付金融", "财务" to "支付金融",
+    "Developer Tools" to "开发", "开发工具" to "开发",
+    "Games" to "游戏", "游戏" to "游戏",
+    "Entertainment" to "娱乐", "娱乐" to "娱乐", "Music" to "娱乐", "音乐" to "娱乐", "Video" to "娱乐",
+    "Photo & Video" to "娱乐", "摄影与录像" to "娱乐",
+    "Travel" to "出行", "旅游" to "出行", "旅行" to "出行", "Navigation" to "出行", "导航" to "出行",
+  )
+  val byId = mapOf("6005" to "社交", "6024" to "购物", "6015" to "支付金融", "6026" to "开发", "6014" to "游戏",
+    "6016" to "娱乐", "6011" to "娱乐", "6008" to "娱乐", "6003" to "出行", "6010" to "出行")
+  byName[primary.trim()]?.let { return it }
+  for (g in genres) byName[g.trim()]?.let { return it }
+  for (i in ids) byId[i.trim()]?.let { return it }
+  return "工具"
+}
+
+fun parseAppStore(text: String): List<AppHit> = runCatching {
+  val root = JSON.parseToJsonElement(text) as? kotlinx.serialization.json.JsonObject ?: return emptyList()
+  val arr = root["results"] as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+  fun kotlinx.serialization.json.JsonObject.str(k: String) = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
+  fun kotlinx.serialization.json.JsonObject.list(k: String) =
+    (this[k] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+  arr.mapNotNull { e ->
+    val o = e as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+    val n = o.str("trackName")?.trim().orEmpty()
+    if (n.isEmpty()) null
+    else AppHit(n, o.str("sellerUrl"), o.str("primaryGenreName").orEmpty(), o.list("genres"), o.list("genreIds"), o.str("artworkUrl100"), o.str("artworkUrl512"))
+  }
+}.getOrDefault(emptyList())
 
 /** Natural, locale-aware-ish name order (like localizedStandardCompare). */
 val nameOrder: Comparator<String> = run {

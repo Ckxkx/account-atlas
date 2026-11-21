@@ -127,7 +127,7 @@ fun MapScreen() {
           .width((width - 16 - rx).dp).height(appH.dp).press { Store.push(Route.AccountR(a.id)) }
           .clip(RoundedCornerShape(14.dp)).background(pal.glass).padding(horizontal = 8.dp),
           verticalAlignment = Alignment.CenterVertically) {
-          AppIcon(a.name, a.domain, 30.dp); Spacer(Modifier.width(8.dp))
+          AppIcon(a, 30.dp); Spacer(Modifier.width(8.dp))
           T(a.handle?.let { Store.handleText(it) } ?: a.name, 13f, FontWeight.Medium, lines = 1)
         }
       }
