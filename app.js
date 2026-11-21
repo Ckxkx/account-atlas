@@ -65,8 +65,8 @@
   function myApps() {
     let saved = []; try { saved = JSON.parse(localStorage.getItem('atlas.custom') || '[]'); } catch (e) {}
     const out = [], seen = new Set();
-    const add = t => { const k = (t[0] || '').toLowerCase(); if (!k || seen.has(k) || isPreset(t[0])) return; seen.add(k); out.push([t[0], t[1] || '', t[2] || '其他']); };
-    saved.forEach(add); (state.accounts || []).slice().reverse().forEach(a => add([a.name, a.domain, a.category]));
+    const add = t => { const k = (t[0] || '').toLowerCase(); if (!k || seen.has(k) || isPreset(t[0])) return; seen.add(k); out.push([t[0], t[1] || '', t[2] || '其他', '', customIcon({ icon: t[4] }) || '']); };
+    saved.forEach(add); (state.accounts || []).slice().reverse().forEach(a => add([a.name, a.domain, a.category, '', a.icon]));
     return out;
   }
   function rememberApp(name, domain, cat) {
@@ -162,6 +162,8 @@
     return digits.length > 7 ? '••• •••• ' + digits.slice(-4) : '••••';
   }
   const cleanDomain = d => (d || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0];
+  // the account's own icon (uploaded, or from the App Store): a small square data: URL, synced with the data
+  const customIcon = a => typeof a?.icon === 'string' && a.icon.length < 400000 && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/.test(a.icon) ? a.icon : null;
   // bundled 192px icons for every preset, so common apps are sharp and load from this site
   const localIcon = a => {
     const d = cleanDomain(a.domain), n = (a.name || '').toLowerCase();
@@ -193,7 +195,7 @@
   };
   const idIcon = (i, size = '') => `<span class="icon ${size}" style="--c:${i.color}">${ICON[i.type]}</span>`;
   function favIcon(a, size = '') {
-    const loc = localIcon(a);
+    const loc = customIcon(a) || localIcon(a);
     if (loc) return `<span class="icon fav full ${size}"><img alt="" loading="lazy" decoding="async" width="64" height="64" src="${loc}"></span>`;
     const src = favSources(a.domain), letter = esc((a.name || '?').trim().slice(0, 1).toUpperCase());
     const b = brand(a), style = `style="--lc1:color-mix(in srgb,${b} 78%,#fff);--lc2:${b}"`;
@@ -216,7 +218,7 @@
     for (let k = 0; k < n; k++) {
       const a = list[k % Math.max(1, list.length)];
       if (!a) { tiles.push('<b style="--pc:transparent"></b>'); continue; }
-      const src = localIcon(a) || favSources(a.domain)[0];
+      const src = customIcon(a) || localIcon(a) || favSources(a.domain)[0];
       tiles.push(`<b style="--pc:${brand(a)};position:relative">${src && k < list.length ? `<img alt="" decoding="async" width="64" height="64" src="${src}" onerror="this.remove()" style="position:absolute;inset:18%;width:64%;height:64%;object-fit:contain">` : ''}</b>`);
     }
     return `<div class="${cls}" aria-hidden="true">${tiles.join('')}</div>`;
@@ -676,14 +678,60 @@
     }, 0);
   }
 
+  // ---------- custom icons ----------
+  // any image → center-cropped 128×128 data: URL; PNG, or JPEG when the PNG is over ~24 KB
+  async function makeIcon(blob) {
+    let img;
+    try { img = await createImageBitmap(blob); }
+    catch { img = await new Promise((ok, no) => { const u = URL.createObjectURL(blob), im = new Image(); im.onload = () => { URL.revokeObjectURL(u); ok(im); }; im.onerror = () => { URL.revokeObjectURL(u); no(); }; im.src = u; }); }
+    const w = img.width, h = img.height, side = Math.min(w, h); if (!side) throw 0;
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+    g.drawImage(img, (w - side) / 2, (h - side) / 2, side, side, 0, 0, 128, 128);
+    img.close?.();
+    const png = c.toDataURL('image/png');
+    if ((png.length - 22) * 3 / 4 <= 24 * 1024) return png;
+    const j = document.createElement('canvas'); j.width = j.height = 128;
+    const jg = j.getContext('2d'); jg.fillStyle = '#fff'; jg.fillRect(0, 0, 128, 128); jg.drawImage(c, 0, 0);   // JPEG has no transparency
+    return j.toDataURL('image/jpeg', 0.85);
+  }
+  // App Store search (iTunes Search API: free, no key, CORS *)
+  const storeName = t => {
+    t = (t || '').trim();
+    // "Name - slogan" first; else the first bare dash that isn't inside a word like "Wi-Fi"
+    let k = t.search(/\s[-–—]\s/);
+    if (k < 0) for (let n = 0; n < t.length; n++) {
+      if (!'-–—'.includes(t[n])) continue;
+      if (t[n] === '-' && /[A-Za-z0-9]/.test(t[n - 1] || '') && /[A-Za-z0-9]/.test(t[n + 1] || '')) continue;
+      k = n; break;
+    }
+    const head = k > 0 ? t.slice(0, k).trim() : '';
+    return head.length >= 2 ? head : t;
+  };
+  const GENRE = { 'Social Networking': '社交', 'Shopping': '购物', 'Finance': '支付金融', 'Developer Tools': '开发', 'Games': '游戏', 'Entertainment': '娱乐', 'Music': '娱乐', 'Video': '娱乐', 'Photo & Video': '娱乐', 'Travel': '出行', 'Navigation': '出行',
+    '社交': '社交', '社交网络': '社交', '购物': '购物', '财务': '支付金融', '财经': '支付金融', '开发工具': '开发', '游戏': '游戏', '娱乐': '娱乐', '音乐': '娱乐', '摄影与录像': '娱乐', '旅游': '出行', '旅行': '出行', '导航': '出行' };
+  const storeCat = r => { for (const g of [r.primaryGenreName, ...(r.genres || [])]) if (GENRE[g]) return GENRE[g]; return '工具'; };
+  const storeArt = r => r.artworkUrl512 || (r.artworkUrl100 || '').replace(/100x100/, '256x256');
+  async function storeSearch(q) {
+    const r = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&country=cn&entity=software&limit=8`);
+    if (!r.ok) throw 0;
+    return ((await r.json()).results || []).filter(x => x.trackName && (x.artworkUrl100 || x.artworkUrl512));
+  }
+  async function storeIcon(url) {
+    if (!/^https:\/\/[a-z0-9.-]+\.mzstatic\.com\//.test(url)) throw 0;
+    const r = await fetch(url, { mode: 'cors' }); if (!r.ok) throw 0;
+    return makeIcon(await r.blob());
+  }
+
   function accountForm(existing, presetId, presetName = '') {
     if (!state.identities.length) { identityForm(); toast('先添加一个邮箱或手机号'); return; }
     const a = existing || { name: presetName, domain: '', category: '其他', identityIds: presetId ? [presetId] : [], notes: '' };
     const sel = new Set(a.identityIds);
-    let cat = a.category;
+    let cat = a.category, icon = customIcon(a) || '', iconSeq = 0;
     openSheet(`${bar('取消', existing ? '编辑' : '新网站或 App', existing ? '保存' : '添加', 'id="saveAccount"')}
       <div class="sheet-body form">
         <div class="form-hero" id="aHero"></div>
+        <input type="file" id="iconFile" accept="image/*" hidden>
         <div class="group">
           <div class="field" id="nameField"><label>名称</label><input id="aName" value="${esc(a.name)}" placeholder="GitHub、淘宝、微信…" autocomplete="off"></div>
           <div class="suggest" id="suggest"></div>
@@ -707,23 +755,57 @@
       $$('#idPicks .check-cell').forEach(b => b.onclick = () => { const id = b.dataset.id; sel.has(id) ? sel.delete(id) : sel.add(id); b.classList.toggle('on'); });
       const hero = () => {
         const name = $('#aName').value.trim(), dom = cleanDomain($('#aDomain').value);
-        const key = name + '|' + dom; const h = $('#aHero'); if (h.dataset.k === key) return; h.dataset.k = key;
-        const fake = { name: name || '?', domain: dom };
-        h.style.setProperty('--pc', name ? brand(fake) : 'transparent'); h.innerHTML = `${name ? favIcon(fake, 'lg') : `<span class="icon lg" style="background:rgba(255,255,255,.08);color:var(--tertiary)">${ICON.plus}</span>`}<b>${esc(name || '新网站或 App')}</b>`;
+        const key = name + '|' + dom + '|' + icon.length + icon.slice(-24); const h = $('#aHero'); if (h.dataset.k === key) return; h.dataset.k = key;
+        const fake = { name: name || '?', domain: dom, icon };
+        h.style.setProperty('--pc', name || icon ? brand(fake) : 'transparent');
+        h.innerHTML = `<button class="hero-icon" id="heroIcon" aria-label="更换图标">${name || icon ? favIcon(fake, 'lg') : `<span class="icon lg" style="background:rgba(255,255,255,.08);color:var(--tertiary)">${ICON.plus}</span>`}<i class="hero-edit">${ICON.edit}</i></button><b>${esc(name || '新网站或 App')}</b>
+          <div class="icon-menu" id="iconMenu"><button data-im="pick"><span>从相册选择</span><svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m4 17.5 5-4.5 4 3.5 3-2.5 4 3.5"/></svg></button>${icon ? `<button data-im="reset"><span>使用默认图标</span><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5"/></svg></button>` : ''}</div>`;
+        $('#heroIcon').onclick = e => { e.stopPropagation(); $('#iconMenu').classList.toggle('open'); };
+        $$('#iconMenu button').forEach(b => b.onclick = e => {
+          e.stopPropagation(); $('#iconMenu').classList.remove('open');
+          if (b.dataset.im === 'pick') $('#iconFile').click(); else setIcon('');
+        });
         const dup = name && state.accounts.find(x => x !== existing && x.name.toLowerCase() === name.toLowerCase());
         const dh = $('#dupHint');
         if (dup) { dh.hidden = false; dh.innerHTML = `已经记录过 ${esc(dup.name)}${dup.handle ? `（${esc(dup.handle)}）` : ''}。是另一个账号的话，填个账号名区分。`; } else dh.hidden = true;
       };
+      const setIcon = v => { iconSeq++; icon = v || ''; hero(); };
+      document.addEventListener('click', function off(e) { const m = $('#iconMenu'); if (!m) return document.removeEventListener('click', off, true); if (!e.target.closest('#iconMenu,#heroIcon')) m.classList.remove('open'); }, true);
+      $('#iconFile').onchange = async e => {
+        const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+        const seq = ++iconSeq;
+        try { const v = await makeIcon(f); if (seq === iconSeq) setIcon(v); } catch { toast('这张图片读不了，换一张试试'); }
+      };
       hero();
-      const applyPreset = p => { $('#aName').value = p[0]; $('#aDomain').value = p[1]; setCat(p[2]); $('#suggest').innerHTML = ''; hero(); };
+      const applyPreset = p => { $('#aName').value = p[0]; $('#aDomain').value = p[1]; setCat(p[2]); store = []; storeQ = ''; $('#suggest').innerHTML = ''; setIcon(p[4] || ''); };
+      const applyStore = r => {
+        $('#aName').value = storeName(r.trackName);
+        const host = cleanDomain(r.sellerUrl || ''); if (host) $('#aDomain').value = host;
+        setCat(storeCat(r)); store = []; storeQ = ''; $('#suggest').innerHTML = '';
+        const seq = ++iconSeq;
+        // show the small artwork right away, then swap in the downscaled copy that gets saved
+        icon = ''; hero();
+        const h = $('#heroIcon .icon'); if (h) h.outerHTML = `<span class="icon fav full lg"><img alt="" width="64" height="64" src="${esc(r.artworkUrl100 || storeArt(r))}"></span>`;
+        storeIcon(storeArt(r)).catch(() => storeIcon(r.artworkUrl100)).then(v => { if (seq === iconSeq) setIcon(v); }).catch(() => { if (seq === iconSeq) { $('#aHero').dataset.k = ''; hero(); } });
+      };
+      let store = [], storeQ = '', storeSeq = 0, storeT;
       const suggest = () => {
-        const q = $('#aName').value.trim().toLowerCase();
+        const raw = $('#aName').value.trim(), q = raw.toLowerCase();
         const ALL = [...PRESETS, ...myApps()];
         const exact = ALL.find(p => p[0].toLowerCase() === q);
         if (exact) { if (!$('#aDomain').value) $('#aDomain').value = exact[1]; setCat(exact[2]); hero(); }
         const list = q && !exact ? ALL.filter(p => p[0].toLowerCase().includes(q) || p[1].includes(q)).slice(0, 8) : [];
-        $('#suggest').innerHTML = list.map((p, k) => `<button data-k="${ALL.indexOf(p)}">${favIcon({ name: p[0], domain: p[1] })}${esc(p[0])}</button>`).join('');
-        $$('#suggest button').forEach(b => b.onclick = () => applyPreset(ALL[b.dataset.k]));
+        const shown = new Set(list.map(p => p[0].toLowerCase())), seen = new Set();
+        const apps = q && !exact && storeQ === q ? store.filter(r => { const n = storeName(r.trackName).toLowerCase(); if (shown.has(n) || shown.has(r.trackName.toLowerCase()) || seen.has(r.trackId)) return false; seen.add(r.trackId); return true; }) : [];
+        $('#suggest').innerHTML = list.map(p => `<button data-k="${ALL.indexOf(p)}">${favIcon({ name: p[0], domain: p[1], icon: p[4] })}${esc(p[0])}</button>`).join('') +
+          (apps.length ? `<span class="suggest-h">App Store</span>` + apps.map(r => `<button data-s="${store.indexOf(r)}"><span class="icon fav full"><img alt="" loading="lazy" decoding="async" width="64" height="64" src="${esc(r.artworkUrl100 || storeArt(r))}"></span>${esc(storeName(r.trackName))}</button>`).join('') : '');
+        $$('#suggest button').forEach(b => b.onclick = () => b.dataset.s !== undefined ? applyStore(store[b.dataset.s]) : applyPreset(ALL[b.dataset.k]));
+        // ask the App Store too (debounced; a newer query wins; offline just means presets only)
+        clearTimeout(storeT);
+        if (q && !exact && storeQ !== q) {
+          const seq = ++storeSeq;
+          storeT = setTimeout(() => storeSearch(raw).then(res => { if (seq !== storeSeq || !$('#suggest')) return; store = res; storeQ = q; suggest(); }).catch(() => {}), 350);
+        } else if (!q || exact) storeSeq++;
       };
       $('#aName').addEventListener('input', () => { suggest(); hero(); });
       $('#aDomain').addEventListener('input', hero);
@@ -732,8 +814,9 @@
         const name = $('#aName').value.trim();
         if (!name) { const f = $('#nameField'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); $('#aName').focus(); toast('填一下名称'); return; }
         const data = { name, handle: $('#aHandle').value.trim(), domain: cleanDomain($('#aDomain').value), category: cat, identityIds: [...sel], notes: $('#aNotes').value.trim() };
+        if (icon) data.icon = icon;   // no key at all when there's no custom icon, for older clients
         let id; rememberApp(data.name, data.domain, data.category);
-        if (existing) { Object.assign(existing, data); id = existing.id; } else { id = uid(); state.accounts.push({ id, createdAt: Date.now(), ...data }); }
+        if (existing) { Object.assign(existing, data); if (!icon) delete existing.icon; id = existing.id; } else { id = uid(); state.accounts.push({ id, createdAt: Date.now(), ...data }); }
         save(); render(); showAccount(id); toast(existing ? '已保存' : `已添加 ${name}`);
       };
       if (!existing && !presetName && matchMedia('(hover:hover)').matches) $('#aName').focus({ preventScroll: true });
@@ -761,7 +844,7 @@
         : cat === '我添加的' ? ALL.slice(MINE) : ALL.filter(p => p[2] === cat);
       $('#pkCats').style.display = ql ? 'none' : '';
       const exact = ql && ALL.some(p => p[0].toLowerCase() === ql);
-      $('#pkGrid').innerHTML = list.map(p => { const k = ALL.indexOf(p), h = have(p[0]); return `<button class="pk ${chosen.has(k) ? 'on' : ''} ${h ? 'had' : ''}" data-pk="${k}">${favIcon({ name: p[0], domain: p[1] })}<span>${esc(p[0])}</span>${sub(k, h)}<i class="pk-tick">${ICON.check}</i></button>`; }).join('') +
+      $('#pkGrid').innerHTML = list.map(p => { const k = ALL.indexOf(p), h = have(p[0]); return `<button class="pk ${chosen.has(k) ? 'on' : ''} ${h ? 'had' : ''}" data-pk="${k}">${favIcon({ name: p[0], domain: p[1], icon: p[4] })}<span>${esc(p[0])}</span>${sub(k, h)}<i class="pk-tick">${ICON.check}</i></button>`; }).join('') +
         (ql && !exact ? `<button class="pk custom" data-pk-custom="${esc(q.trim())}"><span class="icon">${ICON.plus}</span><span>添加“${esc(q.trim())}”</span></button>` : '') +
         (!ql ? `<button class="pk custom" data-pk-custom=""><span class="icon">${ICON.edit}</span><span>手动添加</span></button>` : '');
       if (open >= 0) { const t = $(`#pkGrid [data-pk="${open}"]`); t ? expand(t, false) : (open = -1); }
@@ -796,7 +879,7 @@
       const n = have(p[0]);
       const x = document.createElement('div'); x.id = 'pkExp'; x.className = 'pk-exp';
       x.style.setProperty('--ax', (tile.offsetLeft + tile.offsetWidth / 2) + 'px');
-      x.innerHTML = `<div class="pk-exp-in">${favIcon({ name: p[0], domain: p[1] })}<div class="pk-exp-f"><label>${esc(p[0])} 账号名</label><input id="pkHd" value="${esc(handles[k] || '')}" placeholder="${n ? `第 ${n + 1} 个账号，填用户名区分` : '用户名、昵称或 UID，选填'}" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"></div><button class="pk-exp-x" id="pkHdOk">好</button></div>`;
+      x.innerHTML = `<div class="pk-exp-in">${favIcon({ name: p[0], domain: p[1], icon: p[4] })}<div class="pk-exp-f"><label>${esc(p[0])} 账号名</label><input id="pkHd" value="${esc(handles[k] || '')}" placeholder="${n ? `第 ${n + 1} 个账号，填用户名区分` : '用户名、昵称或 UID，选填'}" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"></div><button class="pk-exp-x" id="pkHdOk">好</button></div>`;
       end.after(x);
       const inp = $('#pkHd');
       inp.oninput = () => { const v = inp.value.trim(); v ? handles[k] = v : delete handles[k]; paintSub(tile, k); };
@@ -839,7 +922,7 @@
 
   function pickIdentities(picks, presetId, q, hds = []) {
     const sel = new Set(presetId && idById(presetId) ? [presetId] : cur() ? [cur().id] : []);
-    const fakes = picks.map(p => ({ name: p[0], domain: p[1] }));
+    const fakes = picks.map(p => ({ name: p[0], domain: p[1], icon: p[4] }));
     openSheet(`<div class="sheet-bar"><button id="pkBack">返回</button><span class="t">用哪个注册的</span><button id="pkSave">添加</button></div>
       <div class="sheet-body form">
         <div class="form-hero" style="--pc:${brand(fakes[0])}"><span class="pk-stack">${fakes.slice(0, 5).map(f => favIcon(f, 'lg')).join('')}</span><b>${picks.length === 1 ? esc(picks[0][0]) : `${esc(picks[0][0])} 等 ${picks.length} 个`}</b></div>
@@ -854,7 +937,7 @@
       $$('#idPicks .check-cell').forEach(b => b.onclick = () => { const id = b.dataset.id; sel.has(id) ? sel.delete(id) : sel.add(id); b.classList.toggle('on'); });
       $('#pkBack').onclick = () => pickApps(presetId, q);
       $('#pkSave').onclick = () => {
-        const now = Date.now(), made = picks.map((p, k) => ({ id: uid(), createdAt: now + k, name: p[0], handle: ($(`[data-hd="${k}"]`)?.value || '').trim(), domain: p[1], category: p[2], identityIds: [...sel], notes: '' }));
+        const now = Date.now(), made = picks.map((p, k) => ({ id: uid(), createdAt: now + k, name: p[0], handle: ($(`[data-hd="${k}"]`)?.value || '').trim(), domain: p[1], category: p[2], identityIds: [...sel], notes: '', ...(p[4] ? { icon: p[4] } : {}) }));
         state.accounts.push(...made); save(); render();
         if (made.length === 1) showAccount(made[0].id); else if (sel.size === 1) showIdentity([...sel][0]); else closeSheet();
         toast(made.length === 1 ? `已添加 ${made[0].name}` : `已添加 ${made.length} 个`);
