@@ -42,6 +42,7 @@ struct RootView: View {
     }
     .environment(\.selectedTab, tab)
     .sensoryFeedback(.selection, trigger: tab)
+    .modifier(TabBarGlass())
     .onChange(of: store.theme) { _, t in ThemeFX.apply(t) }
     .sheet(item: Binding(get: { store.route }, set: { r in store.route = r })) { r in sheet(r) }
     .overlay(alignment: .top) { ToastView() }
@@ -142,7 +143,7 @@ struct ToastView: View {
         }
       }
       .padding(.horizontal, 14).padding(.vertical, 11)
-      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+      .liquidPanel(RoundedRectangle(cornerRadius: 24, style: .continuous))
       .bakedShadow(RoundedRectangle(cornerRadius: 24, style: .continuous), key: "toast", color: .black.opacity(0.25), radius: 20, y: 8)
       .padding(.horizontal, 14)
       .transition(.move(edge: .top).combined(with: .opacity))
@@ -154,6 +155,14 @@ struct ToastView: View {
 }
 
 // MARK: - Motion
+
+/// iOS 26: the floating glass tab bar shrinks to a pill while you scroll down and comes back on the
+/// way up, so the wallet cards get the whole screen. No-op before iOS 26.
+struct TabBarGlass: ViewModifier {
+  @ViewBuilder func body(content: Content) -> some View {
+    if #available(iOS 26.0, *) { content.tabBarMinimizeBehavior(.onScrollDown) } else { content }
+  }
+}
 
 private struct SelectedTabKey: EnvironmentKey { static let defaultValue = 0 }
 extension EnvironmentValues {
