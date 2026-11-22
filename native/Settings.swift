@@ -47,6 +47,15 @@ struct SettingsSheet: View {
           }
         } footer: { Text("备份是 JSON 文件，和网页版通用。") }
         Section {
+          Link(destination: URL(string: "https://github.com/Ckxkx/account-atlas/releases/latest")!) {
+            HStack {
+              Label("下载新版本", systemImage: "arrow.up.forward.app")
+              Spacer()
+              Text((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { "当前 " + $0 } ?? "").foregroundStyle(.secondary)
+            }
+          }
+        } footer: { Text("在 GitHub Releases 下载，直接覆盖安装，数据不会丢失。") }
+        Section {
           Button(role: .destructive) { askWipe = true } label: { Label("清空全部数据", systemImage: "trash") }
         }
         Section {
@@ -91,6 +100,7 @@ struct OrderView: View {
     List {
       group("email", "邮箱")
       group("phone", "手机号")
+      group("login", "登录")
     }
     .environment(\.editMode, .constant(.active))
     .navigationTitle("卡片顺序").navigationBarTitleDisplayMode(.inline)
@@ -101,7 +111,7 @@ struct OrderView: View {
       Section {
         ForEach(list) { i in
           HStack(spacing: 12) {
-            Image(systemName: i.isPhone ? "simcard.fill" : "envelope.fill").font(.system(size: 13)).foregroundStyle(.white).frame(width: 46, height: 30)
+            IdentityGlyph(identity: i, size: 13).foregroundStyle(.white).frame(width: 46, height: 30)
               .background(skinGradient(i.color), in: CardShape(sim: i.isPhone))
               .shadow(color: Color(hex: i.color).opacity(0.35), radius: 5, y: 2)
             VStack(alignment: .leading, spacing: 1) {
@@ -111,18 +121,19 @@ struct OrderView: View {
           }.padding(.vertical, 2)
         }
         .onMove { from, to in move(type, from, to) }
-      } header: { Text(title) } footer: { if type == "phone" || !store.data.identities.contains(where: { $0.type == "phone" }) { Text("拖动右侧把手排序，排在第一位的卡会在卡包里最先出现。") } }
+      } header: { Text(title) } footer: { if type == lastType { Text("拖动右侧把手排序，排在第一位的卡会在卡包里最先出现。") } }
     }
   }
+  /// the footer hint goes under the last group shown
+  var lastType: String { ["login", "phone", "email"].first { t in store.data.identities.contains { $0.type == t } } ?? "email" }
   func move(_ type: String, _ from: IndexSet, _ to: Int) {
     store.mutate(nil) { s in
       var list = s.identities.filter { $0.type == type }
       list.move(fromOffsets: from, toOffset: to)
       for k in list.indices { list[k].order = Double(k) }
       let others = s.identities.filter { $0.type != type }
-      let emails = type == "email" ? list : others.filter { $0.type == "email" }
-      let phones = type == "phone" ? list : others.filter { $0.type == "phone" }
-      s.identities = emails + phones + others.filter { $0.type != "email" && $0.type != "phone" }
+      func of(_ t: String) -> [Identity] { t == type ? list : others.filter { $0.type == t } }
+      s.identities = of("email") + of("phone") + of("login") + others.filter { !KINDS.contains($0.type) }
     }
   }
 }
