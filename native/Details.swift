@@ -84,14 +84,14 @@ struct IdentityDetail: View {
       }
     }
   }
-  /// sites that log in with a 微信 / Apple card bound to this email / phone (affected when it changes)
+  /// sites that log in with a 微信 / QQ / Apple card bound to this email / phone (affected when it changes)
   @ViewBuilder func viaSites(_ i: Identity, direct: [Account]) -> some View {
     if !i.isLogin {
       let seen = Set(direct.map(\.id))
       ForEach(store.boundLogins(i.id)) { l in
         let more = store.accounts(of: l.id).filter { !seen.contains($0.id) }
         if !more.isEmpty {
-          section("通过\(l.isApple ? " Apple " : "微信")登录的 \(more.count) 个网站与 App")
+          section("通过\(l.isApple ? " Apple " : l.isQQ ? " QQ " : "微信")登录的 \(more.count) 个网站与 App")
           VStack(spacing: 8) {
             ForEach(more) { a in
               Button { store.route = .account(a.id) } label: { ReelRow(account: a) }.buttonStyle(PressStyle(scale: 0.98))

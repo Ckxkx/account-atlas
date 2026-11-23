@@ -55,20 +55,25 @@ data class Identity(
   val isESim get() = isPhone && esim == true
   val isLogin get() = type == "login"
   val isApple get() = isLogin && provider == "apple"
-  val isWechat get() = isLogin && !isApple
+  val isQQ get() = isLogin && provider == "qq"
+  val isWechat get() = isLogin && !isApple && !isQQ
 }
 
 /** Identity kinds in wallet order. */
 val KINDS = listOf("email", "phone", "login")
 fun kindRank(t: String) = KINDS.indexOf(t).let { if (it < 0) KINDS.size else it }
 
-fun providerName(p: String?) = if (p == "apple") "Apple 账户" else "微信"
-fun providerColor(p: String?) = if (p == "apple") "#1d1d1f" else "#07c160"
+fun providerName(p: String?) = when (p) { "apple" -> "Apple 账户"; "qq" -> "QQ"; else -> "微信" }
+fun providerColor(p: String?) = when (p) { "apple" -> "#1d1d1f"; "qq" -> "#12b7f5"; else -> "#07c160" }
 
-/** 微信号: at least one char. Apple ID: an email, or a phone number with >= 5 digits. */
+/** 微信号: at least one char. QQ: a 5–12 digit number or an email. Apple ID: an email, or a phone number with >= 5 digits. */
 fun validLogin(provider: String?, value: String): Boolean {
   val v = value.trim()
   if (v.isEmpty()) return false
+  if (provider == "qq") {
+    val d = v.filter { it != ' ' }
+    return (d.length in 5..12 && d.all { it.isDigit() }) || Regex("""^[^\s@]+@[^\s@]+\.[^\s@]+$""").matches(v)
+  }
   if (provider != "apple") return true
   if (Regex("""^[^\s@]+@[^\s@]+\.[^\s@]+$""").matches(v)) return true
   return !v.contains('@') && v.count { it.isDigit() } >= 5 && v.all { it.isDigit() || it in " +-()" }

@@ -26,15 +26,17 @@
     '#3a3a3c': ['曜石', '#76767c 0%, #3a3a3c 46%, #0d0d10 100%'],
   };
   const COLORS = Object.keys(SKINS).slice(0, 10);   // the palette; provider skins are added for login cards
-  // 微信 / Apple 登录卡: provider name, default key colour (with its own skin), field label and placeholder
+  // 微信 / QQ / Apple 登录卡: provider name, default key colour (with its own skin), field label and placeholder
   const LOGIN = {
     wechat: { name: '微信', color: '#07c160', field: '微信号', ph: 'wxid 或自定义微信号' },
+    qq: { name: 'QQ', color: '#12b7f5', field: 'QQ 号', ph: 'QQ 号或 QQ 邮箱' },
     apple: { name: 'Apple 账户', short: 'Apple', color: '#1d1d1f', field: 'Apple ID', ph: 'name@icloud.com 或手机号' },
   };
   SKINS['#07c160'] = ['微信绿', '#7ee8a2 0%, #07c160 46%, #05785a 100%'];
+  SKINS['#12b7f5'] = ['QQ 蓝', '#8fe3ff 0%, #12b7f5 46%, #0a6fb8 100%'];
   SKINS['#1d1d1f'] = ['石墨', '#c9ccd3 0%, #6e7079 34%, #2c2c30 68%, #111113 100%'];
   const KINDS = ['email', 'phone', 'login'];
-  const provOf = i => i.provider === 'apple' ? 'apple' : 'wechat';
+  const provOf = i => i.provider === 'apple' || i.provider === 'qq' ? i.provider : 'wechat';
   const typeName = i => i.type === 'login' ? LOGIN[provOf(i)].name : i.type === 'phone' ? '手机号' : '邮箱';
   const skin = c => `linear-gradient(145deg, ${SKINS[c] ? SKINS[c][1] : `color-mix(in srgb, ${c} 70%, #fff) 0%, ${c} 50%, color-mix(in srgb, ${c} 70%, #000) 100%`})`;
   const CATS = ['社交', '购物', '支付金融', '开发', 'AI', '娱乐', '游戏', '出行', '工具', '加密', '其他'];
@@ -154,7 +156,7 @@
     };
   }
 
-  // the wallet shows one kind at a time: emails, phone numbers, or 微信 / Apple login cards
+  // the wallet shows one kind at a time: emails, phone numbers, or 微信 / QQ / Apple login cards
   const deck = () => state.identities.filter(i => i.type === ui.kind);
   const cur = () => deck()[ui.active];
   function setKind(k, focusId) {
@@ -225,6 +227,7 @@
     check: '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
     login: '<svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M21 12v2"/></svg>',
     wechat: '<svg viewBox="0 0 24 24"><path d="M9.5 4C5.4 4 2.5 6.6 2.5 9.8c0 1.8 1 3.4 2.5 4.5l-.6 2.2 2.6-1.4c.8.2 1.6.3 2.5.3h.4"/><path d="M15.3 9.3c-3.4 0-6.1 2.3-6.1 5.1s2.7 5.1 6.1 5.1c.7 0 1.4-.1 2-.3l2.2 1.2-.5-1.9c1.5-.9 2.4-2.4 2.4-4.1 0-2.8-2.7-5.1-6.1-5.1Z"/><circle class="f" cx="7" cy="8.6" r=".9"/><circle class="f" cx="11.4" cy="8.6" r=".9"/><circle class="f" cx="13.4" cy="13.8" r=".8"/><circle class="f" cx="17.2" cy="13.8" r=".8"/></svg>',
+    qq: '<svg viewBox="0 0 24 24"><path d="M12 2.8c-3.3 0-5.6 2.6-5.6 6 0 .8.1 1.5.3 2.1-1.1 1.4-2.2 3.3-2.2 5 0 .9.4 1.3 1 .9.5-.3 1-.9 1.3-1.5.3 1.2 1 2.3 1.8 3.1-1 .4-1.9 1-1.9 1.6 0 .8 1.6 1.2 3.4 1.2 1.1 0 2-.2 2.6-.5h.6c.6.3 1.5.5 2.6.5 1.8 0 3.4-.4 3.4-1.2 0-.6-.9-1.2-1.9-1.6.8-.8 1.5-1.9 1.8-3.1.3.6.8 1.2 1.3 1.5.6.4 1 0 1-.9 0-1.7-1.1-3.6-2.2-5 .2-.6.3-1.3.3-2.1 0-3.4-2.3-6-5.6-6Z"/><circle class="f" cx="10" cy="8.2" r=".9"/><circle class="f" cx="14" cy="8.2" r=".9"/><path d="M8.6 11.6c2.2 1 4.6 1 6.8 0"/></svg>',
     apple: '<svg viewBox="0 0 24 24"><path class="f" d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.2 1-4 2.5-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.1-1.2 2.9-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.4-.9-2.4-4ZM14 5.3c.7-.8 1.1-1.9 1-3-.9 0-2.1.6-2.8 1.4-.6.7-1.2 1.8-1 2.9 1.1.1 2.1-.5 2.8-1.3Z"/></svg>',
   };
   const idGlyph = i => i.type === 'login' ? ICON[provOf(i)] : ICON[i.type] || ICON.login;
@@ -311,7 +314,7 @@
 
   function renderWallet() {
     const w = $('#wallet');
-    const d = deck(), word = { email: '邮箱', phone: '手机号', login: '微信或 Apple 账号' }[ui.kind];
+    const d = deck(), word = { email: '邮箱', phone: '手机号', login: '微信、QQ 或 Apple 账号' }[ui.kind];
     renderSeg();
     w.innerHTML = d.map(i => walletCard(i)).join('') +
       (state.identities.length ? `<button class="wcard ghost ${ui.kind === 'phone' ? 'sim' : ''}" data-new="identity" data-type="${ui.kind}"><div>${ICON.plus}添加${word}</div></button>`
@@ -630,7 +633,7 @@
   function showIdentity(id) {
     const i = idById(id); if (!i) return;
     const accs = accountsOf(id), lg = i.type === 'login', via = viaOf(i), bound = lg ? [] : boundTo(id);
-    // sites that sign in with a 微信 / Apple card bound to this number or address
+    // sites that sign in with a 微信 / QQ / Apple card bound to this number or address
     const direct = new Set(accs.map(a => a.id));
     const indirect = bound.map(b => [b, accountsOf(b.id).filter(a => !direct.has(a.id))]).filter(([, l]) => l.length);
     const idCell = (x, title) => `<button class="cell" data-identity="${x.id}">${idIcon(x)}<span class="cell-main"><span class="cell-title">${esc(title)}</span><span class="cell-sub">${esc(x.label ? x.label + ' · ' + display(x) : display(x))}</span></span>${ICON.chev}</button>`;
@@ -689,7 +692,7 @@
     let touched = !!existing && !(i.type === 'login' && i.color === LOGIN[provider].color);
     const PH = { email: ['地址', 'name@example.com', 'email'], phone: ['号码', '+86 138 0000 0000', 'tel'] };
     const ph = () => type === 'login' ? [LOGIN[provider].field, LOGIN[provider].ph, provider === 'apple' ? 'email' : 'text'] : PH[type];
-    const palette = () => { const p = type === 'login' ? [LOGIN.wechat.color, LOGIN.apple.color, ...COLORS] : [...COLORS]; if (!p.includes(color)) p.unshift(color); return p; };
+    const palette = () => { const p = type === 'login' ? [LOGIN.wechat.color, LOGIN.qq.color, LOGIN.apple.color, ...COLORS] : [...COLORS]; if (!p.includes(color)) p.unshift(color); return p; };
     const colorsHtml = () => palette().map(c => `<button class="color ${c === color ? 'active' : ''}" style="--c:${c};--g:${skin(c)}" data-c="${c}" aria-label="${SKINS[c] ? SKINS[c][0] : c}"><span>${SKINS[c] ? SKINS[c][0] : ''}</span></button>`).join('');
     const viaHtml = () => { const opts = state.identities.filter(x => (x.type === 'email' || x.type === 'phone') && x.id !== existing?.id);
       return `<button class="check-cell ${via ? '' : 'on'}" data-via=""><i style="background:var(--tertiary)"></i><span class="cell-main"><span class="cell-title">不绑定</span></span>${ICON.tick}</button>` +
@@ -699,7 +702,7 @@
       <div class="sheet-body form">
         <div class="preview" id="preview"></div>
         <div class="seg-inline three" id="typeSeg" style="--k:${KINDS.indexOf(type)}"><span class="thumb"></span><button data-v="email">邮箱</button><button data-v="phone">手机号</button><button data-v="login">登录</button></div>
-        <div id="provBox" ${type === 'login' ? '' : 'hidden'}><div class="prov-pills" id="provPills"><button data-p="wechat" class="${provider === 'wechat' ? 'on' : ''}">${ICON.wechat}微信</button><button data-p="apple" class="${provider === 'apple' ? 'on' : ''}">${ICON.apple}Apple</button></div></div>
+        <div id="provBox" ${type === 'login' ? '' : 'hidden'}><div class="prov-pills" id="provPills"><button data-p="wechat" class="${provider === 'wechat' ? 'on' : ''}">${ICON.wechat}微信</button><button data-p="qq" class="${provider === 'qq' ? 'on' : ''}">${ICON.qq}QQ</button><button data-p="apple" class="${provider === 'apple' ? 'on' : ''}">${ICON.apple}Apple</button></div></div>
         <div class="group" style="margin-top:16px">
           <div class="field" id="valueField"><label id="valueLabel">${l0}</label><input id="fValue" value="${esc(i.value)}" inputmode="${m0}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${p0}"></div>
           <div class="field"><label>标签</label><input id="fLabel" value="${esc(i.label)}" placeholder="主力、小号、工作…"></div>
@@ -744,10 +747,10 @@
       $('#saveIdentity').onclick = () => {
         const value = $('#fValue').value.trim();
         const isMail = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), digits = v => v.replace(/\D/g, '').length >= 5;
-        const ok = type === 'email' ? isMail(value) : type === 'phone' ? digits(value) : provider === 'wechat' ? value.length >= 1 : isMail(value) || digits(value);
+        const ok = type === 'email' ? isMail(value) : type === 'phone' ? digits(value) : provider === 'wechat' ? value.length >= 1 : provider === 'qq' ? /^\d{5,12}$/.test(value.replace(/\s/g, '')) || isMail(value) : isMail(value) || digits(value);
         if (!ok) {
           const f = $('#valueField'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); $('#fValue').focus();
-          toast(type === 'email' ? '邮箱地址格式不对' : type === 'phone' ? '手机号至少要 5 位数字' : provider === 'wechat' ? '填一下微信号' : 'Apple ID 是邮箱或手机号'); return;
+          toast(type === 'email' ? '邮箱地址格式不对' : type === 'phone' ? '手机号至少要 5 位数字' : provider === 'wechat' ? '填一下微信号' : provider === 'qq' ? 'QQ 号是 5 到 12 位数字，或填 QQ 邮箱' : 'Apple ID 是邮箱或手机号'); return;
         }
         if (state.identities.some(x => x.id !== existing?.id && x.type === type && (type !== 'login' || provOf(x) === provider) && x.value.toLowerCase() === value.toLowerCase())) { toast('这个身份已经添加过了'); return; }
         const data = { type, value, label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim() };
@@ -810,7 +813,7 @@
     return makeIcon(await r.blob());
   }
 
-  // 选择身份: emails and phone numbers, then 微信 / Apple in their own 第三方登录 group
+  // 选择身份: emails and phone numbers, then 微信 / QQ / Apple in their own 第三方登录 group
   function idPicksHtml(sel, title) {
     const cell = i => `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}">${i.type === 'login' ? `<span class="lg-glyph lg-${provOf(i)}" style="--g:${skin(i.color)}">${idGlyph(i)}</span>` : '<i></i>'}<span class="cell-main"><span class="cell-title">${esc(i.type === 'login' ? (i.label ? `${LOGIN[provOf(i)].name} · ${i.label}` : LOGIN[provOf(i)].name) : i.label || display(i))}</span>${i.type === 'login' || i.label ? `<span class="cell-sub">${esc(display(i))}</span>` : ''}</span>${ICON.tick}</button>`;
     const base = state.identities.filter(i => i.type === 'email' || i.type === 'phone'), lg = state.identities.filter(i => i.type === 'login');
@@ -836,7 +839,7 @@
         </div>
         <p class="hint dup" id="dupHint" hidden></p>
         ${idPicksHtml(sel, '用哪个邮箱或手机号注册、绑定的')}
-        <p class="hint">可以多选，比如用邮箱注册、再绑定手机号；用微信或 Apple 登录的，选下面的登录账号。</p>
+        <p class="hint">可以多选，比如用邮箱注册、再绑定手机号；用微信、QQ 或 Apple 登录的，选下面的登录账号。</p>
         <div class="sec-title">分类</div>
         <div class="group"><div class="cats" id="catPicks">${CATS.map(c => `<button class="${c === cat ? 'active' : ''}" data-c="${c}">${c}</button>`).join('')}</div></div>
         <div class="sec-title">备注</div>
@@ -920,11 +923,12 @@
   // ---------- add by picking: tap the apps you use, then say which email or number ----------
   function pickApps(presetId, query = '') {
     if (!state.identities.length) { identityForm(); toast('先添加一个邮箱或手机号'); return; }
-    const ALL = [...PRESETS, ...myApps()], MINE = PRESETS.length;
+    const ALL = [...PRESETS, ...myApps()], MINE = PRESETS.length, BASE = ALL.length;   // App Store picks are appended after BASE
     const chosen = new Set(), handles = {}; let cat = '常用', q = query, open = -1;
+    let store = [], storeQ = '', storeSeq = 0, storeT;   // App Store results for the current search
     const have = name => state.accounts.filter(x => x.name.toLowerCase() === name.toLowerCase()).length;
     let told = false;
-    const gone = new Set(), mine = () => ALL.slice(MINE).some((p, i) => !gone.has(MINE + i));
+    const gone = new Set(), mine = () => ALL.slice(MINE, BASE).some((p, i) => !gone.has(MINE + i));
     const cats = () => ['常用', ...(mine() ? ['我添加的'] : []), ...CATS.filter(c => ALL.some((p, i) => p[2] === c && !gone.has(i)))];
     const catsHtml = () => cats().map(c => `<button data-pc="${c}" class="${c === cat ? 'active' : ''}">${c}</button>`).join('');
     openSheet(`<div class="sheet-bar"><button data-close>取消</button><span class="t" id="pkTitle">选择网站或 App</span><button id="pkNext" disabled>下一步</button></div>
@@ -937,14 +941,24 @@
       const ql = q.trim().toLowerCase();
       let list = ql ? ALL.filter(p => p[0].toLowerCase().includes(ql) || p[1].includes(ql))
         : cat === '常用' ? POPULAR.slice(0, 12).map(n => PRESETS.find(p => p[0] === n)).filter(Boolean)
-        : cat === '我添加的' ? ALL.slice(MINE) : ALL.filter(p => p[2] === cat);
+        : cat === '我添加的' ? ALL.slice(MINE, BASE) : ALL.slice(0, BASE).filter(p => p[2] === cat);
       list = list.filter(p => !gone.has(ALL.indexOf(p)));
+      // App Store results for this search, minus apps already shown above
+      const shown = new Set(list.map(p => p[0].toLowerCase()));
+      const apps = ql && storeQ === ql ? store.map((r, i) => [r, i]).filter(([r]) => { const n = storeName(r.trackName).toLowerCase(); if (shown.has(n) || shown.has(r.trackName.toLowerCase())) return false; shown.add(n); return true; }) : [];
       menuOff();
       $('#pkCats').style.display = ql ? 'none' : '';
       const exact = ql && ALL.some(p => p[0].toLowerCase() === ql);
       $('#pkGrid').innerHTML = list.map(p => { const k = ALL.indexOf(p), h = have(p[0]); return `<button class="pk ${chosen.has(k) ? 'on' : ''} ${h ? 'had' : ''}" data-pk="${k}">${favIcon({ name: p[0], domain: p[1], icon: p[4] })}<span>${esc(p[0])}</span>${sub(k, h)}<i class="pk-tick">${ICON.check}</i></button>`; }).join('') +
         (ql && !exact ? `<button class="pk custom" data-pk-custom="${esc(q.trim())}"><span class="icon">${ICON.plus}</span><span>添加“${esc(q.trim())}”</span></button>` : '') +
-        (!ql ? `<button class="pk custom" data-pk-custom=""><span class="icon">${ICON.edit}</span><span>手动添加</span></button>` : '');
+        (!ql ? `<button class="pk custom" data-pk-custom=""><span class="icon">${ICON.edit}</span><span>手动添加</span></button>` : '') +
+        (apps.length ? `<div class="pk-sec">${ICON.apple}App Store</div>` + apps.map(([r, i]) => `<button class="pk" data-pk-store="${i}"><span class="icon fav full"><img alt="" loading="lazy" decoding="async" width="64" height="64" src="${esc(r.artworkUrl100 || storeArt(r))}"></span><span>${esc(storeName(r.trackName))}</span><i class="pk-tick">${ICON.check}</i></button>`).join('') : '');
+      // look the search up on the App Store (debounced), then draw again
+      clearTimeout(storeT);
+      if (ql && !exact && storeQ !== ql) {
+        const seq = ++storeSeq, raw = q.trim();
+        storeT = setTimeout(() => storeSearch(raw).then(res => { if (seq !== storeSeq || !$('#pkGrid')) return; store = res; storeQ = ql; draw(); }).catch(() => {}), 350);
+      } else if (!ql || exact) storeSeq++;
       if (open >= 0) { const t = $(`#pkGrid [data-pk="${open}"]`); t ? expand(t, false) : (open = -1); }
     };
     const sub = (k, h) => handles[k] ? `<small class="hd-on">@${esc(handles[k])}</small>` : h ? `<small>已记 ${h} 个</small>` : '';
@@ -995,7 +1009,7 @@
     // long-press (or right-click) one of your own apps to take it off the list
     const menuOff = () => { const m = $('#pkMenu'); if (!m) return; m.id = ''; m.classList.remove('open'); setTimeout(() => m.remove(), 250); };
     const menuFor = tile => {
-      const k = +tile.dataset.pk; if (k < MINE || gone.has(k)) return;
+      const k = +tile.dataset.pk; if (k < MINE || k >= BASE || gone.has(k)) return;
       menuOff(); navigator.vibrate?.(8);
       const n = have(ALL[k][0]), r = tile.getBoundingClientRect(), m = document.createElement('div');
       m.className = 'icon-menu pk-menu'; m.id = 'pkMenu';
@@ -1043,14 +1057,14 @@
       const grid = $('#pkGrid'), cancelPress = () => { clearTimeout(press); press = 0; };
       grid.addEventListener('pointerdown', e => {
         cancelPress(); pressed = false; if (e.button > 0) return;
-        const b = e.target.closest('[data-pk]'); if (!b || +b.dataset.pk < MINE) return;
+        const b = e.target.closest('[data-pk]'); if (!b || +b.dataset.pk < MINE || +b.dataset.pk >= BASE) return;
         pressAt = [e.clientX, e.clientY];
         press = setTimeout(() => { press = 0; pressed = true; menuFor(b); }, 500);
       });
       grid.addEventListener('pointermove', e => { if (press && Math.hypot(e.clientX - pressAt[0], e.clientY - pressAt[1]) > 10) cancelPress(); });
       ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => grid.addEventListener(t, cancelPress));
       grid.addEventListener('contextmenu', e => {
-        const b = e.target.closest('[data-pk]'); if (!b || +b.dataset.pk < MINE) return;
+        const b = e.target.closest('[data-pk]'); if (!b || +b.dataset.pk < MINE || +b.dataset.pk >= BASE) return;
         e.preventDefault(); if (pressed && $('#pkMenu')) return; cancelPress(); menuFor(b);
       });
       const offMenu = e => { if (!$('#pkGrid')) { document.removeEventListener('pointerdown', offMenu, true); return; } if (!e.target.closest('#pkMenu')) menuOff(); };
@@ -1060,6 +1074,18 @@
         if (pressed) { pressed = false; return; }   // the long-press already opened the menu
         const c = e.target.closest('[data-pk-custom]');
         if (c) return accountForm(null, presetId, c.dataset.pkCustom);
+        const st = e.target.closest('[data-pk-store]');
+        if (st) {   // an App Store result becomes a pick like any preset; its icon downloads in the background
+          const r = store[+st.dataset.pkStore]; if (!r) return;
+          const name = storeName(r.trackName);
+          let k = ALL.findIndex(p => p[0].toLowerCase() === name.toLowerCase());
+          if (k < 0) { const p = [name, '', storeCat(r), '', '']; p.store = true; ALL.push(p); k = ALL.length - 1;
+            storeIcon(storeArt(r)).catch(() => storeIcon(r.artworkUrl100)).then(v => { p[4] = v; if ($('#pkGrid')) { const t = $(`#pkGrid [data-pk="${k}"] .icon`); if (t) t.outerHTML = favIcon({ name: p[0], domain: p[1], icon: v }); } }).catch(() => {}); }
+          if (!chosen.has(k)) { chosen.add(k); open = k; }
+          sync(); draw();
+          const t = $(`#pkGrid [data-pk="${k}"]`); if (t) { t.animate([{ transform: 'scale(.86)' }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.34,1.45,.64,1)' }); expand(t, true); }
+          return;
+        }
         const b = e.target.closest('[data-pk]'); if (!b) return;
         const k = +b.dataset.pk, h = have(ALL[k][0]);
         if (chosen.has(k) && open !== k) { open = k; expand(b); return; }   // selected but closed: reopen its drawer
@@ -1081,7 +1107,7 @@
       <div class="sheet-body form">
         <div class="form-hero" style="--pc:${brand(fakes[0])}"><span class="pk-stack">${fakes.slice(0, 5).map(f => favIcon(f, 'lg')).join('')}</span><b>${picks.length === 1 ? esc(picks[0][0]) : `${esc(picks[0][0])} 等 ${picks.length} 个`}</b></div>
         ${idPicksHtml(sel, '用哪个邮箱或手机号注册、绑定的')}
-        <p class="hint">可以多选，比如用邮箱注册、再绑定了手机号；用微信或 Apple 登录的，选下面的登录账号。</p>
+        <p class="hint">可以多选，比如用邮箱注册、再绑定了手机号；用微信、QQ 或 Apple 登录的，选下面的登录账号。</p>
         <div class="sec-title">账号名</div>
         <div class="group">${picks.map((p, k) => { const n = state.accounts.filter(x => x.name.toLowerCase() === p[0].toLowerCase()).length; return `<div class="field hd-field">${favIcon(fakes[k])}<input data-hd="${k}" value="${esc(hds[k] || '')}" placeholder="${n ? `第 ${n + 1} 个${esc(p[0])}账号，填用户名区分` : `${esc(p[0])}的用户名或昵称（选填）`}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`; }).join('')}</div>
         <p class="hint">同一个网站有好几个账号时，靠它区分。</p>
@@ -1091,6 +1117,7 @@
       $('#pkBack').onclick = () => pickApps(presetId, q);
       $('#pkSave').onclick = () => {
         const now = Date.now(), made = picks.map((p, k) => ({ id: uid(), createdAt: now + k, name: p[0], handle: ($(`[data-hd="${k}"]`)?.value || '').trim(), domain: p[1], category: p[2], identityIds: [...sel], notes: '', ...(p[4] ? { icon: p[4] } : {}) }));
+        picks.forEach(p => { if (p.store) rememberApp(p[0], p[1], p[2], p[4]); });
         state.accounts.push(...made); save(); render();
         if (made.length === 1) showAccount(made[0].id); else if (sel.size === 1) showIdentity([...sel][0]); else closeSheet();
         toast(made.length === 1 ? `已添加 ${made[0].name}` : `已添加 ${made.length} 个`);
@@ -1264,7 +1291,7 @@
       if (d.act === 'order') orderSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
-      if (d.act === 'download') window.open('https://github.com/Ckxkx/account-atlas/releases/latest', '_blank', 'noopener');
+      if (d.act === 'download') window.open('https://wwbsj.lanzoup.com/b01i61djvg', '_blank', 'noopener');
       if (d.act === 'demo') { snap(); state = demo(); save(); setKind('email'); render(); undoToast('已载入示例'); }
       if (d.act === 'wipe') confirmSheet('清空全部数据？', Sync.on ? '所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。' : '所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。', '清空全部数据', () => { snap(); state = { identities: [], accounts: [] }; save(); render(); undoToast('已清空'); });
       return;

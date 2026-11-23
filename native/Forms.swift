@@ -36,14 +36,14 @@ struct IdentityForm: View {
     switch type {
     case "email": return "name@example.com"
     case "phone": return "+86 138 0000 0000"
-    default: return provider == "apple" ? "name@icloud.com 或手机号" : "wxid 或自定义微信号"
+    default: return provider == "apple" ? "name@icloud.com 或手机号" : provider == "qq" ? "QQ 号或 QQ 邮箱" : "wxid 或自定义微信号"
     }
   }
   var sample: String {
     switch type {
     case "email": return "name@example.com"
     case "phone": return "+86 138 0000 0000"
-    default: return provider == "apple" ? "name@icloud.com" : "wxid_example"
+    default: return provider == "apple" ? "name@icloud.com" : provider == "qq" ? "10001" : "wxid_example"
     }
   }
   /// emails and phones a login card can be bound to
@@ -81,6 +81,7 @@ struct IdentityForm: View {
           Section {
             HStack(spacing: 10) {
               providerPill("wechat", "微信")
+              providerPill("qq", "QQ")
               providerPill("apple", "Apple")
             }
             .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
@@ -88,11 +89,12 @@ struct IdentityForm: View {
         }
         Section {
           TextField(placeholder, text: $value)
-            .keyboardType(type == "email" || (isLogin && provider == "apple") ? .emailAddress : type == "phone" ? .phonePad : .asciiCapable)
+            .keyboardType(type == "email" || (isLogin && provider == "apple") ? .emailAddress : type == "phone" ? .phonePad : (isLogin && provider == "qq") ? .numbersAndPunctuation : .asciiCapable)
             .textInputAutocapitalization(.never).autocorrectionDisabled()
           TextField("标签：主力、小号、工作…", text: $label)
         } header: { Text(fieldTitle) } footer: {
           if isLogin && provider == "apple" && !trimmed.isEmpty && !valid { Text("Apple ID 是邮箱或手机号。") }
+          if isLogin && provider == "qq" && !trimmed.isEmpty && !valid { Text("QQ 号是 5 到 12 位数字，或填 QQ 邮箱。") }
         }
         if type == "phone" {
           Section {
@@ -152,7 +154,7 @@ struct IdentityForm: View {
     switch type {
     case "email": return "地址"
     case "phone": return "号码"
-    default: return provider == "apple" ? "Apple ID" : "微信号"
+    default: return provider == "apple" ? "Apple ID" : provider == "qq" ? "QQ 号" : "微信号"
     }
   }
 
@@ -160,7 +162,7 @@ struct IdentityForm: View {
     let on = provider == p
     return Button { withAnimation(Motion.snappy) { provider = p } } label: {
       HStack(spacing: 6) {
-        LoginGlyph(apple: p == "apple", size: 15, filled: true)
+        LoginGlyph(provider: p, size: 15, filled: true)
         Text(name).font(.system(size: 15, weight: .semibold))
       }
       .frame(maxWidth: .infinity).frame(height: 40)
@@ -366,7 +368,7 @@ struct AccountForm: View {
 struct IdentityToggles: View {
   @Environment(Store.self) var store
   @Binding var selected: [String]
-  var login = false     // true: only 微信 / Apple cards; false: emails and phones
+  var login = false     // true: only 微信 / QQ / Apple cards; false: emails and phones
   var body: some View {
     ForEach(login ? store.index.logins : store.data.identities.filter { !$0.isLogin }) { i in
       let on = selected.contains(i.id)
@@ -585,15 +587,24 @@ struct PickerSheet: View {
     AppIcon(name: p.name, domain: p.domain, icon: p.icon, url: p.icon == nil ? art[key(p)] : nil, size: size)
   }
 
+  // the picked icons, plus its own 下一步: while the search field is active iOS hides the navigation
+  // bar's buttons, so without this there was no way forward from a search
   var pickedBar: some View {
-    ScrollView(.horizontal) {
-      HStack(spacing: 10) {
-        ForEach(picked, id: \.name) { p in
-          pickedIcon(p, size: 38).transition(.scale.combined(with: .opacity))
-        }
-      }.padding(.horizontal, 16).padding(.vertical, 10)
+    HStack(spacing: 0) {
+      ScrollView(.horizontal) {
+        HStack(spacing: 10) {
+          ForEach(picked, id: \.name) { p in
+            pickedIcon(p, size: 38).transition(.scale.combined(with: .opacity))
+          }
+        }.padding(.horizontal, 16).padding(.vertical, 10)
+      }
+      .scrollIndicators(.hidden)
+      Button { step2 = true } label: {
+        Text("下一步 (\(picked.count))").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+          .padding(.horizontal, 16).frame(height: 38).background(Color.accentColor, in: Capsule())
+      }
+      .buttonStyle(PressStyle(scale: 0.94)).padding(.trailing, 16)
     }
-    .scrollIndicators(.hidden)
     .background(.bar)
   }
 

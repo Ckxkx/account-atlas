@@ -60,7 +60,7 @@ struct Identity: Codable, Identifiable, Hashable {
   var order: Double? = nil
   /// phone only: an eSIM (no physical card). Written only when true; the key is omitted otherwise.
   var esim: Bool? = nil
-  /// login only: "wechat" | "apple"
+  /// login only: "wechat" | "qq" | "apple"
   var provider: String? = nil
   /// login only: id of the email / phone identity it is bound to. Omitted when empty; a dangling id counts as none.
   var via: String? = nil
@@ -111,16 +111,23 @@ struct Identity: Codable, Identifiable, Hashable {
   var isESim: Bool { isPhone && esim == true }
   var isLogin: Bool { type == "login" }
   var isApple: Bool { isLogin && provider == "apple" }
-  /// 微信 / Apple 账户 (login cards), 手机号, 邮箱
-  var kindName: String { isLogin ? (isApple ? "Apple 账户" : "微信") : isPhone ? "手机号" : "邮箱" }
+  var isQQ: Bool { isLogin && provider == "qq" }
+  /// "wechat" | "qq" | "apple" for a login card (anything unknown reads as 微信)
+  var loginProvider: String { isApple ? "apple" : isQQ ? "qq" : "wechat" }
+  /// 微信 / QQ / Apple 账户 (login cards), 手机号, 邮箱
+  var kindName: String { isLogin ? (isApple ? "Apple 账户" : isQQ ? "QQ" : "微信") : isPhone ? "手机号" : "邮箱" }
 }
 
 let KINDS = ["email", "phone", "login"]
-func loginDefaultColor(_ provider: String) -> String { provider == "apple" ? "#1d1d1f" : "#07c160" }
-/// 微信号: at least one character. Apple ID: an email, or a phone number (≥5 digits).
+func loginDefaultColor(_ provider: String) -> String { provider == "apple" ? "#1d1d1f" : provider == "qq" ? "#12b7f5" : "#07c160" }
+/// 微信号: at least one character. QQ: a 5–12 digit number or an email. Apple ID: an email, or a phone number (≥5 digits).
 func loginValueValid(provider: String, value: String) -> Bool {
   let v = value.trimmingCharacters(in: .whitespaces)
   if v.isEmpty { return false }
+  if provider == "qq" {
+    let d = v.filter { $0 != " " }
+    return (d.count >= 5 && d.count <= 12 && d.allSatisfy(\.isNumber)) || v.range(of: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", options: .regularExpression) != nil
+  }
   if provider != "apple" { return true }
   if v.range(of: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", options: .regularExpression) != nil { return true }
   return v.allSatisfy { $0.isNumber || " +-()".contains($0) } && v.filter(\.isNumber).count >= 5
@@ -280,7 +287,7 @@ struct AtlasIndex {
   var recent: [Account] = []                     // newest 5
   var emails: [Identity] = []
   var phones: [Identity] = []
-  var logins: [Identity] = []                    // 微信 / Apple
+  var logins: [Identity] = []                    // 微信 / QQ / Apple
   var boundLogins: [String: [Identity]] = [:]    // email/phone id -> login cards bound to it
   var categoryCount: [String: Int] = [:]
   var categories: [String] = []
@@ -379,7 +386,7 @@ final class Store {
     }
     if i.type == "email" { return mail(i.value) }
     if i.isLogin {
-      if i.isApple { return i.value.contains("@") ? mail(i.value) : number(i.value) }
+      if i.isApple || i.isQQ { return i.value.contains("@") ? mail(i.value) : number(i.value) }
       return String(i.value.prefix(2)) + "•••"
     }
     return number(i.value)

@@ -452,6 +452,8 @@ body.is-empty main .block, body.is-empty #dots{display:none}
 .pk-tick svg{width:13px;height:13px;stroke:#fff;stroke-width:3}
 .pk.on .pk-tick{opacity:1;transform:none}
 .pk.on .icon{box-shadow:0 0 0 2.5px var(--tint)}
+.pk-sec{grid-column:1/-1;display:flex;align-items:center;gap:6px;margin:8px 4px -2px;font-size:13px;font-weight:600;color:var(--secondary)}
+.pk-sec svg{width:14px;height:14px}
 .pk.custom .icon{background:var(--fill);color:var(--secondary)}
 .pk.custom span:not(.icon){color:var(--tint)}
 .pk-stack{display:flex;justify-content:center}
@@ -774,6 +776,8 @@ html[data-theme=light] .hero-edit{background:#e5e5ea}
 .prov-pills button svg{width:18px;height:18px}
 .prov-pills button:active{transform:scale(.95)}
 .prov-pills button.on[data-p=wechat]{background:#07c160;color:#fff}
+.prov-pills button.on[data-p=qq]{background:#12b7f5;color:#fff}
+.wcard.lg-qq .wc-kind svg{width:21px;height:21px}
 .prov-pills button.on[data-p=apple]{background:#e5e5ea;color:#000}
 html[data-theme=light] .prov-pills button.on[data-p=apple]{background:#1d1d1f;color:#fff}
 .cat-list.indirect .reel{opacity:.85}
