@@ -42,8 +42,10 @@ struct SettingsSheet: View {
         Section {
           Button { doc = BackupDoc(data: store.backupJSON()); exporting = true } label: { Label("导出备份", systemImage: "square.and.arrow.up") }
           Button { importing = true } label: { Label("导入备份", systemImage: "square.and.arrow.down") }
-          if !sync.on {
-            Button { store.mutate("已载入示例") { s in s = Store.demo() }; store.data.demo = true; store.persist(); store.setKind("email") } label: { Label("载入示例", systemImage: "text.badge.plus") }
+          if store.hasDemo {
+            Button(role: .destructive) { store.clearDemo() } label: { Label("清除示例数据", systemImage: "xmark.bin") }
+          } else if !sync.on {
+            Button { store.loadDemo() } label: { Label("载入示例", systemImage: "text.badge.plus") }
           }
         } footer: { Text("备份是 JSON 文件，和网页版通用。") }
         Section {

@@ -123,10 +123,38 @@
       delete state.deleted[x.id];
     }
     for (const id of seen.keys()) if (!live.has(id)) state.deleted[id] = now;
+    // "pure demo" only while nothing but the sample cards is on the device
+    if (state.demo) { const d = new Set(readList(DEMO_KEY)); if ([...live].some(id => !d.has(id))) delete state.demo; }
     remember();
     localStorage.setItem(KEY, JSON.stringify(state));
     Sync.schedule();
   };
+
+  // sample data is opt-in: its ids are kept on this device so 「清除示例数据」 removes only them
+  const DEMO_KEY = 'atlas.demoIds';
+  const demoIdSet = () => state.demo ? new Set([...state.identities, ...state.accounts].map(x => x.id)) : new Set(readList(DEMO_KEY));
+  const hasDemo = () => { const d = demoIdSet(); return [...state.identities, ...state.accounts].some(x => d.has(x.id)); };
+  function loadDemo() {
+    snap();
+    const d = demo(), fresh = !state.identities.length && !state.accounts.length;
+    localStorage.setItem(DEMO_KEY, JSON.stringify([...d.identities, ...d.accounts].map(x => x.id)));
+    state.identities.push(...d.identities); state.accounts.push(...d.accounts);
+    if (fresh) state.demo = true;
+    save(); setKind('email'); render(); undoToast('已载入示例，可在右上角「更多」里清除');
+  }
+  function clearDemo() {
+    const d = demoIdSet(); snap();
+    state.identities = state.identities.filter(i => !d.has(i.id)).map(i => i.via && d.has(i.via) ? (({ via, ...r }) => r)(i) : i);
+    state.accounts = state.accounts.filter(a => !d.has(a.id)).map(a => a.identityIds.some(x => d.has(x)) ? { ...a, identityIds: a.identityIds.filter(x => !d.has(x)) } : a);
+    delete state.demo;
+    save(); setKind(ui.kind); render(); undoToast('已清除示例数据');
+  }
+  function askDemo() {
+    localStorage.setItem('atlas.demoAsked', '1');
+    openSheet(`<div class="sheet-body"><div class="alert"><h3>先看看示例？</h3><p>可以载入一组示例邮箱、手机号和网站，看看用起来的效果。之后随时在右上角「更多」里清除。</p></div>
+      <div class="alert-actions"><button id="dYes" style="font-weight:600">载入示例数据</button><button data-close>不用了，直接开始</button></div></div>`, { kind: 'confirm' });
+    setTimeout(() => { $('#dYes').onclick = () => { closeSheet(); loadDemo(); }; }, 0);
+  }
 
   function demo() {
     const ids = [
@@ -309,7 +337,9 @@
     $('#summary').textContent = state.identities.length || a ? `${e} 个邮箱、${p} 个手机号${l ? `、${l} 个登录账号` : ''}，关联着 ${a} 个网站与 App` : '先添加一个邮箱或手机号';
     $('#sitesSummary').textContent = a ? `共 ${a} 个` : '';
     document.body.classList.toggle('is-empty', !state.identities.length && !a);
-    const demoBtn = $('#menu [data-act="demo"]'); if (demoBtn) demoBtn.hidden = Sync.on;
+    const demoOn = hasDemo();
+    const demoBtn = $('#menu [data-act="demo"]'); if (demoBtn) demoBtn.hidden = Sync.on || demoOn;
+    const clearBtn = $('#menu [data-act="demoClear"]'); if (clearBtn) clearBtn.hidden = !demoOn;
   }
 
   function renderWallet() {
@@ -1292,7 +1322,8 @@
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
       if (d.act === 'download') window.open('https://wwbsj.lanzoup.com/b01i61djvg', '_blank', 'noopener');
-      if (d.act === 'demo') { snap(); state = demo(); save(); setKind('email'); render(); undoToast('已载入示例'); }
+      if (d.act === 'demo') loadDemo();
+      if (d.act === 'demoClear') clearDemo();
       if (d.act === 'wipe') confirmSheet('清空全部数据？', Sync.on ? '所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。' : '所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。', '清空全部数据', () => { snap(); state = { identities: [], accounts: [] }; save(); render(); undoToast('已清空'); });
       return;
     }
@@ -1665,8 +1696,8 @@
   // ---------- boot ----------
   if (state) remember();
   if (!state) {
-    state = demo(); save();
-    setTimeout(() => toast('这是示例数据', { label: '清空', fn: () => { state = { identities: [], accounts: [] }; save(); render(); } }), 1400);
+    state = { identities: [], accounts: [] }; save();
+    if (!localStorage.getItem('atlas.demoAsked')) setTimeout(askDemo, 900);
   }
   if (!state.identities.some(i => i.type === ui.kind)) { const t = state.identities.find(i => KINDS.includes(i.type)); if (t) ui.kind = t.type; }
 

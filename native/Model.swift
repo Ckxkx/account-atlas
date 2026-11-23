@@ -328,6 +328,8 @@ final class Store {
   var route: Route? = nil
   var toast: Toast? = nil
   var demoFocus: String? = nil
+  /// true when there was nothing saved on this device: the app starts empty and offers the sample data once
+  var firstRun = false
   @ObservationIgnored var toastAction: (() -> Void)? = nil
   @ObservationIgnored var onSaved: (() -> Void)? = nil
 
@@ -340,8 +342,11 @@ final class Store {
   init() {
     if let d = try? Data(contentsOf: url), let s = try? JSONDecoder().decode(AtlasData.self, from: d) {
       data = s
+    } else if UserDefaults.standard.object(forKey: "atlasSeed") != nil || UserDefaults.standard.string(forKey: "atlasDemo") != nil {
+      data = Store.demo()   // CI screenshots / promo clips
     } else {
-      data = Store.demo()
+      data = AtlasData()
+      firstRun = true
     }
     index = AtlasIndex(data)
     remember()
@@ -537,6 +542,38 @@ final class Store {
     mutate("已导入 \(b.identities.count) 个身份和 \(b.accounts.count) 个网站") { s in s.identities = b.identities; s.accounts = b.accounts }
     setKind(kind)
     return true
+  }
+
+  // sample data is opt-in; its ids stay on this device so 「清除示例数据」 removes only them
+  private static let demoKey = "atlas.demoIds"
+  var demoIDs: Set<String> {
+    if data.demo == true { return Set(data.identities.map(\.id) + data.accounts.map(\.id)) }
+    return Set(UserDefaults.standard.stringArray(forKey: Store.demoKey) ?? [])
+  }
+  var hasDemo: Bool {
+    let d = demoIDs
+    return data.identities.contains { d.contains($0.id) } || data.accounts.contains { d.contains($0.id) }
+  }
+  func loadDemo() {
+    let d = Store.demo()
+    let fresh = data.identities.isEmpty && data.accounts.isEmpty
+    UserDefaults.standard.set(d.identities.map(\.id) + d.accounts.map(\.id), forKey: Store.demoKey)
+    mutate("已载入示例，可在「更多」里清除") { s in s.identities += d.identities; s.accounts += d.accounts }
+    if fresh { data.demo = true; persist() }
+    IconStore.shared.prefetch(data.accounts)
+    setKind("email")
+  }
+  func clearDemo() {
+    let d = demoIDs
+    mutate("已清除示例数据") { s in
+      s.identities = s.identities.filter { !d.contains($0.id) }.map { i in
+        var i = i; if let v = i.via, d.contains(v) { i.via = nil }; return i
+      }
+      s.accounts = s.accounts.filter { !d.contains($0.id) }.map { a in
+        var a = a; a.identityIds.removeAll { d.contains($0) }; return a
+      }
+    }
+    setKind(kind)
   }
 
   static func demo() -> AtlasData {

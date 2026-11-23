@@ -51,6 +51,8 @@ object Store {
   var toastAction: (() -> Unit)? = null
   var onSaved: (() -> Unit)? = null
   var ready = false; private set
+  /** nothing was saved on this device: the app starts empty and offers the sample data once */
+  var firstRun = false; private set
 
   private var seen = HashMap<String, Any>()
   private var undoSnap: AtlasData? = null
@@ -63,7 +65,7 @@ object Store {
     privacy = prefs.getBoolean("atlas.privacy", false)
     kind = prefs.getString("atlas.kind", "email")?.takeIf { it in KINDS } ?: "email"
     theme = prefs.getString("atlas.theme", "dark") ?: "dark"
-    data = runCatching { decodeAtlas(file.readText()) }.getOrElse { demo() }
+    data = runCatching { decodeAtlas(file.readText()) }.getOrElse { firstRun = true; AtlasData() }
     remember()
     activeID = deck.firstOrNull()?.id
     ready = true
@@ -211,9 +213,36 @@ object Store {
     return true
   }
 
+  // sample data is opt-in; its ids stay on this device so 「清除示例数据」 removes only them
+  private const val DEMO_KEY = "atlas.demoIds"
+  fun demoIds(): Set<String> =
+    if (data.demo == true) (data.identities.map { it.id } + data.accounts.map { it.id }).toSet()
+    else prefs.getStringSet(DEMO_KEY, emptySet()) ?: emptySet()
+  val hasDemo: Boolean get() { val d = demoIds(); return data.identities.any { it.id in d } || data.accounts.any { it.id in d } }
+
   fun loadDemo() {
-    mutate("已载入示例") { demo() }
-    data = data.copy(demo = true); persist(); setKind("email")
+    val d = demo()
+    val fresh = data.identities.isEmpty() && data.accounts.isEmpty()
+    prefs.edit().putStringSet(DEMO_KEY, (d.identities.map { it.id } + d.accounts.map { it.id }).toSet()).apply()
+    mutate("已载入示例，可在「更多」里清除") { it.copy(identities = it.identities + d.identities, accounts = it.accounts + d.accounts) }
+    if (fresh) { data = data.copy(demo = true); persist() }
+    setKind("email")
+  }
+  fun clearDemo() {
+    val d = demoIds()
+    mutate("已清除示例数据") { s ->
+      s.copy(
+        identities = s.identities.filter { it.id !in d }.map { if (it.via != null && it.via in d) it.copy(via = null) else it },
+        accounts = s.accounts.filter { it.id !in d }.map { a -> if (a.identityIds.any { it in d }) a.copy(identityIds = a.identityIds.filter { it !in d }) else a },
+      )
+    }
+    setKind(kind)
+  }
+  /** CI screenshots start from the sample data */
+  fun seedDemo() {
+    if (!firstRun) return
+    firstRun = false
+    data = demo(); remember(); persist(); fixActive()
   }
 
   fun demo(): AtlasData {

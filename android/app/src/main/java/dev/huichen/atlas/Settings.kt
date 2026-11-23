@@ -49,6 +49,7 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.PlaylistAdd
+import androidx.compose.material.icons.outlined.PlaylistRemove
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -156,7 +157,10 @@ fun SettingsMain(go: (String) -> Unit) {
         SettingRow(Icons.Outlined.Upload, "导出备份") { exporter.launch("账号备份-${LocalDate.now()}.json") }
         Divider()
         SettingRow(Icons.Outlined.Download, "导入备份") { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
-        if (!Sync.on) {
+        if (Store.hasDemo) {
+          Divider()
+          SettingRow(Icons.Outlined.PlaylistRemove, "清除示例数据", color = pal.red) { Store.clearDemo() }
+        } else if (!Sync.on) {
           Divider()
           SettingRow(Icons.Outlined.PlaylistAdd, "载入示例") { Store.loadDemo() }
         }
