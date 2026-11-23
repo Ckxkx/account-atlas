@@ -137,7 +137,18 @@ fun nowMS(): Double = System.currentTimeMillis().toDouble()
 
 val CATS = listOf("社交", "购物", "支付金融", "开发", "AI", "娱乐", "游戏", "出行", "工具", "加密", "其他")
 
-data class Preset(val name: String, val domain: String, val category: String, val color: String)
+data class Preset(val name: String, val domain: String, val category: String, val color: String, val aliases: String = "")
+
+/** search match: name or domain contains the (lowercased) query, or one of the aliases starts with it */
+fun siteHit(p: Preset, q: String): Boolean =
+  p.name.lowercase().contains(q) || (p.domain.isNotEmpty() && p.domain.contains(q)) || (p.aliases.isNotEmpty() && (" " + p.aliases).contains(" $q"))
+
+/** category of a hand-added app: from the presets, else the site directory, else 其他 */
+fun categoryFor(name: String, domain: String): String {
+  val d = cleanDomain(domain)
+  return presetFor(name, domain)?.category
+    ?: Presets.directory.firstOrNull { (d.isNotEmpty() && it.domain == d) || it.name.lowercase() == name.lowercase() }?.category ?: "其他"
+}
 
 /** An app the user added by hand (or has an account for) and its own icon, if any. */
 data class CustomApp(val preset: Preset, val icon: String?)

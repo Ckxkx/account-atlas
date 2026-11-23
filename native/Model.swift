@@ -217,7 +217,12 @@ func nowMS() -> Double { (Date().timeIntervalSince1970 * 1000).rounded() }
 
 let CATS = ["社交", "购物", "支付金融", "开发", "AI", "娱乐", "游戏", "出行", "工具", "加密", "其他"]
 
-struct Preset: Hashable { let name: String; let domain: String; let category: String; let color: String; var icon: String? = nil }
+struct Preset: Hashable { let name: String; let domain: String; let category: String; let color: String; var icon: String? = nil; var aliases: String = "" }
+
+/// search match: name or domain contains the (lowercased) query, or one of the aliases starts with it
+func siteHit(_ p: Preset, _ q: String) -> Bool {
+  p.name.lowercased().contains(q) || p.domain.contains(q) || (!p.aliases.isEmpty && (" " + p.aliases).contains(" " + q))
+}
 
 // MARK: - helpers
 

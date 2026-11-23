@@ -233,7 +233,7 @@ struct AccountForm: View {
   var presetHits: [Preset] {
     let q = query.lowercased()
     guard !q.isEmpty else { return [] }
-    return Array(Presets.all.filter { $0.name.lowercased().contains(q) || $0.domain.contains(q) }.prefix(4))
+    return Array((Presets.all + Presets.directory).filter { siteHit($0, q) }.prefix(4))
   }
   var storeHits: [AppStoreApp] {
     let shown = Set(presetHits.map { $0.name.lowercased() })
@@ -421,7 +421,10 @@ struct PickerSheet: View {
   var list: [Preset] {
     let q = query.trimmingCharacters(in: .whitespaces).lowercased()
     let all = store.customApps + Presets.all
-    if !q.isEmpty { return all.filter { $0.name.lowercased().contains(q) || $0.domain.contains(q) } }
+    if !q.isEmpty {
+      let names = Set(all.map { $0.name.lowercased() })
+      return Array((all + Presets.directory.filter { !names.contains($0.name.lowercased()) }).filter { siteHit($0, q) }.prefix(60))
+    }
     switch cat {
     case "我添加的": return store.customApps
     case "常用": return Array(Presets.popular.compactMap { n in Presets.all.first { $0.name == n } }.prefix(12))
@@ -686,6 +689,7 @@ struct ManualAppSheet: View {
   @State private var photos = false
   @State private var photoItem: PhotosPickerItem? = nil
   @State private var iconJob = 0
+  @State private var webHits: [SiteHit] = []          // official sites found online for a name we don't know
   @FocusState private var nameFocused: Bool
 
   init(initialName: String, onAdd: @escaping (Preset) -> Void) {
@@ -694,6 +698,13 @@ struct ManualAppSheet: View {
   }
 
   var trimmed: String { name.trimmingCharacters(in: .whitespaces) }
+  /// sites we know that match the name, so the user never has to look the domain up
+  var localHits: [SiteHit] {
+    let q = trimmed.lowercased()
+    guard !q.isEmpty, cleanDomain(domain).isEmpty else { return [] }
+    return Array((Presets.all + Presets.directory).filter { siteHit($0, q) }.prefix(3)).map { SiteHit(label: $0.name, domain: $0.domain) }
+  }
+  var domainHits: [SiteHit] { cleanDomain(domain).isEmpty ? (localHits.isEmpty ? webHits : localHits) : [] }
 
   var body: some View {
     NavigationStack {
@@ -718,10 +729,34 @@ struct ManualAppSheet: View {
         Section {
           TextField("名称", text: $name).font(.system(size: 17, weight: .semibold)).focused($nameFocused)
             .submitLabel(.done).onSubmit { add() }
-          TextField("域名（可选）", text: $domain).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-        } footer: { Text("名称必填，填了域名会自动找图标。") }
+          TextField("网址（可选）", text: $domain).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+        } footer: { Text(domainHits.isEmpty ? "名称必填。网址用来找图标，不知道可以不填。" : "不知道网址？点下面的官网就行。") }
+        if !domainHits.isEmpty {
+          Section("官网") {
+            ForEach(domainHits, id: \.self) { h in
+              Button { withAnimation(Motion.snappy) { domain = h.domain } } label: {
+                HStack(spacing: 12) {
+                  AppIcon(name: h.label, domain: h.domain, size: 28)
+                  Text(h.label).foregroundStyle(.primary).lineLimit(1)
+                  Spacer()
+                  Text(h.domain).font(.system(size: 14)).foregroundStyle(.secondary).lineLimit(1)
+                }
+              }
+            }
+          }
+        }
       }
       .animation(Motion.snappy, value: icon)
+      .animation(Motion.snappy, value: domainHits)
+      .task(id: trimmed) {
+        // nothing we know by that name: look its official site up online (debounced; a newer name cancels this)
+        webHits = []
+        guard !trimmed.isEmpty, localHits.isEmpty, cleanDomain(domain).isEmpty else { return }
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        guard !Task.isCancelled else { return }
+        let found = await SiteLookup.find(trimmed)
+        if !Task.isCancelled { webHits = found }
+      }
       .confirmationDialog("更换图标", isPresented: $iconMenu, titleVisibility: .visible) {
         Button("从相册选择") { photos = true }
         if icon != nil { Button("使用默认图标") { iconJob &+= 1; withAnimation(Motion.snappy) { icon = nil } } }
@@ -751,7 +786,9 @@ struct ManualAppSheet: View {
 
   func add() {
     let n = trimmed; guard !n.isEmpty else { return }
-    let p = Preset(name: n, domain: cleanDomain(domain), category: presetFor(name: n, domain: domain)?.category ?? "其他", color: "", icon: icon)
+    let d = cleanDomain(domain)
+    let cat = presetFor(name: n, domain: domain)?.category ?? Presets.directory.first { (!d.isEmpty && $0.domain == d) || $0.name.lowercased() == n.lowercased() }?.category ?? "其他"
+    let p = Preset(name: n, domain: d, category: cat, color: "", icon: icon)
     onAdd(p)
     dismiss()
   }

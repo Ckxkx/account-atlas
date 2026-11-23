@@ -87,6 +87,36 @@ object CustomIcon {
   }
 }
 
+data class SiteHit(val label: String, val domain: String)
+
+/** 不知道网址: official website (Wikidata P856) for a name. Free, no key; unreachable in some regions -> empty. */
+object SiteLookup {
+  private val http = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
+  private fun get(params: String): kotlinx.serialization.json.JsonObject? = runCatching {
+    http.newCall(Request.Builder().url("https://www.wikidata.org/w/api.php?format=json&$params")
+      .header("User-Agent", "AccountAtlas/2 (https://github.com/Ckxkx/account-atlas)").build()).execute().use { r ->
+      if (!r.isSuccessful) null else JSON.parseToJsonElement(r.body?.string().orEmpty()) as? kotlinx.serialization.json.JsonObject
+    }
+  }.getOrNull()
+
+  suspend fun find(q: String): List<SiteHit> = withContext(Dispatchers.IO) {
+    val enc = java.net.URLEncoder.encode(q.trim(), "UTF-8")
+    val hits = (get("action=wbsearchentities&type=item&language=zh&uselang=zh&limit=6&search=$enc")?.get("search") as? kotlinx.serialization.json.JsonArray) ?: return@withContext emptyList()
+    val out = ArrayList<SiteHit>()
+    for (h in hits.take(3)) {
+      val o = h as? kotlinx.serialization.json.JsonObject ?: continue
+      val id = (o["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: continue
+      val cl = ((get("action=wbgetclaims&property=P856&entity=$id")?.get("claims") as? kotlinx.serialization.json.JsonObject)?.get("P856") as? kotlinx.serialization.json.JsonArray)
+        ?.mapNotNull { it as? kotlinx.serialization.json.JsonObject } ?: continue
+      val best = cl.firstOrNull { (it["rank"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "preferred" } ?: cl.firstOrNull()
+      val v = (((best?.get("mainsnak") as? kotlinx.serialization.json.JsonObject)?.get("datavalue") as? kotlinx.serialization.json.JsonObject)?.get("value") as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+      val d = cleanDomain(v)
+      if (d.isNotEmpty() && out.none { it.domain == d }) out += SiteHit((o["label"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: q, d)
+    }
+    out
+  }
+}
+
 /** Free iTunes Search API, no key. Fails silently (offline -> empty). */
 object AppStore {
   private val http = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
