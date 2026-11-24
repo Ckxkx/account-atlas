@@ -99,37 +99,10 @@ struct AppStoreApp: Decodable, Hashable, Identifiable {
   }
 }
 
-// MARK: - 不知道网址: official website (Wikidata P856) for a name. Free, no key; unreachable in some regions -> []
-
 struct SiteHit: Hashable { let label: String; let domain: String }
 
-enum SiteLookup {
-  private static func get(_ items: [URLQueryItem]) async -> [String: Any]? {
-    var c = URLComponents(string: "https://www.wikidata.org/w/api.php")!
-    c.queryItems = [.init(name: "format", value: "json")] + items
-    guard let u = c.url else { return nil }
-    var r = URLRequest(url: u, timeoutInterval: 10)
-    r.setValue("AccountAtlas/2 (https://github.com/Ckxkx/account-atlas)", forHTTPHeaderField: "User-Agent")
-    guard let res = try? await URLSession.shared.data(for: r), ((res.1 as? HTTPURLResponse)?.statusCode ?? 0) == 200 else { return nil }
-    return (try? JSONSerialization.jsonObject(with: res.0)) as? [String: Any]
-  }
-
-  static func find(_ q: String) async -> [SiteHit] {
-    guard let s = await get([.init(name: "action", value: "wbsearchentities"), .init(name: "type", value: "item"), .init(name: "language", value: "zh"),
-                             .init(name: "uselang", value: "zh"), .init(name: "limit", value: "6"), .init(name: "search", value: q)]),
-          let hits = s["search"] as? [[String: Any]] else { return [] }
-    var out: [SiteHit] = []
-    for h in hits.prefix(3) {
-      guard let id = h["id"] as? String, let j = await get([.init(name: "action", value: "wbgetclaims"), .init(name: "property", value: "P856"), .init(name: "entity", value: id)]),
-            let cl = (j["claims"] as? [String: Any])?["P856"] as? [[String: Any]] else { continue }
-      let best = cl.first { ($0["rank"] as? String) == "preferred" } ?? cl.first
-      let v = ((best?["mainsnak"] as? [String: Any])?["datavalue"] as? [String: Any])?["value"] as? String ?? ""
-      let d = cleanDomain(v)
-      if !d.isEmpty && !out.contains(where: { $0.domain == d }) { out.append(SiteHit(label: h["label"] as? String ?? q, domain: d)) }
-    }
-    return out
-  }
-}
+/// no online domain lookup: the app stays offline apart from the App Store search
+enum SiteLookup { static func find(_ q: String) async -> [SiteHit] { [] } }
 
 enum AppStoreSearch {
   private struct Reply: Decodable { let results: [AppStoreApp] }

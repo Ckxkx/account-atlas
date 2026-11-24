@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
     Sync.init()
     Store.onSaved = { Sync.schedule() }
     Store.backfillIcons()
+    Store.scope.launch { kotlinx.coroutines.delay(2500); Store.nudge() }
     if (Store.recovered) Store.scope.launch { kotlinx.coroutines.delay(1000); Store.show("数据文件读取出错，已恢复到上次能打开的版本") }
     // launch extras used by the CI emulator screenshots
     intent?.getStringExtra("atlasTheme")?.let { Store.putTheme(it) }

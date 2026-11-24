@@ -505,6 +505,26 @@ final class Store {
     if active == nil || !deck.contains(where: { $0.id == activeID }) { activeID = deck.first?.id }
   }
 
+  /// 小提示: at most once a week, the card that hasn't had a new site in two weeks or more
+  func nudge() {
+    let d = UserDefaults.standard, now = nowMS(), day = 86_400_000.0
+    guard data.demo != true, now - d.double(forKey: "atlas.nudgeAt") >= 7 * day else { return }
+    let demo = demoIDs
+    var pick: Identity? = nil, oldest = Double.infinity
+    for i in data.identities where !demo.contains(i.id) {
+      guard let t = data.accounts.filter({ $0.identityIds.contains(i.id) }).map(\.createdAt).max() else { continue }
+      if t < oldest { oldest = t; pick = i }
+    }
+    guard let p = pick, now - oldest >= 14 * day else { return }
+    d.set(now, forKey: "atlas.nudgeAt")
+    // never the full address or number: the user's own label, else a masked form
+    let v = p.value
+    let masked: String = p.type == "phone" ? "尾号 \(String(v.filter(\.isNumber).suffix(4))) 的手机号"
+      : (v.firstIndex(of: "@").map { at in at > v.startIndex ? "\(v.prefix(1))•••\(v[at...])" : "这个账号" } ?? "这个账号")
+    let name = p.label.isEmpty ? masked : p.label
+    show("好久没给「\(name)」记录新账号啦，要不要来看看呢～", action: "去看看") { [weak self] in self?.route = .identity(p.id) }
+  }
+
   func show(_ text: String, action: String? = nil, _ fn: (() -> Void)? = nil) {
     toastAction = fn
     withAnimation(Motion.smooth) { toast = Toast(text: text, action: action) }

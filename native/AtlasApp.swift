@@ -62,6 +62,9 @@ struct RootView: View {
       if store.recovered {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { store.show("数据文件读取出错，已恢复到上次能打开的版本") }
       }
+      if !store.firstRun && !store.recovered {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { store.nudge() }
+      }
       Task { try? await Task.sleep(for: .seconds(4)); await store.backfillIcons() }
     }
   }
