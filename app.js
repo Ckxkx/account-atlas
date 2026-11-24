@@ -1775,11 +1775,7 @@
     }
     if (!pick || now - oldest < 14 * DAY) return;
     localStorage.setItem('atlas.nudgeAt', String(now));
-    // never the full address or number: the user's own label, else a masked form (the banner can be seen over a shoulder)
-    const v = String(pick.value || ''), at = v.indexOf('@');
-    const masked = pick.type === 'phone' ? `尾号 ${v.replace(/\D/g, '').slice(-4)} 的手机号` : at > 0 ? `${v[0]}•••${v.slice(at)}` : '这个账号';
-    const name = pick.type === 'login' ? LOGIN[provOf(pick)].name + (pick.label ? ` · ${pick.label}` : '') : (pick.label || masked);
-    toast(`好久没给「${name}」记录新账号啦，要不要来看看呢～`, { label: '去看看', fn: () => showIdentity(pick.id) });
+    toast('好久没来记录新账号啦，要不要来看看呢～');   // plain text only: no address, number or name on screen
   }
   setTimeout(nudge, 2500);
 

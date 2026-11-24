@@ -517,12 +517,7 @@ final class Store {
     }
     guard let p = pick, now - oldest >= 14 * day else { return }
     d.set(now, forKey: "atlas.nudgeAt")
-    // never the full address or number: the user's own label, else a masked form
-    let v = p.value
-    let masked: String = p.type == "phone" ? "尾号 \(String(v.filter(\.isNumber).suffix(4))) 的手机号"
-      : (v.firstIndex(of: "@").map { at in at > v.startIndex ? "\(v.prefix(1))•••\(v[at...])" : "这个账号" } ?? "这个账号")
-    let name = p.label.isEmpty ? masked : p.label
-    show("好久没给「\(name)」记录新账号啦，要不要来看看呢～", action: "去看看") { [weak self] in self?.route = .identity(p.id) }
+    _ = p; show("好久没来记录新账号啦，要不要来看看呢～")   // plain text only: no address, number or name on screen
   }
 
   func show(_ text: String, action: String? = nil, _ fn: (() -> Void)? = nil) {
