@@ -72,6 +72,27 @@ struct GlassStyle: ShapeStyle {
 }
 extension ShapeStyle where Self == GlassStyle { static var glass: GlassStyle { GlassStyle() } }
 
+/// iOS 26 Liquid Glass: real refraction, specular rim and adaptive tinting, rendered by the
+/// render server. On iOS 17 and 18 (the releases before 26) the flat tint above stands in for it.
+/// Only put this on chrome and one-off surfaces — a live glass layer on every row of a long
+/// scroll view is a lot of backdrop sampling for something the eye won't see over a soft gradient.
+struct LiquidPanel<S: Shape>: ViewModifier {
+  let shape: S
+  var interactive = false
+  @ViewBuilder func body(content: Content) -> some View {
+    if #available(iOS 26.0, *) {
+      content.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+    } else {
+      content.background(.glass, in: shape)
+    }
+  }
+}
+extension View {
+  func liquidPanel<S: Shape>(_ shape: S, interactive: Bool = false) -> some View {
+    modifier(LiquidPanel(shape: shape, interactive: interactive))
+  }
+}
+
 // MARK: - baked shadows
 
 /// Coloured soft shadows rendered once into a bitmap (Core Graphics, off the frame loop) and then

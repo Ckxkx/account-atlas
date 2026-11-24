@@ -100,7 +100,7 @@ struct MapView: View {
             Spacer(minLength: 0)
           }
           .padding(.horizontal, 8).frame(width: width - 16 - rx, height: appH)
-          .background(.glass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+          .liquidPanel(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(PressStyle())
         .foregroundStyle(.primary)

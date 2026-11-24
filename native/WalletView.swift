@@ -121,6 +121,15 @@ struct KindSwitch: View {
   @Environment(Store.self) var store
   @Namespace private var ns
   var body: some View {
+    // iOS 26: glass container so the selected thumb and the track blend as one piece of glass
+    if #available(iOS 26.0, *) {
+      GlassEffectContainer(spacing: 12) { bar(glass: true) }
+    } else {
+      bar(glass: false)
+    }
+  }
+
+  func bar(glass: Bool) -> some View {
     HStack(spacing: 0) {
       ForEach([("email", "邮箱", "envelope"), ("phone", "手机号", "simcard"), ("login", "登录", "person.badge.key")], id: \.0) { t in
         let k = t.0, name = t.1, icon = t.2
@@ -135,17 +144,35 @@ struct KindSwitch: View {
           }
           .frame(maxWidth: .infinity).frame(height: 36)
           .foregroundStyle(on ? .primary : .secondary)
-          .background {
-            if on { Capsule().fill(.background.opacity(0.9)).shadow(color: .black.opacity(0.18), radius: 6, y: 2).matchedGeometryEffect(id: "thumb", in: ns) }
-          }
+          .background { if on { thumb(glass: glass) } }
           .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
       }
     }
     .padding(3)
-    .background(.glass, in: Capsule())
+    .modifier(KindSwitchChrome(glass: glass))
     .sensoryFeedback(.selection, trigger: store.kind)
+  }
+
+  @ViewBuilder func thumb(glass: Bool) -> some View {
+    if #available(iOS 26.0, *), glass {
+      // a tinted glass thumb: plain .regular over the glass track is nearly invisible
+      Capsule().fill(.clear)
+        .glassEffect(.regular.interactive().tint(Color.white.opacity(0.55)), in: Capsule())
+        .matchedGeometryEffect(id: "thumb", in: ns)
+    } else {
+      Capsule().fill(.background.opacity(0.9)).shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+        .matchedGeometryEffect(id: "thumb", in: ns)
+    }
+  }
+}
+
+private struct KindSwitchChrome: ViewModifier {
+  let glass: Bool
+  @ViewBuilder func body(content: Content) -> some View {
+    if #available(iOS 26.0, *), glass { content.glassEffect(.regular, in: Capsule()) }
+    else { content.background(.glass, in: Capsule()) }
   }
 }
 
@@ -161,7 +188,7 @@ struct AddCard: View {
       .foregroundStyle(.secondary)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .aspectRatio(1.586, contentMode: .fit)
-      .background(CardShape(sim: kind == "phone").fill(.glass))
+      .liquidPanel(CardShape(sim: kind == "phone"))
       .overlay(CardShape(sim: kind == "phone").stroke(style: StrokeStyle(lineWidth: 1.2, dash: [6, 5])).foregroundStyle(.secondary.opacity(0.5)))
     }
     .buttonStyle(PressStyle())
@@ -203,7 +230,7 @@ struct AppGrid: View {
           Button { store.route = .identity(i.id) } label: {
             VStack(spacing: 6) {
               Text("+\(more)").font(.system(size: 18, weight: .bold, design: .rounded)).frame(width: 58, height: 58)
-                .background(.glass, in: RoundedRectangle(cornerRadius: 58 * 0.235, style: .continuous))
+                .liquidPanel(RoundedRectangle(cornerRadius: 58 * 0.235, style: .continuous))
               Text("全部").font(.system(size: 12)).foregroundStyle(.secondary)
             }
           }.buttonStyle(PressStyle(scale: 0.9))
@@ -211,7 +238,7 @@ struct AppGrid: View {
           Button { store.route = .picker(i.id) } label: {
             VStack(spacing: 6) {
               Image(systemName: "plus").font(.system(size: 20, weight: .medium)).frame(width: 58, height: 58)
-                .background(.glass, in: RoundedRectangle(cornerRadius: 58 * 0.235, style: .continuous))
+                .liquidPanel(RoundedRectangle(cornerRadius: 58 * 0.235, style: .continuous))
               Text("添加").font(.system(size: 12)).foregroundStyle(.secondary)
             }
           }.buttonStyle(PressStyle(scale: 0.9))
@@ -219,7 +246,7 @@ struct AppGrid: View {
       }
       .animation(Motion.smooth, value: store.activeID)
       .padding(16)
-      .background(.glass.opacity(0.7), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+      .liquidPanel(RoundedRectangle(cornerRadius: 26, style: .continuous))
       if list.isEmpty && i == nil { Text("还没有网站，从右上角的 + 开始。").font(.system(size: 14)).foregroundStyle(.secondary) }
     }
   }

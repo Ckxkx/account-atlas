@@ -25,7 +25,7 @@ struct IdentityDetail: View {
             if !i.notes.isEmpty {
               section("备注")
               Text(i.notes).frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                .background(.glass, in: RoundedRectangle(cornerRadius: 16, style: .continuous)).padding(.horizontal, 20)
+                .liquidPanel(RoundedRectangle(cornerRadius: 16, style: .continuous)).padding(.horizontal, 20)
             }
             links(i)
             section((i.isLogin ? "用它登录的 " : "用它注册或绑定的 ") + "\(accs.count) 个网站与 App")
@@ -36,7 +36,7 @@ struct IdentityDetail: View {
               Button { store.route = .picker(i.id) } label: {
                 Label("添加网站或 App", systemImage: "plus").font(.system(size: 16, weight: .semibold))
                   .frame(maxWidth: .infinity).frame(height: 52)
-                  .background(.glass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                  .liquidPanel(RoundedRectangle(cornerRadius: 18, style: .continuous))
               }.buttonStyle(PressStyle(scale: 0.98))
             }.padding(.horizontal, 20)
             viaSites(i, direct: accs)
@@ -112,7 +112,7 @@ struct IdentityDetail: View {
       Spacer()
       Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(.tertiary)
     }
-    .padding(12).background(.glass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    .padding(12).liquidPanel(RoundedRectangle(cornerRadius: 18, style: .continuous))
     .foregroundStyle(.primary)
   }
 
@@ -128,7 +128,7 @@ struct IdentityDetail: View {
       }
       .foregroundStyle(role == .destructive ? Color.red : Color.primary)
       .frame(maxWidth: .infinity).frame(height: 66)
-      .background(.glass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+      .liquidPanel(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }.buttonStyle(PressStyle())
   }
 }
@@ -176,7 +176,7 @@ struct AccountDetail: View {
                     Spacer()
                     Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(.tertiary)
                   }
-                  .padding(12).background(.glass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                  .padding(12).liquidPanel(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }.buttonStyle(PressStyle(scale: 0.98)).foregroundStyle(.primary)
               }
             }.padding(.horizontal, 20)
@@ -184,7 +184,7 @@ struct AccountDetail: View {
               Text("备注").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 36).padding(.top, 26).padding(.bottom, 8)
               Text(a.notes).frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                .background(.glass, in: RoundedRectangle(cornerRadius: 16, style: .continuous)).padding(.horizontal, 20)
+                .liquidPanel(RoundedRectangle(cornerRadius: 16, style: .continuous)).padding(.horizontal, 20)
             }
             Text("添加于 " + Date(timeIntervalSince1970: a.createdAt / 1000).formatted(date: .long, time: .omitted))
               .font(.system(size: 12)).foregroundStyle(.tertiary).padding(.top, 24).padding(.bottom, 30)
@@ -199,7 +199,7 @@ struct AccountDetail: View {
     }
   }
   func tag(_ s: String) -> some View {
-    Text(s).font(.system(size: 12, weight: .medium)).padding(.horizontal, 9).padding(.vertical, 4).background(.glass, in: Capsule())
+    Text(s).font(.system(size: 12, weight: .medium)).padding(.horizontal, 9).padding(.vertical, 4).liquidPanel(Capsule())
   }
   func act(_ t: String, _ icon: String, disabled: Bool = false, destructive: Bool = false, _ fn: @escaping () -> Void) -> some View {
     Button(action: fn) {
@@ -209,7 +209,7 @@ struct AccountDetail: View {
       }
       .foregroundStyle(destructive ? Color.red : Color.primary)
       .frame(maxWidth: .infinity).frame(height: 66)
-      .background(.glass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+      .liquidPanel(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }.buttonStyle(PressStyle()).disabled(disabled).opacity(disabled ? 0.35 : 1)
   }
 }

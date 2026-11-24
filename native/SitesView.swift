@@ -1,5 +1,15 @@
 import SwiftUI
 
+/// Selected filter chip: solid accent. The rest are Liquid Glass on iOS 26, a flat tint below it.
+struct ChipChrome: ViewModifier {
+  let on: Bool
+  @ViewBuilder func body(content: Content) -> some View {
+    if on { content.background(Color.accentColor, in: Capsule()) }
+    else if #available(iOS 26.0, *) { content.glassEffect(.regular, in: Capsule()) }
+    else { content.background(.glass, in: Capsule()) }
+  }
+}
+
 struct SitesView: View {
   @Environment(Store.self) var store
   @State private var cat = "全部"
@@ -65,7 +75,7 @@ struct SitesView: View {
               .font(.system(size: 14, weight: .semibold))
               .padding(.horizontal, 13).frame(height: 32)
               .foregroundStyle(cat == c ? Color.white : Color.primary)
-              .background(cat == c ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.glass), in: Capsule())
+              .modifier(ChipChrome(on: cat == c))
           }.buttonStyle(PressStyle(scale: 0.94))
         }
       }.padding(.horizontal, 16)
