@@ -194,7 +194,10 @@ object Store {
     val p = pick ?: return
     if (now - oldest < 14 * day) return
     prefs.edit().putFloat("atlas.nudgeAtDays", (now / day).toFloat()).apply()
-    val name = p.label.ifEmpty { display(p) }
+    // never the full address or number: the user's own label, else a masked form
+    val v = p.value; val at = v.indexOf('@')
+    val masked = if (p.type == "phone") "尾号 ${v.filter { it.isDigit() }.takeLast(4)} 的手机号" else if (at > 0) "${v.take(1)}•••${v.substring(at)}" else "这个账号"
+    val name = p.label.ifEmpty { masked }
     show("好久没给「$name」记录新账号啦，要不要来看看呢～", "去看看") { push(Route.IdentityR(p.id)) }
   }
 
