@@ -27,7 +27,7 @@ struct RootView: View {
   @Environment(Store.self) var store
   @State private var tab = 0
   @State private var dir: CGFloat = 1
-  @State private var askDemo = false
+  @State private var tour = false
 
   var body: some View {
     TabView(selection: Binding(get: { tab }, set: { t in dir = t >= tab ? 1 : -1; tab = t })) {
@@ -41,10 +41,7 @@ struct RootView: View {
     .onChange(of: store.theme) { _, t in ThemeFX.apply(t) }
     .sheet(item: Binding(get: { store.route }, set: { r in store.route = r })) { r in sheet(r) }
     .overlay(alignment: .top) { ToastView() }
-    .alert("先看看示例？", isPresented: $askDemo) {
-      Button("载入示例数据") { store.loadDemo() }
-      Button("不用了，直接开始", role: .cancel) {}
-    } message: { Text("可以载入一组示例邮箱、手机号和网站，看看用起来的效果。之后随时在右上角「更多」里清除。") }
+    .fullScreenCover(isPresented: $tour) { OnboardingView(offerDemo: true).environment(store) }
     .onAppear {
       // launch arguments used by the CI preview screenshots
       let d = UserDefaults.standard
@@ -57,10 +54,15 @@ struct RootView: View {
       default: break
       }
       if let demo = d.string(forKey: "atlasDemo") { Task { await runDemo(demo) } }
-      if store.firstRun && !d.bool(forKey: "atlas.demoAsked") {
+      // a fresh install starts empty and gets the tour (skippable); an update never shows it
+      if store.firstRun && !d.bool(forKey: "atlas.tourDone") && !d.bool(forKey: "atlas.demoAsked") {
         d.set(true, forKey: "atlas.demoAsked")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { askDemo = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { tour = true }
       }
+      if store.recovered {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { store.show("数据文件读取出错，已恢复到上次能打开的版本") }
+      }
+      Task { try? await Task.sleep(for: .seconds(4)); await store.backfillIcons() }
     }
   }
 

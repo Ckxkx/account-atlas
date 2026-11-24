@@ -410,6 +410,7 @@ struct PickerSheet: View {
   @State private var removing: Preset? = nil          // 我添加的 tile waiting on the remove confirmation
   @State private var appResults: [AppStoreApp] = []
   @State private var art: [String: String] = [:]      // App Store artwork per picked key, until its icon lands
+  @State private var storeFor: [String: AppStoreApp] = [:]  // picked key -> the App Store app its icon comes from
   @State private var iconFor: String? = nil           // picked key whose icon menu is open
   @State private var uploadFor: String? = nil         // picked key the photo picker is choosing for
   @State private var photos = false
@@ -438,9 +439,27 @@ struct PickerSheet: View {
     return appResults.filter { !shown.contains($0.cleanName.lowercased()) && !shown.contains($0.trackName.lowercased()) }
   }
   func preset(_ a: AppStoreApp) -> Preset { Preset(name: a.cleanName, domain: a.domain, category: a.category, color: "") }
+  /// a listed app with no icon of its own (not bundled, none uploaded) borrows the App Store artwork
+  /// of the store result with the same name, instead of a blurry favicon or a parent site's logo
+  func storeMatch(_ p: Preset) -> AppStoreApp? {
+    guard p.icon == nil, !IconStore.shared.key(name: p.name, domain: p.domain).hasPrefix("b:") else { return nil }
+    let k = key(p)
+    return appResults.first { $0.cleanName.lowercased() == k || $0.trackName.lowercased() == k }
+  }
+  /// picked from the App Store (or matched to it): show its artwork now, store the real icon when it lands
+  func fetchIcon(_ k: String, _ a: AppStoreApp) {
+    if !a.thumbURL.isEmpty { art[k] = a.thumbURL }
+    storeFor[k] = a
+    Task {
+      let u = await a.iconDataURL()
+      // only if it's still picked and the user hasn't chosen another icon meanwhile
+      guard art[k] != nil, let u else { art[k] = nil; return }
+      setIcon(k, u)
+    }
+  }
   func setIcon(_ k: String, _ v: String?) {
     if let i = picked.firstIndex(where: { key($0) == k }) { picked[i].icon = v }
-    art[k] = nil
+    art[k] = nil; storeFor[k] = nil
   }
 
   var body: some View {
@@ -535,13 +554,16 @@ struct PickerSheet: View {
   func tile(_ p: Preset) -> some View {
     let on = picked.contains { key($0) == key(p) }
     let has = hasAccounts(p)
+    let match = storeMatch(p)
     return Button {
       withAnimation(Motion.snappy) {
-        if on { picked.removeAll { key($0) == key(p) } } else { picked.append(p) }
+        if on { picked.removeAll { key($0) == key(p) }; art[key(p)] = nil; storeFor[key(p)] = nil; return }
+        picked.append(p)
+        if let match { fetchIcon(key(p), match) }
       }
     } label: {
       VStack(spacing: 6) {
-        AppIcon(name: p.name, domain: p.domain, icon: p.icon, size: 60)
+        AppIcon(name: p.name, domain: p.domain, icon: p.icon, url: match?.thumbURL, size: 60)
           .overlay(alignment: .topTrailing) {
             if on {
               Image(systemName: "checkmark.circle.fill").font(.system(size: 22)).symbolRenderingMode(.palette)
@@ -561,15 +583,9 @@ struct PickerSheet: View {
     let on = picked.contains { key($0) == k }
     return Button {
       withAnimation(Motion.snappy) {
-        if on { picked.removeAll { key($0) == k }; art[k] = nil; return }
+        if on { picked.removeAll { key($0) == k }; art[k] = nil; storeFor[k] = nil; return }
         picked.append(p)
-        if !a.thumbURL.isEmpty { art[k] = a.thumbURL }
-      }
-      Task {
-        let u = await a.iconDataURL()
-        // only if it's still picked and the user hasn't chosen another icon meanwhile
-        guard art[k] != nil, let u else { art[k] = nil; return }
-        setIcon(k, u)
+        fetchIcon(k, a)
       }
     } label: {
       VStack(spacing: 6) {
@@ -647,7 +663,7 @@ struct PickerSheet: View {
     .onChange(of: photoItem) {
       guard let item = photoItem, let k = uploadFor else { return }
       photoItem = nil
-      art[k] = nil   // a pending App Store download no longer applies
+      art[k] = nil; storeFor[k] = nil   // a pending App Store download no longer applies
       Task {
         if let u = await IconCodec.dataURL(from: item) { withAnimation(Motion.snappy) { setIcon(k, u) } } else { store.show("这张图片读不出来") }
       }
@@ -672,6 +688,21 @@ struct PickerSheet: View {
       s.accounts.append(contentsOf: made)
     }
     IconStore.shared.prefetch(made)
+    // App Store icons still downloading when 保存 was tapped: attach them to the new accounts when they land
+    let late = made.compactMap { m in m.icon == nil ? storeFor[m.name.lowercased()].map { (m.id, $0) } : nil }
+    if !late.isEmpty {
+      let st = store
+      Task { @MainActor in
+        for (id, a) in late {
+          guard let u = await a.iconDataURL() else { continue }
+          guard st.data.accounts.contains(where: { $0.id == id && $0.icon == nil }) else { continue }
+          st.mutate(nil, undo: false) { s in
+            if let i = s.accounts.firstIndex(where: { $0.id == id }) { s.accounts[i].icon = u }
+          }
+          IconStore.shared.prefetch(st.data.accounts.filter { $0.id == id })
+        }
+      }
+    }
     dismiss()
   }
 }

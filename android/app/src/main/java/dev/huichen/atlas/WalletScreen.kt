@@ -126,6 +126,7 @@ fun WalletScreen() {
     val l = d.identities.count { it.isLogin }; val a = d.accounts.size
     LargeTitle("账号", if (d.identities.isEmpty() && a == 0) "先添加一个邮箱或手机号"
       else "$e 个邮箱、$p 个手机号" + (if (l > 0) "、$l 个第三方登录" else "") + "，关联着 $a 个网站与 App")
+    DemoBanner(Modifier.padding(horizontal = 20.dp).padding(top = 12.dp))
     KindSwitch(Modifier.padding(horizontal = 20.dp).padding(top = 14.dp))
     AnimatedContent(Store.kind, transitionSpec = {
       val from = if (kindRank(targetState) > kindRank(initialState)) 1 else -1

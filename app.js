@@ -651,15 +651,23 @@ Etherscan|etherscan.io|加密|`.split('\n').map(l => { const [n, d, c, a] = l.sp
   // the account's own icon (uploaded, or from the App Store): a small square data: URL, synced with the data
   const customIcon = a => typeof a?.icon === 'string' && a.icon.length < 400000 && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/.test(a.icon) ? a.icon : null;
   // bundled 192px icons for every preset, so common apps are sharp and load from this site
+  // the built-in app an account is: exact domain, then (byName) the name, then the longest parent
+  // domain whose name also agrees, so 王者荣耀 on pvp.qq.com is not drawn as QQ
+  const presetMatch = (name, domain, byName) => {
+    const d = cleanDomain(domain), norm = s => (s || '').toLowerCase().replace(/\s+/g, ''), n = norm(name);
+    if (d) { const p = PRESETS.find(p => p[1] === d); if (p) return p; }
+    if (byName && n) { const p = PRESETS.find(p => norm(p[0]) === n); if (p) return p; }
+    if (!d || !n) return null;
+    return PRESETS.filter(p => d.endsWith('.' + p[1]) && n.includes(norm(p[0]))).sort((a, b) => b[1].length - a[1].length)[0] || null;
+  };
   const localIcon = a => {
-    const d = cleanDomain(a.domain), n = (a.name || '').toLowerCase();
-    const p = PRESETS.find(p => (d && (d === p[1] || d.endsWith('.' + p[1]))) || (!d && p[0].toLowerCase() === n));
+    const p = presetMatch(a.name, a.domain, !cleanDomain(a.domain));
     return p ? `icons/${p[1]}.png` : null;
   };
   const favSources = d => { d = cleanDomain(d); return d ? [`https://favicon.im/${d}?larger=true`, `https://${d}/apple-touch-icon.png`, `https://${d}/favicon.ico`, `https://www.google.com/s2/favicons?domain=${d}&sz=128`] : []; };
   function brand(a) {
     const d = cleanDomain(a.domain), n = (a.name || '').toLowerCase();
-    const p = PRESETS.find(p => (d && (d === p[1] || d.endsWith('.' + p[1]))) || p[0].toLowerCase() === n);
+    const p = presetMatch(a.name, a.domain, true);
     if (p) return p[3];
     let h = 0; for (const ch of (d || n || '?')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
     return `hsl(${h % 360} 62% 48%)`;
@@ -1774,7 +1782,7 @@ Etherscan|etherscan.io|加密|`.split('\n').map(l => { const [n, d, c, a] = l.sp
       if (d.act === 'order') orderSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
-      if (d.act === 'download') window.open('https://wwbsj.lanzn.com/b01i61dn1a', '_blank', 'noopener');
+      if (d.act === 'download') window.open('https://wwbsj.lanzoup.com/b01i61dn1a', '_blank', 'noopener');
       if (d.act === 'demo') loadDemo();
       if (d.act === 'demoClear') clearDemo();
       if (d.act === 'wipe') confirmSheet('清空全部数据？', Sync.on ? '所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。' : '所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。', '清空全部数据', () => { snap(); state = { identities: [], accounts: [] }; save(); render(); undoToast('已清空'); });

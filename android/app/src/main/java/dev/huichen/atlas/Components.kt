@@ -204,8 +204,8 @@ object IconCache {
   val remote = mutableStateMapOf<String, ImageBitmap?>()
   private val http = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
   fun preset(name: String, domain: String): Preset? {
-    val d = cleanDomain(domain); val n = name.lowercase()
-    return Presets.all.firstOrNull { (d.isNotEmpty() && (d == it.domain || d.endsWith("." + it.domain))) || (d.isEmpty() && it.name.lowercase() == n) }
+    val d = cleanDomain(domain)
+    return presetMatch(name, d, byName = d.isEmpty())
   }
   private fun decode(ctx: Context, p: Preset): ImageBitmap? = bitmaps[p.domain] ?: runCatching {
     ctx.assets.open("icons/${p.domain}.png").use { BitmapFactory.decodeStream(it) }?.asImageBitmap()?.also { it.prepareToDraw(); bitmaps[p.domain] = it }

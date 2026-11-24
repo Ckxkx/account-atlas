@@ -53,6 +53,32 @@ object Store {
   var ready = false; private set
   /** nothing was saved on this device: the app starts empty and offers the sample data once */
   var firstRun = false; private set
+  /** the data file couldn't be read at launch: it was set aside and the last good copy loaded */
+  var recovered = false; private set
+  /** 新手教程 overlay (first launch, or 设置 › 使用教程); tourDemo = offer the sample data on its last page */
+  var tour by mutableStateOf(false)
+  var tourDemo = false
+
+  /** Accounts saved before 2.3.1 with no icon of their own and no bundled one (王者荣耀, 金铲铲之战 …) were
+   *  drawn with a parent site's logo or a tiny favicon. Look each name up on the App Store once and keep
+   *  the artwork of an exact-name match. A few names per launch; each name is tried only once. */
+  fun backfillIcons() {
+    if (data.demo == true) return
+    scope.launch {
+      kotlinx.coroutines.delay(4000)
+      val tried = (prefs.getStringSet("atlas.iconTried", emptySet()) ?: emptySet()).toMutableSet()
+      val names = data.accounts.filter { it.icon.isNullOrEmpty() && IconCache.preset(it.name, it.domain) == null }
+        .map { it.name.lowercase() }.filter { it.isNotEmpty() && it !in tried }.distinct().take(6)
+      for (k in names) {
+        val hits = AppStore.search(k)
+        tried += k; prefs.edit().putStringSet("atlas.iconTried", tried.toSet()).apply()
+        val h = hits.firstOrNull { it.name.lowercase() == k || it.trackName.lowercase() == k } ?: continue
+        val ic = AppStore.icon(h) ?: continue
+        if (data.accounts.none { it.name.lowercase() == k && it.icon.isNullOrEmpty() }) continue
+        mutate(null, undo = false) { d -> d.copy(accounts = d.accounts.map { if (it.name.lowercase() == k && it.icon.isNullOrEmpty()) it.copy(icon = ic) else it }) }
+      }
+    }
+  }
 
   private var seen = HashMap<String, Any>()
   private var undoSnap: AtlasData? = null
@@ -65,7 +91,20 @@ object Store {
     privacy = prefs.getBoolean("atlas.privacy", false)
     kind = prefs.getString("atlas.kind", "email")?.takeIf { it in KINDS } ?: "email"
     theme = prefs.getString("atlas.theme", "dark") ?: "dark"
-    data = runCatching { decodeAtlas(file.readText()) }.getOrElse { firstRun = true; AtlasData() }
+    val raw = if (file.exists()) runCatching { file.readText() }.getOrNull() else null
+    data = if (raw.isNullOrBlank()) { firstRun = true; AtlasData() } else runCatching { decodeAtlas(raw) }.fold(
+      onSuccess = { d ->
+        // keep the last copy that opened fine, so an update can never be the only copy of the data
+        if (d.identities.isNotEmpty() || d.accounts.isNotEmpty()) runCatching { File(ctx.filesDir, "atlas.prev.json").writeText(raw) }
+        d
+      },
+      onFailure = {
+        // the file is there but can't be read: never start over on top of it. Set it aside and
+        // fall back to the last good copy.
+        runCatching { File(ctx.filesDir, "atlas.unreadable-${System.currentTimeMillis() / 1000}.json").writeText(raw) }
+        recovered = true
+        runCatching { decodeAtlas(File(ctx.filesDir, "atlas.prev.json").readText()) }.getOrDefault(AtlasData())
+      })
     remember()
     activeID = deck.firstOrNull()?.id
     ready = true
@@ -110,7 +149,7 @@ object Store {
 
   // every change goes through here: snapshot for undo, stamp, persist, sync
   fun mutate(message: String? = null, undo: Boolean = true, f: (AtlasData) -> AtlasData) {
-    undoSnap = data
+    if (undo) undoSnap = data   // a silent fix-up (a late icon) must not replace what 撤销 restores
     data = f(data).copy(demo = null)
     save()
     if (message != null) show(message, if (undo) "撤销" else null) { undo() }
