@@ -180,6 +180,24 @@ object Store {
   fun adopt(d: AtlasData) { data = d; remember(); persist(); fixActive() }
   private fun fixActive() { if (active == null || deck.none { it.id == activeID }) activeID = deck.firstOrNull()?.id ?: "add" }
 
+  /** 小提示: at most once a week, the card that hasn't had a new site in two weeks or more */
+  fun nudge() {
+    val now = nowMS(); val day = 86_400_000.0
+    if (firstRun || recovered || data.demo == true || now - prefs.getFloat("atlas.nudgeAtDays", 0f).toDouble() * day < 7 * day) return
+    val demo = demoIds()
+    var pick: Identity? = null; var oldest = Double.MAX_VALUE
+    for (i in data.identities) {
+      if (i.id in demo) continue
+      val t = data.accounts.filter { i.id in it.identityIds }.maxOfOrNull { it.createdAt } ?: continue
+      if (t < oldest) { oldest = t; pick = i }
+    }
+    val p = pick ?: return
+    if (now - oldest < 14 * day) return
+    prefs.edit().putFloat("atlas.nudgeAtDays", (now / day).toFloat()).apply()
+    val name = p.label.ifEmpty { display(p) }
+    show("好久没给「$name」记录新账号啦，要不要来看看呢～", "去看看") { push(Route.IdentityR(p.id)) }
+  }
+
   fun show(text: String, action: String? = null, fn: (() -> Unit)? = null) {
     toastAction = fn
     val t = Toast(text, action)

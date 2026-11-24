@@ -1760,6 +1760,26 @@
   }
   if (!state.identities.some(i => i.type === ui.kind)) { const t = state.identities.find(i => KINDS.includes(i.type)); if (t) ui.kind = t.type; }
 
+  // 小提示: at most once a week, the card that hasn't had a new site in two weeks or more
+  function nudge() {
+    const now = Date.now(), last = +localStorage.getItem('atlas.nudgeAt') || 0;
+    if (now - last < 7 * DAY || state.demo || !localStorage.getItem('atlas.tourDone') && !localStorage.getItem('atlas.demoAsked')) return;
+    const demoIds = new Set(readList(DEMO_KEY));
+    let pick = null, oldest = Infinity;
+    for (const i of state.identities) {
+      if (demoIds.has(i.id)) continue;
+      const ts = state.accounts.filter(a => a.identityIds.includes(i.id)).map(a => a.createdAt || 0);
+      if (!ts.length) continue;
+      const t = Math.max(...ts);
+      if (t < oldest) { oldest = t; pick = i; }
+    }
+    if (!pick || now - oldest < 14 * DAY) return;
+    localStorage.setItem('atlas.nudgeAt', String(now));
+    const name = pick.type === 'login' ? (pick.label ? `${LOGIN[provOf(pick)].name} · ${pick.label}` : LOGIN[provOf(pick)].name) : (pick.label || display(pick));
+    toast(`好久没给「${name}」记录新账号啦，要不要来看看呢～`, { label: '去看看', fn: () => showIdentity(pick.id) });
+  }
+  setTimeout(nudge, 2500);
+
   paintTheme(); render(); Sync.init(); Sync.listeners.forEach(f => f());
   const first = cur();
   $('#glow').style.setProperty('--accent', first ? first.color : '#3a3a3c'); glowColor = first ? first.color : '#3a3a3c';
