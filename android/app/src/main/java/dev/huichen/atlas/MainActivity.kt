@@ -153,6 +153,14 @@ fun AtlasRoot(startTab: Int) {
           Shell(startTab)
         }
         FirstRunTour()
+        // 2.4: duplicates (incl. a former Apple login card and its email) are merged only after a yes, asked once
+        if (Store.mergeAsk > 0 && !Store.tour && Store.routes.isEmpty()) {
+          androidx.compose.material3.AlertDialog(onDismissRequest = { Store.declineMerge() },
+            title = { Text("合并重复的身份") },
+            text = { Text("发现 ${Store.mergeAsk} 个重复的身份，合并后关系图更清晰，数据不会丢。") },
+            confirmButton = { androidx.compose.material3.TextButton({ Store.mergeDuplicates() }) { Text("合并") } },
+            dismissButton = { androidx.compose.material3.TextButton({ Store.declineMerge() }) { Text("暂不") } })
+        }
         snap?.let { img ->
           Canvas(Modifier.fillMaxSize().clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {}) {
             val o = ThemeFX.origin.takeIf { it != Offset.Zero } ?: Offset(size.width / 2, 60f)

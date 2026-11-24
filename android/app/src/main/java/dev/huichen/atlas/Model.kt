@@ -46,24 +46,128 @@ data class Identity(
   @Serializable(with = MsSerializer::class) val order: Double? = null,
   /** Phone only: an eSIM (no physical card). Written only when true; key omitted otherwise. */
   val esim: Boolean? = null,
-  /** Login only: "wechat" | "apple". Key omitted for email / phone. */
+  /** Login only: "wechat" | "qq" ("apple" only in data older than 2.4, converted on load). Key omitted for email / phone. */
   val provider: String? = null,
   /** Login only: id of the email / phone identity this login is bound to. Key omitted when empty. */
   val via: String? = null,
+  /** Email / phone: this address or number is also an Apple ID (2.4). Written only when true. */
+  val apple: Boolean? = null,
 ) {
   val isPhone get() = type == "phone"
   val isESim get() = isPhone && esim == true
   val isLogin get() = type == "login"
+  /** a pre-2.4 Apple login card (converted to its email / phone on load) */
   val isApple get() = isLogin && provider == "apple"
+  /** 2.4: an email / phone that is also an Apple ID */
+  val isAppleID get() = !isLogin && apple == true
   val isQQ get() = isLogin && provider == "qq"
   val isWechat get() = isLogin && !isApple && !isQQ
+}
+
+// MARK: 2.4 — one identity per email / phone; Apple ID is a flag on it (mirrors app.js / Model.swift)
+
+fun normEmail(v: String) = v.trim().lowercase()
+fun normPhone(v: String): String {
+  var d = v.filter { it in '0'..'9' }
+  if (d.startsWith("0086")) d = d.drop(4) else if (d.startsWith("86") && d.length == 13) d = d.drop(2)
+  return d
+}
+/** The key two identities share when they are the same thing; null = never merged. */
+fun idKey(type: String, provider: String?, value: String): String? {
+  val v = value.trim()
+  if (v.isEmpty()) return null
+  return when (type) {
+    "email" -> "e:" + normEmail(v)
+    "phone" -> normPhone(v).takeIf { it.isNotEmpty() }?.let { "p:$it" }
+    "login" -> when (provider) {
+      "apple" -> null
+      "qq" -> "q:" + (if (v.contains('@')) normEmail(v) else v.filter { it in '0'..'9' })
+      else -> "w:" + v.lowercase()
+    }
+    else -> null
+  }
+}
+fun idKey(i: Identity) = idKey(i.type, i.provider, i.value)
+
+object Migrate24 {
+  /** Silent, lossless fix-ups (ids kept): an Apple login card becomes the email / phone it is, flagged
+   *  apple (its via stays in the JSON, unused); a QQ card whose QQ is an email you already have points at
+   *  that email. Returns the same instance when nothing changed. */
+  fun autoFix(d: AtlasData): AtlasData {
+    var changed = false
+    var ids = d.identities.map { i ->
+      if (i.type == "login" && i.provider == "apple") { changed = true; i.copy(type = if (i.value.contains('@')) "email" else "phone", provider = null, apple = true) } else i
+    }
+    ids = ids.map { i ->
+      if (i.type == "login" && i.provider == "qq" && i.via.isNullOrEmpty() && i.value.contains('@')) {
+        val m = ids.firstOrNull { it.type == "email" && normEmail(it.value) == normEmail(i.value) }
+        if (m != null) { changed = true; i.copy(via = m.id) } else i
+      } else i
+    }
+    return if (changed) d.copy(identities = ids) else d
+  }
+  /** Groups of identity ids that are the same email / phone / 微信 / QQ; the first (oldest) is kept. */
+  fun groups(d: AtlasData): List<List<String>> {
+    val by = LinkedHashMap<String, MutableList<String>>()
+    for (i in d.identities) { val k = idKey(i) ?: continue; by.getOrPut(k) { ArrayList() }.add(i.id) }
+    return by.values.filter { it.size > 1 }
+  }
+  fun dupCount(d: AtlasData) = groups(d).sumOf { it.size - 1 }
+  /** Merges every group into its first identity: label, notes and flags carry over, every account and
+   *  binding is repointed. Removed ids become tombstones when Store.save() stamps the change. */
+  fun merge(d: AtlasData): Pair<AtlasData, Int> {
+    val to = HashMap<String, String>()
+    val byId = d.identities.associateBy { it.id }.toMutableMap()
+    for (g in groups(d)) {
+      var keep = byId[g[0]] ?: continue
+      for (oid in g.drop(1)) {
+        val o = byId[oid] ?: continue
+        to[oid] = keep.id
+        if (keep.label.isEmpty() && o.label.isNotEmpty()) keep = keep.copy(label = o.label)
+        if (o.notes.isNotEmpty() && !keep.notes.contains(o.notes)) keep = keep.copy(notes = if (keep.notes.isEmpty()) o.notes else keep.notes + "\n" + o.notes)
+        if (o.apple == true) keep = keep.copy(apple = true)
+        if (o.esim == true && keep.type == "phone") keep = keep.copy(esim = true)
+        if (keep.via.isNullOrEmpty() && !o.via.isNullOrEmpty() && o.via != keep.id) keep = keep.copy(via = o.via)
+        if (keep.order == null && o.order != null) keep = keep.copy(order = o.order)
+      }
+      byId[keep.id] = keep
+    }
+    if (to.isEmpty()) return d to 0
+    val ids = d.identities.filter { it.id !in to }.map { byId[it.id] ?: it }.map { i ->
+      val v = i.via?.let { to[it] } ?: return@map i
+      i.copy(via = if (v == i.id) null else v)
+    }
+    val accs = d.accounts.map { a ->
+      val out = ArrayList<String>()
+      for (x in a.identityIds) { val y = to[x] ?: x; if (y !in out) out.add(y) }
+      if (out == a.identityIds) a else a.copy(identityIds = out)
+    }
+    return d.copy(identities = ids, accounts = accs) to to.size
+  }
+}
+
+/** A 微信 / QQ card's binding without the full number: 尾号 1234, or ab•••@qq.com */
+fun bindTag(v: Identity): String {
+  if (v.type == "phone") { val d = v.value.filter { it.isDigit() }; return if (d.length >= 4) "尾号 " + d.takeLast(4) else "" }
+  val parts = v.value.split("@", limit = 2)
+  return parts[0].take(2) + "•••" + (if (parts.size > 1) "@" + parts[1] else "")
+}
+/** What's wrong with a value for this kind ("email" | "phone" | "wechat" | "qq"), or null when it's fine. */
+fun idValueError(kind: String, value: String): String? {
+  val v = value.trim()
+  return when (kind) {
+    "email" -> if (Regex("""^[^\s@]+@[^\s@]+\.[^\s@]+$""").matches(v)) null else "邮箱地址格式不对"
+    "phone" -> if (v.count { it.isDigit() } >= 5) null else "手机号至少要 5 位数字"
+    "qq" -> if (validLogin("qq", v)) null else "QQ 号是 5 到 12 位数字，或填 QQ 邮箱"
+    else -> if (v.isEmpty()) "填一下微信号" else null
+  }
 }
 
 /** Identity kinds in wallet order. */
 val KINDS = listOf("email", "phone", "login")
 fun kindRank(t: String) = KINDS.indexOf(t).let { if (it < 0) KINDS.size else it }
 
-fun providerName(p: String?) = when (p) { "apple" -> "Apple 账户"; "qq" -> "QQ"; else -> "微信" }
+fun providerName(p: String?) = when (p) { "apple" -> "Apple 账户"; "qq" -> "QQ"; else -> "微信" }   // apple: pre-2.4 data only
 fun providerColor(p: String?) = when (p) { "apple" -> "#1d1d1f"; "qq" -> "#12b7f5"; else -> "#07c160" }
 
 /** 微信号: at least one char. QQ: a 5–12 digit number or an email. Apple ID: an email, or a phone number with >= 5 digits. */
@@ -128,6 +232,7 @@ fun decodeAtlas(text: String): AtlasData {
   return d.copy(identities = d.identities.map { i ->
     var x = i
     if (x.esim == false) x = x.copy(esim = null)
+    if (x.apple == false) x = x.copy(apple = null)
     if (x.provider != null && x.provider!!.isBlank()) x = x.copy(provider = null)
     if (x.via != null && x.via!!.isBlank()) x = x.copy(via = null)
     x

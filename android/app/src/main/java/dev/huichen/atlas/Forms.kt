@@ -140,12 +140,18 @@ fun Segmented(options: List<Pair<String, String>>, selected: String, onPick: (St
   }
 }
 
+/** 怎么登录 / 用哪个身份: every email, phone, 微信 and QQ in one list (Apple IDs badged), and 新建 only when
+ *  none fits. A value that already exists is never typed in again: 新建 picks the existing card. */
 @Composable
 fun IdentityToggles(selected: List<String>, onChange: (List<String>) -> Unit) {
   val hap = haptics()
-  val all = Store.data.identities
-  // 邮箱 / 手机号 first, then the 微信 / Apple cards in their own group
-  val plain = all.filter { !it.isLogin }; val logins = all.filter { it.isLogin }
+  val all = Store.data.identities.filter { it.type in KINDS }
+  val rank = { i: Identity -> when { i.type == "email" -> 0; i.type == "phone" -> 1; i.isQQ -> 3; else -> 2 } }
+  val list = all.withIndex().sortedWith(compareBy({ rank(it.value) }, { it.index })).map { it.value }
+  var creating by remember { mutableStateOf(false) }
+  var nKind by remember { mutableStateOf("email") }
+  var nValue by remember { mutableStateOf("") }
+  var nVia by remember { mutableStateOf<String?>(null) }
   @Composable fun row(i: Identity) {
     val on = i.id in selected
     val sc by animateFloatAsState(if (on) 1f else 0.85f, calm(), label = "chk")
@@ -156,9 +162,13 @@ fun IdentityToggles(selected: List<String>, onChange: (List<String>) -> Unit) {
       Column(Modifier.weight(1f)) {
         if (i.isLogin) {
           T(providerName(i.provider) + (if (i.label.isNotEmpty()) " · " + i.label else ""), 16f)
-          T(Store.display(i), 12f, color = pal.secondary)
+          val tag = Store.viaOf(i)?.let { bindTag(it) }.orEmpty()
+          T(Store.display(i) + (if (tag.isNotEmpty()) " · 绑定$tag" else ""), 12f, color = pal.secondary)
         } else {
-          T(Store.title(i), 16f)
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            T(Store.title(i), 16f)
+            if (i.isAppleID) AppleBadge()
+          }
           if (i.label.isNotEmpty()) T(Store.display(i), 12f, color = pal.secondary)
         }
       }
@@ -166,11 +176,45 @@ fun IdentityToggles(selected: List<String>, onChange: (List<String>) -> Unit) {
         tint = if (on) hex(i.color) else pal.secondary.copy(alpha = 0.5f))
     }
   }
-  plain.forEachIndexed { k, i -> if (k > 0) Divider(); row(i) }
-  if (logins.isNotEmpty()) {
-    if (plain.isNotEmpty()) Divider()
-    T("第三方登录", 13f, FontWeight.Medium, pal.secondary, Modifier.padding(start = 16.dp, top = 10.dp, bottom = 2.dp))
-    logins.forEachIndexed { k, i -> if (k > 0) Divider(); row(i) }
+  list.forEachIndexed { k, i -> if (k > 0) Divider(); row(i) }
+  if (list.isNotEmpty()) Divider()
+  Row(Modifier.fillMaxWidth().press(1f) { hap(TICK); creating = !creating }.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    T(if (list.isEmpty()) "新建身份（邮箱、手机号、微信或 QQ）" else "新建身份", 16f, FontWeight.Medium, pal.accent)
+  }
+  if (creating) {
+    val login = nKind == "wechat" || nKind == "qq"
+    val type = if (login) "login" else nKind
+    val hit = Store.existing(type, if (login) nKind else null, nValue)
+    val err = if (nValue.isBlank()) null else idValueError(nKind, nValue)
+    Divider()
+    Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+      Segmented(listOf("email" to "邮箱", "phone" to "手机号", "wechat" to "微信", "qq" to "QQ"), nKind) { nKind = it; nVia = null }
+    }
+    Field(nValue, { nValue = it }, when (nKind) { "phone" -> "+86 138 0000 0000"; "wechat" -> "wxid 或自定义微信号"; "qq" -> "QQ 号或 QQ 邮箱"; else -> "name@example.com" },
+      when (nKind) { "phone" -> KeyboardType.Phone; "email" -> KeyboardType.Email; "qq" -> KeyboardType.Ascii; else -> KeyboardType.Text })
+    if (hit != null) T("已经有这个身份了（${Store.title(hit)}），会直接选上它。", 13f, color = pal.secondary, modifier = Modifier.padding(horizontal = 16.dp))
+    else if (err != null && nValue.length > 2) T(err, 13f, color = pal.secondary, modifier = Modifier.padding(horizontal = 16.dp))
+    if (login && hit == null) {
+      T("绑定的手机号/邮箱（从已有的里选）", 13f, color = pal.secondary, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
+      (listOf<Identity?>(null) + Store.data.identities.filter { it.type == "email" || it.type == "phone" }).forEach { b ->
+        val on = nVia == b?.id
+        Row(Modifier.fillMaxWidth().press(1f) { hap(TICK); nVia = b?.id }.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+          T(b?.let { (if (it.isPhone) "手机号 · " else "邮箱 · ") + Store.title(it) } ?: "不绑定", 15f, modifier = Modifier.weight(1f))
+          Icon(if (on) Icons.Filled.CheckCircle else Icons.Outlined.Circle, null, Modifier.size(22.dp), tint = if (on) pal.accent else pal.secondary.copy(alpha = 0.5f))
+        }
+      }
+    }
+    val ok = nValue.isNotBlank() && (hit != null || err == null)
+    Box(Modifier.fillMaxWidth().padding(16.dp).clip(CircleShape).background(if (ok) pal.accent else pal.glass)
+      .press(0.97f, enabled = ok) {
+        hap(TICK)
+        val id = hit?.id ?: Store.ensureIdentity(type, nValue, if (login) nKind else null, if (login) nVia else null).first
+        if (id !in selected) onChange(selected + id)
+        Store.show(if (hit != null) "已经有这个身份，已直接选上" else "已添加并选上")
+        creating = false; nValue = ""; nVia = null
+      }.padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+      T(if (hit != null) "选上它" else "添加并选上", 16f, FontWeight.SemiBold, if (ok) Color.White else pal.secondary)
+    }
   }
 }
 
@@ -186,27 +230,33 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
   var type by remember { mutableStateOf(existing?.type ?: type0) }
   var value by remember { mutableStateOf(existing?.value ?: "") }
   var label by remember { mutableStateOf(existing?.label ?: "") }
-  var provider by remember { mutableStateOf(existing?.provider ?: "wechat") }
+  // 2.4: 微信 and QQ are the only login cards; an Apple ID is a flag on its email / phone
+  var provider by remember { mutableStateOf(if (existing?.provider == "qq") "qq" else "wechat") }
   var via by remember { mutableStateOf(existing?.via?.takeIf { v -> Store.identity(v)?.let { !it.isLogin } == true }) }
+  var viaNew by remember { mutableStateOf("") }   // via == "+": a number / address not in the list yet
   // a new login card starts in its brand colour, until the user picks one
   var colorTouched by remember { mutableStateOf(existing != null) }
   var color by remember { mutableStateOf(existing?.color ?: if (type0 == "login") providerColor("wechat") else defaultColor) }
   var notes by remember { mutableStateOf(existing?.notes ?: "") }
   var esim by remember { mutableStateOf(existing?.esim == true) }
+  var apple by remember { mutableStateOf(existing?.apple == true) }
   val hap = haptics()
   val login = type == "login"
   val esimOut: Boolean? = if (type == "phone" && esim) true else null
+  val appleOut: Boolean? = if (!login && apple) true else null
   val providerOut = if (login) provider else null
-  val viaOut = if (login) via else null
+  val viaOut = if (login && via != "+") via else null
   val sample = when {
-    login && provider == "apple" -> "name@icloud.com"
     login && provider == "qq" -> "10001"
     login -> "wxid_atlas"
     type == "email" -> "name@example.com"
     else -> "+86 138 0000 0000"
   }
-  val preview = Identity(existing?.id ?: "_new", type, value.ifEmpty { sample }, label, color, notes, order = existing?.order, esim = esimOut, provider = providerOut, via = viaOut)
-  val valid = if (login) validLogin(provider, value) else value.isNotBlank()
+  val preview = Identity(existing?.id ?: "_new", type, value.ifEmpty { sample }, label, color, notes, order = existing?.order, esim = esimOut, provider = providerOut, via = viaOut, apple = appleOut)
+  val dup = Store.existing(type, providerOut, value, existing?.id)
+  val viaNewErr = if (login && via == "+" && viaNew.isNotBlank()) idValueError(if (viaNew.contains('@')) "email" else "phone", viaNew) else null
+  val err = if (value.isBlank()) null else idValueError(if (login) provider else type, value)
+  val valid = value.isNotBlank() && err == null && dup == null && viaNewErr == null
   fun autoColor() {
     if (colorTouched) return
     color = if (type == "login") providerColor(provider) else if (color in BRAND_SKINS.map { it.first }) defaultColor else color
@@ -214,19 +264,32 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
 
   fun save() {
     val v = value.trim()
+    var bound = viaOut
+    if (login && via == "+" && viaNew.isNotBlank()) bound = Store.ensureIdentity(if (viaNew.contains('@')) "email" else "phone", viaNew).first
+    // a QQ whose QQ is an email you already have: bind it to that email instead of typing it twice
+    if (login && provider == "qq" && bound == null && v.contains('@'))
+      bound = Store.data.identities.firstOrNull { it.type == "email" && normEmail(it.value) == normEmail(v) }?.id
     if (existing != null) {
       Store.mutate("已保存") { s -> s.copy(identities = s.identities.map {
-        if (it.id == existing.id) it.copy(type = type, value = v, label = label.trim(), color = color, notes = notes.trim(), esim = esimOut, provider = providerOut, via = viaOut)
+        if (it.id == existing.id) it.copy(type = type, value = v, label = label.trim(), color = color, notes = notes.trim(), esim = esimOut, apple = appleOut, provider = providerOut, via = if (login) bound else it.via)
         // a card that stops being an email / phone can no longer be what a login is bound to
         else if (type == "login" && it.via == existing.id) it.copy(via = null) else it
       }) }
       Store.setKind(type, existing.id)
     } else {
-      val i = Identity(newID(), type, v, label.trim(), color, notes.trim(), esim = esimOut, provider = providerOut, via = viaOut)
+      val i = Identity(newID(), type, v, label.trim(), color, notes.trim(), esim = esimOut, provider = providerOut, via = if (login) bound else null, apple = appleOut)
       Store.mutate("已添加") { s -> s.copy(identities = s.identities + i) }
       Store.setKind(type, i.id)
     }
     Store.pop()
+  }
+
+  @Composable fun switchRow(title: String, on: Boolean, flip: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().press(1f) { hap(TICK); flip(!on) }.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+      T(title, 16f, modifier = Modifier.weight(1f))
+      androidx.compose.material3.Switch(on, { hap(TICK); flip(it) }, colors = androidx.compose.material3.SwitchDefaults.colors(
+        checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
+    }
   }
 
   Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(hex(color).copy(alpha = 0.18f), Color.Transparent)))) {
@@ -237,61 +300,60 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
           AnimatedContent(type, transitionSpec = { fadeIn(calm()) togetherWith fadeOut(calm()) }, label = "pv") { WalletCard(preview.copy(type = it)) }
         }
         Box(Modifier.padding(horizontal = 16.dp).padding(top = 18.dp)) {
-          Segmented(listOf("email" to "邮箱", "phone" to "手机号", "login" to "登录"), type) { type = it; autoColor() }
+          Segmented(listOf("email" to "邮箱", "phone" to "手机号", "login" to "微信 / QQ"), type) { type = it; autoColor() }
         }
         if (login) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-          listOf("wechat", "qq", "apple").forEach { p ->
+          listOf("wechat", "qq").forEach { p ->
             val on = provider == p
-            val c = hex(providerColor(p)).let { if (p == "apple" && pal.dark) Color.White else it }
+            val c = hex(providerColor(p))
             Row(Modifier.weight(1f).height(40.dp).press(0.95f) { if (!on) { hap(TICK); provider = p; autoColor() } }.clip(CircleShape)
               .background(if (on) c.copy(alpha = 0.18f) else pal.glass).border(if (on) 1.5.dp else 0.dp, if (on) c else Color.Transparent, CircleShape),
               horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
               LoginGlyph(Identity("_", "login", provider = p), 18.dp, if (on) c else pal.secondary)
               Spacer(Modifier.width(6.dp))
-              T(when (p) { "apple" -> "Apple"; "qq" -> "QQ"; else -> "微信" }, 15f, FontWeight.SemiBold, if (on) pal.primary else pal.secondary)
+              T(if (p == "qq") "QQ" else "微信", 15f, FontWeight.SemiBold, if (on) pal.primary else pal.secondary)
             }
           }
         }
-        FormGroup(when { login && provider == "apple" -> "Apple ID"; login && provider == "qq" -> "QQ 号"; login -> "微信号"; type == "email" -> "地址"; else -> "号码" },
-          if (login && value.isNotBlank() && !valid) (if (provider == "qq") "QQ 号是 5 到 12 位数字，或填 QQ 邮箱。" else "Apple ID 是邮箱或手机号。") else null) {
+        FormGroup(when { login && provider == "qq" -> "QQ 号"; login -> "微信号"; type == "email" -> "地址"; else -> "号码" },
+          when { dup != null -> "已经有这个身份了（${Store.title(dup)}），不用重复添加。"; err != null && value.length > 2 -> err; else -> null }) {
           Field(value, { value = it }, when {
-            login && provider == "apple" -> "name@icloud.com 或手机号"
             login && provider == "qq" -> "QQ 号或 QQ 邮箱"
             login -> "wxid 或自定义微信号"
             type == "email" -> "name@example.com"
             else -> "+86 138 0000 0000"
-          }, if (login && provider == "apple") KeyboardType.Email else if (login && provider == "qq") KeyboardType.Ascii else if (login) KeyboardType.Text else if (type == "email") KeyboardType.Email else KeyboardType.Phone)
+          }, if (login && provider == "qq") KeyboardType.Ascii else if (login) KeyboardType.Text else if (type == "email") KeyboardType.Email else KeyboardType.Phone)
           Divider()
           Field(label, { label = it }, "标签：主力、小号、工作…")
         }
+        if (!login) FormGroup(null, "Apple ID 就是某个邮箱或手机号，打开这个开关就行，不用单独建卡。") { switchRow("也是 Apple ID", apple) { apple = it } }
         if (login) {
           val choices = Store.data.identities.filter { !it.isLogin && it.id != existing?.id }
-          FormGroup("绑定的手机号/邮箱", "很多 App 支持用它登录，记录在这里，换手机号时能看出受影响的网站。") {
-            @Composable fun opt(i: Identity?) {
-              val on = via == i?.id
-              Row(Modifier.fillMaxWidth().press(1f) { hap(TICK); via = i?.id }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+          FormGroup("绑定的手机号/邮箱", viaNewErr ?: "从已有的卡里选，不用再填一遍。换手机号时，能看出哪些 App 跟着受影响。") {
+            @Composable fun opt(i: Identity?, key: String?, title: String) {
+              val on = via == key
+              Row(Modifier.fillMaxWidth().press(1f) { hap(TICK); via = key }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (i != null) { SmallCard(i, kindIcon(i), 36.dp, 24.dp); Spacer(Modifier.width(12.dp)) }
                 Column(Modifier.weight(1f)) {
-                  T(i?.let { Store.title(it) } ?: "不绑定", 16f)
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    T(title, 16f)
+                    if (i?.isAppleID == true) AppleBadge()
+                  }
                   if (i != null && i.label.isNotEmpty()) T(Store.display(i), 12f, color = pal.secondary)
                 }
                 Icon(if (on) Icons.Filled.CheckCircle else Icons.Outlined.Circle, null, Modifier.size(24.dp),
                   tint = if (on) (i?.let { hex(it.color) } ?: pal.accent) else pal.secondary.copy(alpha = 0.5f))
               }
             }
-            opt(null)
-            choices.forEach { Divider(); opt(it) }
+            opt(null, null, "不绑定")
+            choices.forEach { Divider(); opt(it, it.id, Store.title(it)) }
+            Divider(); opt(null, "+", "新的手机号或邮箱")
+            if (via == "+") { Divider(); Field(viaNew, { viaNew = it }, "手机号或邮箱", KeyboardType.Email) }
           }
         }
-        if (type == "phone") FormGroup(null, "eSIM 没有实体卡，换手机时记得转移。") {
-          Row(Modifier.fillMaxWidth().press(1f) { hap(TICK); esim = !esim }.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            T("eSIM", 16f, modifier = Modifier.weight(1f))
-            androidx.compose.material3.Switch(esim, { hap(TICK); esim = it }, colors = androidx.compose.material3.SwitchDefaults.colors(
-              checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
-          }
-        }
+        if (type == "phone") FormGroup(null, "eSIM 没有实体卡，换手机时记得转移。") { switchRow("eSIM", esim) { esim = it } }
         FormGroup("卡面") {
-          // login cards also offer their brand skins (微信绿 / 石墨)
+          // login cards also offer their brand skins (微信绿 / QQ 蓝)
           val swatches = (if (login || color in BRAND_SKINS.map { it.first }) BRAND_SKINS else emptyList()) + SKINS
           Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             swatches.chunked(5).forEach { row ->
@@ -314,6 +376,16 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
         }
       }
     }
+  }
+}
+
+@Composable
+fun AppleBadge() {
+  Row(Modifier.padding(start = 6.dp).clip(RoundedCornerShape(5.dp)).background(pal.secondary.copy(alpha = 0.15f)).padding(horizontal = 5.dp, vertical = 2.dp),
+    verticalAlignment = Alignment.CenterVertically) {
+    AppleGlyph(10.dp, pal.secondary)
+    Spacer(Modifier.width(2.dp))
+    T("Apple ID", 10f, FontWeight.SemiBold, pal.secondary)
   }
 }
 
@@ -448,7 +520,7 @@ fun AccountForm(existing: Account) {
           }
         }
       }
-      FormGroup("用的邮箱、手机号或第三方登录") { IdentityToggles(ids) { ids = it } }
+      FormGroup("怎么登录 / 用哪个身份", "可以多选：比如用邮箱注册、再绑了手机号，或者用微信、QQ 登录。") { IdentityToggles(ids) { ids = it } }
       FormGroup("备注") { Field(notes, { notes = it }, "两步验证、找回方式…", lines = 4) }
     }
   }
@@ -681,8 +753,7 @@ fun PickerSheet(presetIdentity: String?) {
               }
             }
           }
-          FormGroup("用哪个邮箱、手机号注册，或用微信 / QQ / Apple 登录") {
-            if (Store.data.identities.isEmpty()) T("还没有邮箱或手机号，先保存，之后再关联也行。", 15f, color = pal.secondary, modifier = Modifier.padding(16.dp))
+          FormGroup("怎么登录 / 用哪个身份", "可以多选：比如用邮箱注册、再绑了手机号，或者用微信、QQ 登录。列表里没有的，点「新建身份」。") {
             IdentityToggles(ids) { ids = it }
           }
         }

@@ -90,12 +90,13 @@ fun TopButtons() {
     }
     Spacer(Modifier.width(8.dp))
     Box {
-      RoundButton(onClick = { menu = true }) { Icon(Icons.Filled.Add, "添加", Modifier.size(22.dp), tint = pal.accent) }
+      // App first: a tap adds an app (its identity is picked, or made, in the next step); the menu has the rest
+      RoundButton(onClick = { Store.push(Route.Picker(Store.active?.id)) }, onLongClick = { menu = true }) { Icon(Icons.Filled.Add, "添加", Modifier.size(22.dp), tint = pal.accent) }
       DropdownMenu(menu, { menu = false }) {
         DropdownMenuItem({ androidx.compose.material3.Text("添加网站或 App") }, { menu = false; Store.push(Route.Picker(Store.active?.id)) }, leadingIcon = { Icon(Icons.Outlined.Apps, null) })
         DropdownMenuItem({ androidx.compose.material3.Text("添加邮箱") }, { menu = false; Store.push(Route.NewIdentity("email")) }, leadingIcon = { Icon(Icons.Outlined.Email, null) })
         DropdownMenuItem({ androidx.compose.material3.Text("添加手机号") }, { menu = false; Store.push(Route.NewIdentity("phone")) }, leadingIcon = { Icon(Icons.Outlined.SimCard, null) })
-        DropdownMenuItem({ androidx.compose.material3.Text("添加微信、QQ 或 Apple 账号") }, { menu = false; Store.push(Route.NewIdentity("login")) }, leadingIcon = { Icon(Icons.Outlined.Key, null) })
+        DropdownMenuItem({ androidx.compose.material3.Text("添加微信或 QQ") }, { menu = false; Store.push(Route.NewIdentity("login")) }, leadingIcon = { Icon(Icons.Outlined.Key, null) })
       }
     }
     Spacer(Modifier.width(8.dp))
@@ -104,8 +105,8 @@ fun TopButtons() {
 }
 
 @Composable
-fun RoundButton(modifier: Modifier = Modifier, onClick: () -> Unit, content: @Composable () -> Unit) {
-  Box(modifier.size(38.dp).press(0.9f, onClick = onClick).glass(CircleShape), contentAlignment = Alignment.Center) { content() }
+fun RoundButton(modifier: Modifier = Modifier, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
+  Box(modifier.size(38.dp).press(0.9f, onLongClick = onLongClick, onClick = onClick).glass(CircleShape), contentAlignment = Alignment.Center) { content() }
 }
 
 @Composable
@@ -125,7 +126,7 @@ fun WalletScreen() {
     val e = d.identities.count { it.type == "email" }; val p = d.identities.count { it.type == "phone" }
     val l = d.identities.count { it.isLogin }; val a = d.accounts.size
     LargeTitle("账号", if (d.identities.isEmpty() && a == 0) "先添加一个邮箱或手机号"
-      else "$e 个邮箱、$p 个手机号" + (if (l > 0) "、$l 个第三方登录" else "") + "，关联着 $a 个网站与 App")
+      else "$e 个邮箱、$p 个手机号" + (if (l > 0) "、$l 个微信 / QQ" else "") + "，关联着 $a 个网站与 App")
     DemoBanner(Modifier.padding(horizontal = 20.dp).padding(top = 12.dp))
     KindSwitch(Modifier.padding(horizontal = 20.dp).padding(top = 14.dp))
     AnimatedContent(Store.kind, transitionSpec = {
@@ -146,7 +147,7 @@ fun KindSwitch(modifier: Modifier) {
     val x by animateDpAsState(seg * KINDS.indexOf(Store.kind).coerceAtLeast(0), calm(), label = "thumb")
     Box(Modifier.offset(x = x).width(seg).fillMaxSize().shadow(6.dp, CircleShape).clip(CircleShape).background(if (pal.dark) hex("#3a3a3c") else Color.White))
     Row(Modifier.fillMaxSize()) {
-      listOf(Triple("email", "邮箱", Icons.Outlined.Email), Triple("phone", "手机号", Icons.Outlined.SimCard), Triple("login", "登录", Icons.Outlined.Key)).forEach { (k, name, icon) ->
+      listOf(Triple("email", "邮箱", Icons.Outlined.Email), Triple("phone", "手机号", Icons.Outlined.SimCard), Triple("login", "微信/QQ", Icons.Outlined.Key)).forEach { (k, name, icon) ->
         val on = Store.kind == k
         val c = if (on) pal.primary else pal.secondary
         Row(Modifier.weight(1f).fillMaxSize().press(1f) { if (!on) { hap(TICK); Store.setKind(k) } },
@@ -218,7 +219,7 @@ fun AddCard(kind: String, modifier: Modifier = Modifier) {
       Icon(Icons.Filled.Add, null, Modifier.size(30.dp), tint = pal.secondary)
       Spacer(Modifier.height(10.dp))
       T(when {
-        kind == "login" -> "添加微信、QQ 或 Apple 账号"
+        kind == "login" -> "添加微信或 QQ"
         Store.data.identities.isEmpty() -> "从一个邮箱或手机号开始"
         kind == "phone" -> "添加手机号"
         else -> "添加邮箱"

@@ -306,12 +306,14 @@ fun footNote(i: Identity): String {
     if (v != null) return "绑定 " + Store.title(v)
     return i.notes.ifEmpty { if (i.isApple) "Apple ID" else if (i.isQQ) "QQ 号" else "微信号" }
   }
+  val ap = if (i.isAppleID) "Apple ID" else ""
   if (i.isPhone) {
     val c = carrier(i.value)
-    val parts = listOf(if (c.isNotEmpty() && !i.notes.contains(c.drop(2))) c else "", i.notes).filter { it.isNotEmpty() }
+    val parts = listOf(ap, if (c.isNotEmpty() && !i.notes.contains(c.drop(2))) c else "", i.notes).filter { it.isNotEmpty() }
     return if (parts.isEmpty()) "手机号" else parts.joinToString(" · ")
   }
-  return i.notes.ifEmpty { "邮箱" }
+  val parts = listOf(ap, i.notes).filter { it.isNotEmpty() }
+  return if (parts.isEmpty()) "邮箱" else parts.joinToString(" · ")
 }
 
 @Composable
@@ -348,7 +350,10 @@ fun WalletCard(i: Identity, modifier: Modifier = Modifier, shadow: Boolean = tru
             if (i.isLogin) {
               T(providerName(i.provider), 16f, FontWeight.SemiBold, Color.White, lines = 1)
               if (i.label.isNotEmpty()) T(i.label, 13f, FontWeight.Medium, Color.White.copy(alpha = 0.75f), lines = 1)
-            } else T(i.label.ifEmpty { if (i.isPhone) "手机号" else "邮箱" }, 16f, FontWeight.SemiBold, Color.White, lines = 1)
+            } else {
+              T(i.label.ifEmpty { if (i.isPhone) "手机号" else "邮箱" }, 16f, FontWeight.SemiBold, Color.White, lines = 1)
+              if (i.isAppleID) AppleGlyph(15.dp, Color.White)
+            }
           }
           Spacer(Modifier.weight(1f))
           Column(horizontalAlignment = Alignment.End) {

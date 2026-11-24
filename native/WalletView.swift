@@ -34,7 +34,7 @@ struct WalletView: View {
   var summary: String {
     let e = store.index.emails.count, p = store.index.phones.count, l = store.index.logins.count, a = store.data.accounts.count
     if store.data.identities.isEmpty && a == 0 { return "先添加一个邮箱或手机号" }
-    return "\(e) 个邮箱、\(p) 个手机号" + (l > 0 ? "、\(l) 个登录账号" : "") + "，关联着 \(a) 个网站与 App"
+    return "\(e) 个邮箱、\(p) 个手机号" + (l > 0 ? "、\(l) 个微信 / QQ" : "") + "，关联着 \(a) 个网站与 App"
   }
 
   // coverflow of identity cards
@@ -107,12 +107,13 @@ struct TopButtons: ToolbarContent {
           .contentTransition(.symbolEffect(.replace.downUp))
           .background(ThemeOrigin())
       }
+      // App first: a tap adds an app (its identity is picked, or made, in the next step); hold for the rest
       Menu {
         Button { store.route = .picker(store.active?.id) } label: { Label("添加网站或 App", systemImage: "square.grid.2x2") }
         Button { store.route = .newIdentity("email") } label: { Label("添加邮箱", systemImage: "envelope") }
         Button { store.route = .newIdentity("phone") } label: { Label("添加手机号", systemImage: "simcard") }
-        Button { store.route = .newIdentity("login") } label: { Label("添加微信、QQ 或 Apple 账号", systemImage: "person.badge.key") }
-      } label: { Image(systemName: "plus") }
+        Button { store.route = .newIdentity("login") } label: { Label("添加微信或 QQ", systemImage: "bubble.left.and.bubble.right") }
+      } label: { Image(systemName: "plus") } primaryAction: { store.route = .picker(store.active?.id) }
       Button { store.route = .settings } label: { Image(systemName: "ellipsis") }
     }
   }
@@ -132,7 +133,7 @@ struct KindSwitch: View {
 
   func bar(glass: Bool) -> some View {
     HStack(spacing: 0) {
-      ForEach([("email", "邮箱", "envelope"), ("phone", "手机号", "simcard"), ("login", "登录", "person.badge.key")], id: \.0) { t in
+      ForEach([("email", "邮箱", "envelope"), ("phone", "手机号", "simcard"), ("login", "微信/QQ", "bubble.left.and.bubble.right")], id: \.0) { t in
         let k = t.0, name = t.1, icon = t.2
         let on = store.kind == k
         Button {
@@ -184,7 +185,7 @@ struct AddCard: View {
     Button { store.route = .newIdentity(kind) } label: {
       VStack(spacing: 10) {
         Image(systemName: "plus").font(.system(size: 26, weight: .medium))
-        Text(kind == "login" ? "添加微信、QQ 或 Apple 账号" : store.data.identities.isEmpty ? "从一个邮箱或手机号开始" : (kind == "phone" ? "添加手机号" : "添加邮箱")).font(.system(size: 16, weight: .semibold))
+        Text(kind == "login" ? "添加微信或 QQ" : store.data.identities.isEmpty ? "从一个邮箱或手机号开始" : (kind == "phone" ? "添加手机号" : "添加邮箱")).font(.system(size: 16, weight: .semibold))
       }
       .foregroundStyle(.secondary)
       .frame(maxWidth: .infinity, maxHeight: .infinity)

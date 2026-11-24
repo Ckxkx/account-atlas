@@ -65,8 +65,13 @@ fun MapScreen() {
 
   val all = Store.data.identities
   // groups: 邮箱, 手机号, 登录 (anything unknown goes last, with the logins)
-  val ids = all.filter { it.type == "email" } + all.filter { it.type == "phone" } + all.filter { it.type != "email" && it.type != "phone" }
-  val rank = ids.withIndex().associate { it.value.id to it.index }
+  val ordered = all.filter { it.type == "email" } + all.filter { it.type == "phone" } + all.filter { it.type != "email" && it.type != "phone" }
+  // one node per distinct email / phone (and 微信 / QQ), even when duplicates weren't merged
+  val members = LinkedHashMap<String, MutableList<String>>(); val keyNode = HashMap<String, String>()
+  for (i in ordered) { val k = idKey(i) ?: i.id; val n = keyNode[k]; if (n != null) members[n]!!.add(i.id) else { keyNode[k] = i.id; members[i.id] = mutableListOf(i.id) } }
+  val ids = ordered.filter { it.id in members }
+  val rank = HashMap<String, Int>().apply { ids.forEachIndexed { k, i -> members[i.id]!!.forEach { put(it, k) } } }
+  fun inNode(a: Account, n: String) = a.identityIds.any { it in (members[n] ?: listOf(n)) }
   val apps = Store.data.accounts.sortedWith(Comparator { x, y ->
     val a = x.identityIds.mapNotNull { rank[it] }.minOrNull() ?: 999; val b = y.identityIds.mapNotNull { rank[it] }.minOrNull() ?: 999
     if (a != b) a - b else nameOrder.compare(x.name, y.name)
@@ -88,7 +93,7 @@ fun MapScreen() {
       val width = maxWidth.value
       val L = minOf(160f, width * 0.42f); val rx = width - 16f - width * 0.4f
       val t = clock.value
-      val linked = apps.filter { a -> focus?.let { it in a.identityIds } ?: true }.map { it.id }.toSet()
+      val linked = apps.filter { a -> focus?.let { inNode(a, it) } ?: true }.map { it.id }.toSet()
       val appIndex = apps.withIndex().associate { it.value.id to it.index }
 
       // threads
@@ -98,7 +103,8 @@ fun MapScreen() {
         ids.forEachIndexed { k, i ->
           val y0 = (idY(k) + cardH / 2).dp.toPx()
           val col = hex(i.color)
-          apps.filter { i.id in it.identityIds }.forEach { a ->
+          // only App ↔ identity threads: a 微信 / QQ binding is a tag on its node, not a line
+          apps.filter { inNode(it, i.id) }.forEach { a ->
             val j = appIndex[a.id] ?: return@forEach
             val p = ease((t - (0.18f + k * 0.07f + j * 0.012f)) / 0.75f)
             if (p <= 0f) return@forEach
@@ -112,7 +118,7 @@ fun MapScreen() {
       }
 
       if (ids.any { it.type == "email" }) T("邮箱", 12f, FontWeight.SemiBold, pal.secondary, Modifier.offset(18.dp, 0.dp))
-      listOf("手机号" to starts[1], "登录" to starts[2]).forEach { (name, k) ->
+      listOf("手机号" to starts[1], "微信 / QQ" to starts[2]).forEach { (name, k) ->
         if (k >= 0) T(name, 12f, FontWeight.SemiBold, pal.secondary, Modifier.offset(18.dp, (idY(k) - 22).dp))
       }
 
@@ -122,7 +128,7 @@ fun MapScreen() {
         val dim by animateFloatAsState(if (focus == null || focus == i.id) 1f else 0.4f, calm(), label = "dim")
         Box(Modifier.offset((16 - 26 * (1 - p)).dp, idY(k).dp).graphicsLayer {
           alpha = p * dim; val s = (0.92f + 0.08f * p) * sel; scaleX = s; scaleY = s
-        }.press { if (focus == i.id) Store.push(Route.IdentityR(i.id)) else focus = i.id }) { MiniCard(i, L.dp, cardH.dp) }
+        }.press { if (focus == i.id) Store.push(Route.IdentityR(i.id)) else focus = i.id }) { MiniCard(i, L.dp, cardH.dp, members[i.id] ?: listOf(i.id)) }
       }
       apps.forEachIndexed { j, a ->
         val p = ease((t - (0.1f + j * 0.02f)) / 0.5f)
@@ -140,8 +146,10 @@ fun MapScreen() {
 }
 
 @Composable
-fun MiniCard(i: Identity, w: Dp, h: Dp) {
-  val n = Store.accountsOf(i.id).size
+fun MiniCard(i: Identity, w: Dp, h: Dp, group: List<String> = listOf(i.id)) {
+  val n = Store.data.accounts.count { a -> a.identityIds.any { it in group } }
+  val apple = group.any { Store.identity(it)?.isAppleID == true }
+  val tag = Store.viaOf(i)?.let { bindTag(it) }.orEmpty()
   val c = hex(i.color)
   Column(Modifier.size(w, h).shadow(10.dp, CardShape(i.isPhone), ambientColor = c, spotColor = c).skin(i.color, CardShape(i.isPhone)).padding(horizontal = 11.dp),
     verticalArrangement = Arrangement.Center) {
@@ -150,6 +158,11 @@ fun MiniCard(i: Identity, w: Dp, h: Dp) {
       else if (i.isLogin) LoginGlyph(i, 13.dp)
       else Icon(kindIcon(i), null, Modifier.size(12.dp), tint = Color.White)
       Spacer(Modifier.width(5.dp)); T("$n", 13f, FontWeight.Bold, Color.White)
+      if (apple) { Spacer(Modifier.width(5.dp)); AppleGlyph(11.dp, Color.White) }
+      if (tag.isNotEmpty()) {
+        Spacer(Modifier.width(5.dp))
+        T(tag, 9.5f, FontWeight.SemiBold, Color.White, Modifier.clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.22f)).padding(horizontal = 4.dp, vertical = 1.dp), lines = 1)
+      }
     }
     T(Store.title(i), 14f, FontWeight.SemiBold, Color.White, lines = 1)
     if (i.label.isNotEmpty() || i.isLogin) T(Store.display(i), 11f, color = Color.White.copy(alpha = 0.75f), lines = 1)

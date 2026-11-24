@@ -42,6 +42,11 @@ struct RootView: View {
     .sheet(item: Binding(get: { store.route }, set: { r in store.route = r })) { r in sheet(r) }
     .overlay(alignment: .top) { ToastView() }
     .fullScreenCover(isPresented: $tour) { OnboardingView(offerDemo: true).environment(store) }
+    // 2.4: duplicates (incl. a former Apple login card and its email) are merged only after a yes, asked once
+    .alert("合并重复的身份", isPresented: Binding(get: { store.mergeAsk > 0 && !tour && store.route == nil }, set: { if !$0 && store.mergeAsk > 0 { store.declineMerge() } })) {
+      Button("合并") { store.mergeDuplicates() }
+      Button("暂不", role: .cancel) { store.declineMerge() }
+    } message: { Text("发现 \(store.mergeAsk) 个重复的身份，合并后关系图更清晰，数据不会丢。") }
     .onAppear {
       // launch arguments used by the CI preview screenshots
       let d = UserDefaults.standard

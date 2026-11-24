@@ -122,7 +122,7 @@ fun IdentityDetail(id: String) {
     } else {
       val logins = Store.loginsVia(i.id)
       if (logins.isNotEmpty()) {
-        SectionLabel("第三方登录")
+        SectionLabel("绑定了这个号的微信 / QQ")
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
           logins.forEach { l -> LinkRow(l, "${providerName(l.provider)} 绑定了这个号", Store.display(l), padded = false) }
         }
@@ -138,7 +138,7 @@ fun IdentityDetail(id: String) {
     }
     // sites reached through a 微信 / Apple card bound to this number: they are affected when it changes too
     if (!i.isLogin) Store.indirectAccounts(i.id).forEach { (l, list) ->
-      SectionLabel("通过${if (l.isApple) " Apple " else if (l.isQQ) " QQ " else "微信"}登录的 ${list.size} 个网站与 App")
+      SectionLabel("通过${if (l.isQQ) " QQ " else "微信"}登录的 ${list.size} 个网站与 App")
       Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         list.forEach { a -> ReelRow(a) { Store.push(Route.AccountR(a.id)) } }
       }
@@ -173,7 +173,7 @@ fun AccountDetail(id: String) {
       ActionTile("编辑", Icons.Outlined.Edit, Modifier.weight(1f)) { Store.push(Route.EditAccount(a.id)) }
       ActionTile("删除", Icons.Outlined.Delete, Modifier.weight(1f), destructive = true) { askDelete = true }
     }
-    SectionLabel(if (a.identityIds.any { Store.identity(it)?.isLogin == true }) "用的邮箱、手机号和第三方登录" else "用的邮箱和手机号")
+    SectionLabel(if (a.identityIds.any { Store.identity(it)?.isLogin == true }) "怎么登录 / 用的身份" else "用的邮箱和手机号")
     Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
       val list = a.identityIds.mapNotNull { Store.identity(it) }
       if (list.isEmpty()) T("还没有关联，点编辑选一个。", 15f, color = pal.secondary, modifier = Modifier.padding(16.dp))

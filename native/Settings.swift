@@ -103,7 +103,7 @@ struct OrderView: View {
     List {
       group("email", "邮箱")
       group("phone", "手机号")
-      group("login", "登录")
+      group("login", "微信 / QQ")
     }
     .environment(\.editMode, .constant(.active))
     .navigationTitle("卡片顺序").navigationBarTitleDisplayMode(.inline)

@@ -58,6 +58,15 @@ class LoginModelTest {
     assertFalse(validLogin("apple", "hello"))
   }
 
+  @Test fun pre24AppleCardStillReadsAndIsConverted() {
+    // older clients wrote Apple ID as a login card: 2.4 reads it and turns it into a flagged email in place
+    val d = decodeAtlas("""{"identities":[{"id":"a1","type":"login","value":"me@icloud.com","provider":"apple","color":"#1d1d1f"}],"accounts":[{"id":"x","name":"Notion","identityIds":["a1"]}],"deleted":{}}""")
+    assertTrue(d.identities[0].isApple)
+    val m = Migrate24.autoFix(d)
+    assertEquals("email", m.identities[0].type); assertTrue(m.identities[0].isAppleID)
+    assertEquals(listOf("a1"), m.accounts[0].identityIds)
+  }
+
   @Test fun kindsOrder() {
     assertEquals(listOf("email", "phone", "login"), KINDS)
     assertTrue(kindRank("login") > kindRank("phone"))

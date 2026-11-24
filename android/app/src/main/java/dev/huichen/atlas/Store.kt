@@ -58,6 +58,8 @@ object Store {
   /** 新手教程 overlay (first launch, or 设置 › 使用教程); tourDemo = offer the sample data on its last page */
   var tour by mutableStateOf(false)
   var tourDemo = false
+  /** 2.4: how many duplicate identities wait on the one-time 合并 question (0 = don't ask) */
+  var mergeAsk by mutableIntStateOf(0)
 
   /** Accounts saved before 2.3.1 with no icon of their own and no bundled one (王者荣耀, 金铲铲之战 …) were
    *  drawn with a parent site's logo or a tiny favicon. Look each name up on the App Store once and keep
@@ -106,6 +108,10 @@ object Store {
         runCatching { decodeAtlas(File(ctx.filesDir, "atlas.prev.json").readText()) }.getOrDefault(AtlasData())
       })
     remember()
+    // 2.4 (atlas.prev.json above is still the untouched copy): Apple login cards become their email /
+    // phone, silently and losslessly. Duplicates are merged only after the user says yes, asked once.
+    migrate24()
+    if (data.demo != true && prefs.getString("atlas.merge24", "") != "no") mergeAsk = Migrate24.dupCount(data)
     activeID = deck.firstOrNull()?.id
     ready = true
   }
@@ -177,7 +183,44 @@ object Store {
     }
   }
   /** replace everything (sync merge), without new stamps */
-  fun adopt(d: AtlasData) { data = d; remember(); persist(); fixActive() }
+  fun adopt(d: AtlasData) { data = d; remember(); persist(); migrate24(); fixActive() }   // an older client may still add an Apple login card
+
+  /** the silent part of the 2.4 migration; safe to run any time (idempotent) */
+  fun migrate24() {
+    val fixed = Migrate24.autoFix(data)
+    if (fixed === data) return
+    val demo = data.demo
+    mutate(null, undo = false) { Migrate24.autoFix(it) }
+    if (demo == true) { data = data.copy(demo = true); persist() }
+  }
+  fun mergeDuplicates() {
+    mergeAsk = 0
+    var n = 0
+    mutate(null) { val (m, k) = Migrate24.merge(it); n = k; m }
+    show("已合并 $n 个重复的身份", "撤销") { undo() }
+    fixActive()
+  }
+  fun declineMerge() {
+    mergeAsk = 0
+    prefs.edit().putString("atlas.merge24", "no").apply()
+  }
+  /** The identity already holding this value (other than [except]), if any. */
+  fun existing(type: String, provider: String?, value: String, except: String? = null): Identity? {
+    val k = idKey(type, provider, value) ?: return null
+    return data.identities.firstOrNull { it.id != except && idKey(it) == k }
+  }
+  /** The identity with this value, or a new one (reuse first: no value is ever typed in twice). Returns its id and whether it existed. */
+  fun ensureIdentity(type: String, value: String, provider: String? = null, via: String? = null): Pair<String, Boolean> {
+    val v = value.trim()
+    existing(type, provider, v)?.let { return it.id to true }
+    var bound = via
+    if (bound == null && type == "login" && provider == "qq" && v.contains('@'))
+      bound = data.identities.firstOrNull { it.type == "email" && normEmail(it.value) == normEmail(v) }?.id
+    val color = if (type == "login") providerColor(provider) else COLORS[data.identities.size % COLORS.size]
+    val i = Identity(newID(), type, v, "", color, "", provider = if (type == "login") provider else null, via = if (type == "login") bound else null)
+    mutate(null, undo = false) { it.copy(identities = it.identities + i) }
+    return i.id to false
+  }
   private fun fixActive() { if (active == null || deck.none { it.id == activeID }) activeID = deck.firstOrNull()?.id ?: "add" }
 
   /** 小提示: at most once a week, the card that hasn't had a new site in two weeks or more */
@@ -311,7 +354,7 @@ object Store {
     )
     val g = ids[0].id; val p1 = ids[1].id; val q = ids[2].id; val o = ids[3].id; val p2 = ids[4].id
     val wx = Identity(newID(), "login", "atlas_wx", "", "#07c160", provider = "wechat", via = p1)
-    val ap = Identity(newID(), "login", "me@icloud.com", "", "#1d1d1f", provider = "apple", via = g)
+    val ap = Identity(newID(), "email", "me@icloud.com", "Apple ID", "#1d1d1f", apple = true)
     val w = wx.id; val ai = ap.id
     val day = 86_400_000.0; val now = nowMS()
     fun mk(n: String, d: String, c: String, i: List<String>, ago: Double, notes: String = "") =

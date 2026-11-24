@@ -74,7 +74,7 @@ struct IdentityDetail: View {
     } else {
       let bound = store.boundLogins(i.id)
       if !bound.isEmpty {
-        section("绑定了这个号的登录账户")
+        section("绑定了这个号的微信 / QQ")
         VStack(spacing: 8) {
           ForEach(bound) { l in
             Button { store.route = .identity(l.id) } label: { identityRow(l, sub: l.kindName + " 绑定了这个号") }
@@ -91,7 +91,7 @@ struct IdentityDetail: View {
       ForEach(store.boundLogins(i.id)) { l in
         let more = store.accounts(of: l.id).filter { !seen.contains($0.id) }
         if !more.isEmpty {
-          section("通过\(l.isApple ? " Apple " : l.isQQ ? " QQ " : "微信")登录的 \(more.count) 个网站与 App")
+          section("通过\(l.isQQ ? " QQ " : "微信")登录的 \(more.count) 个网站与 App")
           VStack(spacing: 8) {
             ForEach(more) { a in
               Button { store.route = .account(a.id) } label: { ReelRow(account: a) }.buttonStyle(PressStyle(scale: 0.98))
@@ -159,7 +159,7 @@ struct AccountDetail: View {
               act("编辑", "pencil") { store.route = .editAccount(a.id) }
               act("删除", "trash", destructive: true) { askDelete = true }
             }.padding(.horizontal, 20).padding(.top, 24)
-            Text(a.identityIds.contains { store.identity($0)?.isLogin == true } ? "用的邮箱、手机号和登录方式" : "用的邮箱和手机号").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+            Text(a.identityIds.contains { store.identity($0)?.isLogin == true } ? "怎么登录 / 用的身份" : "用的邮箱和手机号").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
               .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 36).padding(.top, 26).padding(.bottom, 8)
             VStack(spacing: 10) {
               let list = a.identityIds.compactMap { store.identity($0) }

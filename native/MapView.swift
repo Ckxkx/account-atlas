@@ -55,12 +55,14 @@ struct MapView: View {
 
   func content(_ m: MapLayout, width: CGFloat) -> some View {
     let L = min(160, width * 0.42), rx = width - 16 - (width * 0.4)
-    let linked: Set<String> = focus.map { f in Set(m.apps.filter { $0.identityIds.contains(f) }.map(\.id)) } ?? Set(m.apps.map(\.id))
+    let linked: Set<String> = focus.map { f in let g = Set(m.members[f] ?? [f]); return Set(m.apps.filter { $0.identityIds.contains(where: { g.contains($0) }) }.map(\.id)) } ?? Set(m.apps.map(\.id))
     var threads: [ThreadSpec] = []
     for k in m.ids.indices {
       let i = m.ids[k]
       let y0 = m.idY[k] + cardH / 2
-      for j in m.apps.indices where m.apps[j].identityIds.contains(i.id) {
+      let g = Set(m.members[i.id] ?? [i.id])
+      // only App ↔ identity threads: a 微信 / QQ binding is a tag on its node, not a line
+      for j in m.apps.indices where m.apps[j].identityIds.contains(where: { g.contains($0) }) {
         threads.append(ThreadSpec(id: i.id + ">" + m.apps[j].id, owner: i.id, color: i.color,
                                   from: CGPoint(x: 16 + L, y: y0), to: CGPoint(x: rx, y: m.appY[j] + appH / 2),
                                   delay: 0.18 + Double(k) * 0.07 + Double(j) * 0.012))
@@ -76,7 +78,7 @@ struct MapView: View {
       // group labels
       if m.ids.contains(where: { $0.type == "email" }) { label("邮箱").offset(x: 18, y: 0) }
       if let k = m.ids.firstIndex(where: { $0.type == "phone" }) { label("手机号").offset(x: 18, y: m.idY[k] - 22) }
-      if let k = m.ids.firstIndex(where: { $0.isLogin }) { label("登录").offset(x: 18, y: m.idY[k] - 22) }
+      if let k = m.ids.firstIndex(where: { $0.isLogin }) { label("微信 / QQ").offset(x: 18, y: m.idY[k] - 22) }
 
       ForEach(Array(m.ids.enumerated()), id: \.element.id) { e in
         let k = e.offset, i = e.element
@@ -84,7 +86,7 @@ struct MapView: View {
           withAnimation(Motion.smooth) {
             if focus == i.id { store.route = .identity(i.id) } else { focus = i.id }
           }
-        } label: { mini(i, width: L) }
+        } label: { mini(i, members: m.members[i.id] ?? [i.id], width: L) }
           .buttonStyle(PressStyle())
           .opacity(drawn ? (focus == nil || focus == i.id ? 1 : 0.4) : 0)
           .scaleEffect(focus == i.id ? 1.04 : drawn ? 1 : 0.92)
@@ -116,13 +118,21 @@ struct MapView: View {
   func label(_ s: String) -> some View {
     Text(s).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
   }
-  func mini(_ i: Identity, width: CGFloat) -> some View {
-    let n = store.accounts(of: i.id).count
+  func mini(_ i: Identity, members: [String], width: CGFloat) -> some View {
+    let n = Set(members.flatMap { store.accounts(of: $0).map(\.id) }).count
+    let apple = members.contains { store.identity($0)?.isAppleID == true }
+    let tag = store.via(i).map(bindTag) ?? ""
     let shape = CardShape(sim: i.isPhone)
     return VStack(alignment: .leading, spacing: 2) {
       HStack(spacing: 5) {
         IdentityGlyph(identity: i, size: 11)
         Text("\(n)").font(.system(size: 13, weight: .bold, design: .rounded))
+        if apple { Image(systemName: "apple.logo").font(.system(size: 10, weight: .semibold)) }
+        if !tag.isEmpty {
+          Text(tag).font(.system(size: 9.5, weight: .semibold)).lineLimit(1)
+            .padding(.horizontal, 4).padding(.vertical, 1)
+            .background(.white.opacity(0.22), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        }
       }.opacity(0.85)
       Text(store.title(i)).font(.system(size: 14, weight: .semibold)).lineLimit(1)
       if !i.label.isEmpty { Text(store.display(i)).font(.system(size: 11)).lineLimit(1).opacity(0.75) }
@@ -139,15 +149,21 @@ struct MapView: View {
 /// for every node it placed).
 struct MapLayout {
   let ids: [Identity]
+  /// node id -> the ids it stands for: one node per distinct email / phone, even when duplicates weren't merged
+  let members: [String: [String]]
   let apps: [Account]
   let idY: [CGFloat]
   let appY: [CGFloat]
   let height: CGFloat
   init(_ x: AtlasIndex, cardH: CGFloat, cardGap: CGFloat, appH: CGFloat, appGap: CGFloat, groupGap: CGFloat) {
-    let ids = x.emails + x.phones + x.logins
+    var ids: [Identity] = [], members: [String: [String]] = [:], keyNode: [String: String] = [:]
+    for i in x.emails + x.phones + x.logins {
+      let k = idKey(i) ?? i.id
+      if let n = keyNode[k] { members[n, default: []].append(i.id) } else { keyNode[k] = i.id; members[i.id] = [i.id]; ids.append(i) }
+    }
     // apps follow the first identity they belong to, so threads cross as little as possible
     var rank: [String: Int] = [:]
-    for k in ids.indices { rank[ids[k].id] = k }
+    for k in ids.indices { for id in members[ids[k].id] ?? [] { rank[id] = k } }
     var order: [String: Int] = [:]
     for a in x.byName { order[a.id] = a.identityIds.compactMap { rank[$0] }.min() ?? 999 }
     let apps = x.byName.enumerated().sorted { l, r in
@@ -162,7 +178,7 @@ struct MapLayout {
     }
     var ay: [CGFloat] = []
     for j in apps.indices { ay.append(CGFloat(j) * (appH + appGap) + 22) }
-    self.ids = ids; self.apps = apps; self.idY = iy; self.appY = ay
+    self.ids = ids; self.members = members; self.apps = apps; self.idY = iy; self.appY = ay
     height = max((iy.last ?? 22) + cardH, (ay.last ?? 22) + appH) + 10
   }
 }

@@ -60,18 +60,21 @@ struct Identity: Codable, Identifiable, Hashable {
   var order: Double? = nil
   /// phone only: an eSIM (no physical card). Written only when true; the key is omitted otherwise.
   var esim: Bool? = nil
-  /// login only: "wechat" | "qq" | "apple"
+  /// login only: "wechat" | "qq" ("apple" only in data older than 2.4; converted on load)
   var provider: String? = nil
+  /// email / phone: this address or number is also an Apple ID (2.4). Written only when true.
+  var apple: Bool? = nil
   /// login only: id of the email / phone identity it is bound to. Omitted when empty; a dangling id counts as none.
   var via: String? = nil
   /// fields from newer clients, written back untouched
   var extra: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "type", "value", "label", "color", "notes", "updatedAt", "order", "esim", "provider", "via"]
+  static let knownKeys: Set<String> = ["id", "type", "value", "label", "color", "notes", "updatedAt", "order", "esim", "provider", "via", "apple"]
 
-  init(id: String = newID(), type: String, value: String, label: String = "", color: String, notes: String = "", esim: Bool = false, provider: String? = nil, via: String? = nil) {
+  init(id: String = newID(), type: String, value: String, label: String = "", color: String, notes: String = "", esim: Bool = false, provider: String? = nil, via: String? = nil, apple: Bool = false) {
     self.id = id; self.type = type; self.value = value; self.label = label; self.color = color; self.notes = notes
     self.esim = esim ? true : nil
+    self.apple = apple ? true : nil
     self.provider = (provider?.isEmpty ?? true) ? nil : provider
     self.via = (via?.isEmpty ?? true) ? nil : via
   }
@@ -86,6 +89,7 @@ struct Identity: Codable, Identifiable, Hashable {
     updatedAt = try? c.decode(Double.self, forKey: AnyKey("updatedAt"))
     order = try? c.decode(Double.self, forKey: AnyKey("order"))
     esim = (try? c.decode(Bool.self, forKey: AnyKey("esim"))) == true ? true : nil
+    apple = (try? c.decode(Bool.self, forKey: AnyKey("apple"))) == true ? true : nil
     let p = try? c.decode(String.self, forKey: AnyKey("provider"))
     provider = (p?.isEmpty ?? true) ? nil : p
     let v = try? c.decode(String.self, forKey: AnyKey("via"))
@@ -104,18 +108,127 @@ struct Identity: Codable, Identifiable, Hashable {
     try c.encodeIfPresent(updatedAt, forKey: AnyKey("updatedAt"))
     try c.encodeIfPresent(order, forKey: AnyKey("order"))
     if esim == true { try c.encode(true, forKey: AnyKey("esim")) }
+    if apple == true { try c.encode(true, forKey: AnyKey("apple")) }
     if let provider, !provider.isEmpty { try c.encode(provider, forKey: AnyKey("provider")) }
     if let via, !via.isEmpty { try c.encode(via, forKey: AnyKey("via")) }
   }
   var isPhone: Bool { type == "phone" }
   var isESim: Bool { isPhone && esim == true }
   var isLogin: Bool { type == "login" }
+  /// a pre-2.4 Apple login card (converted to its email / phone on load)
   var isApple: Bool { isLogin && provider == "apple" }
+  /// 2.4: an email / phone that is also an Apple ID
+  var isAppleID: Bool { !isLogin && apple == true }
   var isQQ: Bool { isLogin && provider == "qq" }
   /// "wechat" | "qq" | "apple" for a login card (anything unknown reads as 微信)
   var loginProvider: String { isApple ? "apple" : isQQ ? "qq" : "wechat" }
-  /// 微信 / QQ / Apple 账户 (login cards), 手机号, 邮箱
+  /// 微信 / QQ (login cards), 手机号, 邮箱
   var kindName: String { isLogin ? (isApple ? "Apple 账户" : isQQ ? "QQ" : "微信") : isPhone ? "手机号" : "邮箱" }
+}
+
+// MARK: - 2.4: one identity per email / phone; Apple ID is a flag on it (mirrors app.js / Model.kt)
+
+func normEmail(_ v: String) -> String { v.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+func normPhone(_ v: String) -> String {
+  var d = v.filter { $0.isASCII && $0.isNumber }
+  if d.hasPrefix("0086") { d.removeFirst(4) } else if d.hasPrefix("86") && d.count == 13 { d.removeFirst(2) }
+  return d
+}
+/// the key two identities share when they are the same thing; nil = never merged
+func idKey(type: String, provider: String?, value: String) -> String? {
+  let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+  if v.isEmpty { return nil }
+  switch type {
+  case "email": return "e:" + normEmail(v)
+  case "phone": let d = normPhone(v); return d.isEmpty ? nil : "p:" + d
+  case "login":
+    if provider == "apple" { return nil }
+    if provider == "qq" { return "q:" + (v.contains("@") ? normEmail(v) : v.filter { $0.isASCII && $0.isNumber }) }
+    return "w:" + v.lowercased()
+  default: return nil
+  }
+}
+func idKey(_ i: Identity) -> String? { idKey(type: i.type, provider: i.provider, value: i.value) }
+
+/// Silent, lossless fix-ups (ids kept): an Apple login card becomes the email / phone it is, flagged
+/// apple (its `via` stays in the JSON, unused); a QQ card whose QQ is an email you already have points
+/// at that email. Returns true if anything changed.
+@discardableResult func autoFix24(_ d: inout AtlasData) -> Bool {
+  var changed = false
+  for k in d.identities.indices where d.identities[k].type == "login" && d.identities[k].provider == "apple" {
+    d.identities[k].type = d.identities[k].value.contains("@") ? "email" : "phone"
+    d.identities[k].provider = nil
+    d.identities[k].apple = true
+    changed = true
+  }
+  for k in d.identities.indices {
+    let i = d.identities[k]
+    guard i.type == "login", i.provider == "qq", (i.via ?? "").isEmpty, i.value.contains("@") else { continue }
+    if let m = d.identities.first(where: { $0.type == "email" && normEmail($0.value) == normEmail(i.value) }) {
+      d.identities[k].via = m.id; changed = true
+    }
+  }
+  return changed
+}
+/// groups of identity ids that are the same email / phone / 微信 / QQ; the first (oldest) is kept
+func dupGroups24(_ d: AtlasData) -> [[String]] {
+  var order: [String] = [], by: [String: [String]] = [:]
+  for i in d.identities {
+    guard let k = idKey(i) else { continue }
+    if by[k] == nil { order.append(k) }
+    by[k, default: []].append(i.id)
+  }
+  return order.compactMap { by[$0] }.filter { $0.count > 1 }
+}
+func dupCount24(_ d: AtlasData) -> Int { dupGroups24(d).reduce(0) { $0 + $1.count - 1 } }
+/// Merges every group into its first identity: label, notes, flags and unknown fields carry over,
+/// every account and binding is repointed. Removed ids become tombstones when the change is stamped.
+@discardableResult func mergeDups24(_ d: inout AtlasData) -> Int {
+  var to: [String: String] = [:]
+  for g in dupGroups24(d) {
+    guard let kk = d.identities.firstIndex(where: { $0.id == g[0] }) else { continue }
+    for oid in g.dropFirst() {
+      guard let o = d.identities.first(where: { $0.id == oid }) else { continue }
+      to[oid] = g[0]
+      var keep = d.identities[kk]
+      if keep.label.isEmpty && !o.label.isEmpty { keep.label = o.label }
+      if !o.notes.isEmpty && !keep.notes.contains(o.notes) { keep.notes = keep.notes.isEmpty ? o.notes : keep.notes + "\n" + o.notes }
+      if o.apple == true { keep.apple = true }
+      if o.esim == true && keep.type == "phone" { keep.esim = true }
+      if (keep.via ?? "").isEmpty, let v = o.via, !v.isEmpty, v != keep.id { keep.via = v }
+      if keep.order == nil { keep.order = o.order }
+      for (k, v) in o.extra where keep.extra[k] == nil { keep.extra[k] = v }
+      d.identities[kk] = keep
+    }
+  }
+  if to.isEmpty { return 0 }
+  d.identities.removeAll { to[$0.id] != nil }
+  for k in d.identities.indices {
+    if let v = d.identities[k].via, let t = to[v] { d.identities[k].via = t == d.identities[k].id ? nil : t }
+  }
+  for k in d.accounts.indices {
+    var out: [String] = []
+    for x in d.accounts[k].identityIds { let y = to[x] ?? x; if !out.contains(y) { out.append(y) } }
+    if out != d.accounts[k].identityIds { d.accounts[k].identityIds = out }
+  }
+  return to.count
+}
+/// a 微信 / QQ card's binding without the full number: 尾号 1234, or ab•••@qq.com
+func bindTag(_ v: Identity) -> String {
+  if v.type == "phone" { let d = v.value.filter(\.isNumber); return d.count >= 4 ? "尾号 " + String(d.suffix(4)) : "" }
+  let parts = v.value.split(separator: "@", maxSplits: 1).map(String.init)
+  return String((parts.first ?? "").prefix(2)) + "•••" + (parts.count > 1 ? "@" + parts[1] : "")
+}
+/// what's wrong with a value for this kind ("email" | "phone" | "wechat" | "qq"), or nil when it's fine
+func idValueError(_ kind: String, _ value: String) -> String? {
+  let v = value.trimmingCharacters(in: .whitespaces)
+  let mail = v.range(of: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", options: .regularExpression) != nil
+  switch kind {
+  case "email": return mail ? nil : "邮箱地址格式不对"
+  case "phone": return v.filter(\.isNumber).count >= 5 ? nil : "手机号至少要 5 位数字"
+  case "qq": return loginValueValid(provider: "qq", value: v) ? nil : "QQ 号是 5 到 12 位数字，或填 QQ 邮箱"
+  default: return v.isEmpty ? "填一下微信号" : nil
+  }
 }
 
 let KINDS = ["email", "phone", "login"]
@@ -360,6 +473,8 @@ final class Store {
   var firstRun = false
   /// the data file couldn't be read at launch: it was set aside (atlas.unreadable-*.json) and the last good copy loaded
   @ObservationIgnored var recovered = false
+  /// 2.4: how many duplicate identities wait on the one-time 合并 question (0 = don't ask)
+  var mergeAsk = 0
   @ObservationIgnored var toastAction: (() -> Void)? = nil
   @ObservationIgnored var onSaved: (() -> Void)? = nil
 
@@ -391,6 +506,10 @@ final class Store {
     }
     index = AtlasIndex(data)
     remember()
+    // 2.4 (atlas.prev.json above is still the untouched copy): Apple login cards become their email /
+    // phone, silently and losslessly. Duplicates are merged only after the user says yes, asked once.
+    migrate24()
+    if data.demo != true && UserDefaults.standard.string(forKey: "atlas.merge24") != "no" { mergeAsk = dupCount24(data) }
     activeID = deck.first?.id
     // decode every icon the first screens will show, off the main thread, before they're needed
     IconStore.shared.prefetch(data.accounts)
@@ -498,9 +617,49 @@ final class Store {
     let u = url
     io.async { try? d.write(to: u, options: .atomic) }
   }
+  /// the silent part of the 2.4 migration; safe to run any time (idempotent)
+  func migrate24() {
+    var probe = data
+    guard autoFix24(&probe) else { return }
+    let demo = data.demo
+    mutate(nil, undo: false) { _ = autoFix24(&$0) }
+    if demo == true { data.demo = true; persist() }
+  }
+  func mergeDuplicates() {
+    mergeAsk = 0
+    var n = 0
+    mutate(nil) { n = mergeDups24(&$0) }
+    show("已合并 \(n) 个重复的身份", action: "撤销") { [weak self] in self?.undo() }
+    setKind(kind)
+  }
+  func declineMerge() {
+    mergeAsk = 0
+    UserDefaults.standard.set("no", forKey: "atlas.merge24")
+  }
+  /// the identity with this value, or a new one (reuse first: no value is ever typed in twice).
+  /// Returns the id and whether it already existed.
+  @discardableResult func ensureIdentity(type: String, value: String, provider: String? = nil, via: String? = nil) -> (String, Bool) {
+    let v = value.trimmingCharacters(in: .whitespaces)
+    if let k = idKey(type: type, provider: provider, value: v), let hit = data.identities.first(where: { idKey($0) == k }) { return (hit.id, true) }
+    var bound = via
+    if bound == nil, type == "login", provider == "qq", v.contains("@") {
+      bound = data.identities.first { $0.type == "email" && normEmail($0.value) == normEmail(v) }?.id
+    }
+    let color = type == "login" ? loginDefaultColor(provider ?? "wechat") : COLORS[data.identities.count % COLORS.count]
+    let i = Identity(type: type, value: v, color: color, provider: type == "login" ? provider : nil, via: type == "login" ? bound : nil)
+    mutate(nil, undo: false) { $0.identities.append(i) }
+    return (i.id, false)
+  }
+  /// the email / phone that already has this value (other than `except`)
+  func existing(type: String, provider: String?, value: String, except: String? = nil) -> Identity? {
+    guard let k = idKey(type: type, provider: provider, value: value) else { return nil }
+    return data.identities.first { $0.id != except && idKey($0) == k }
+  }
+
   // replace everything (sync merge), without new stamps
   func adopt(_ d: AtlasData) {
     data = d; remember(); persist()
+    migrate24()   // an older client may still add an Apple login card
     IconStore.shared.prefetch(d.accounts)
     if active == nil || !deck.contains(where: { $0.id == activeID }) { activeID = deck.first?.id }
   }
@@ -672,7 +831,7 @@ final class Store {
     ]
     let g = ids[0].id, p1 = ids[1].id, q = ids[2].id, o = ids[3].id, p2 = ids[4].id
     let wx = Identity(type: "login", value: "atlas_wx2024", label: "", color: loginDefaultColor("wechat"), provider: "wechat", via: p1)
-    let ap = Identity(type: "login", value: "me@icloud.com", label: "", color: loginDefaultColor("apple"), provider: "apple", via: g)
+    let ap = Identity(type: "email", value: "me@icloud.com", label: "Apple ID", color: "#1d1d1f", apple: true)
     let w = wx.id, a = ap.id
     let day = 86_400_000.0, now = nowMS()
     func mk(_ n: String, _ d: String, _ c: String, _ i: [String], _ ago: Double, _ notes: String = "") -> Account {

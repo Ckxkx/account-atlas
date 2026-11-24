@@ -429,6 +429,7 @@ struct WalletCard: View {
           HStack(spacing: 8) {
             if i.isESim { ESimBadge() } else if i.isPhone { Chip() } else if i.isLogin { LoginGlyph(provider: i.loginProvider, size: 17) } else { Image(systemName: "envelope").font(.system(size: 17, weight: .medium)) }
             Text(cardTitle(i)).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+            if i.isAppleID { Image(systemName: "apple.logo").font(.system(size: 14, weight: .semibold)).accessibilityLabel("Apple ID") }
           }
           Spacer()
           VStack(alignment: .trailing, spacing: 0) {
@@ -468,12 +469,14 @@ struct WalletCard: View {
       if let v = store.via(i) { return "绑定 " + store.title(v) }
       return i.notes.isEmpty ? (i.isApple ? "Apple ID" : i.isQQ ? "QQ 号" : "微信号") : i.notes
     }
+    let ap = i.isAppleID ? "Apple ID" : ""
     if i.isPhone {
       let c = carrier(i.value)
-      let parts = [(!c.isEmpty && !i.notes.contains(String(c.dropFirst(2)))) ? c : "", i.notes].filter { !$0.isEmpty }
+      let parts = [ap, (!c.isEmpty && !i.notes.contains(String(c.dropFirst(2)))) ? c : "", i.notes].filter { !$0.isEmpty }
       return parts.isEmpty ? "手机号" : parts.joined(separator: " · ")
     }
-    return i.notes.isEmpty ? "邮箱" : i.notes
+    let parts = [ap, i.notes].filter { !$0.isEmpty }
+    return parts.isEmpty ? "邮箱" : parts.joined(separator: " · ")
   }
   // a blurred mosaic of the brand colours of what this identity unlocks
   func poster(_ accs: [Account]) -> some View {

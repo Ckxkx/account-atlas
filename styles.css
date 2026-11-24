@@ -781,3 +781,16 @@ html[data-theme=light] .hero-edit{background:#e5e5ea}
 .prov-pills button.on[data-p=apple]{background:#e5e5ea;color:#000}
 html[data-theme=light] .prov-pills button.on[data-p=apple]{background:#1d1d1f;color:#fff}
 .cat-list.indirect .reel{opacity:.85}
+/* 2.4: Apple ID is a badge on an email / phone; 微信 / QQ nodes show which number they're bound to */
+.apple-tag{display:inline-flex;align-items:center;gap:2px;margin-left:6px;padding:1px 6px 1px 4px;border-radius:6px;background:var(--fill);font-size:11px;font-weight:600;color:var(--secondary);vertical-align:2px}
+.apple-tag svg{width:11px;height:11px}
+.wc-apple{display:inline-flex;margin-left:2px;opacity:.9}
+.wc-kind .wc-apple svg{width:15px;height:15px;margin-top:-2px}
+.switch-row span svg{width:16px;height:16px;vertical-align:-2px;margin-right:6px}
+.mk .mtag{font-style:normal;font-size:10px;font-weight:600;line-height:1;padding:2px 5px;border-radius:6px;background:rgba(255,255,255,.22);margin:0 auto 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
+.mk .mtag.apple{padding:2px 3px;display:inline-flex}
+.mk .mtag.apple+.mtag{margin-left:4px}
+.mk .mtag.apple svg{width:11px;height:11px;opacity:1}
+#newIdBox{margin:4px 0 6px}
+#nType{flex-wrap:wrap}
+.mk .mtag.apple:has(+.mtag){margin-right:0}

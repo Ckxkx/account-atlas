@@ -203,7 +203,7 @@ fun OrderPage(back: () -> Unit) {
       val hint = "长按拖动排序，排在第一位的卡会在卡包里最先出现。"
       OrderGroup("email", "邮箱", if (last == "email") hint else null)
       OrderGroup("phone", "手机号", if (last == "phone") hint else null)
-      OrderGroup("login", "登录", if (last == "login") hint else null)
+      OrderGroup("login", "微信 / QQ", if (last == "login") hint else null)
     }
   }
 }
