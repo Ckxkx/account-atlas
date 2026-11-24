@@ -396,7 +396,7 @@ object Presets {
     Preset("115 网盘", "115.com", "工具", "", ""),
     Preset("天翼云盘", "cloud.189.cn", "工具", "", ""),
     Preset("中国移动云盘", "yun.139.com", "工具", "", "和彩云"),
-    Preset("蓝奏云", "woozooo.com", "工具", "", "lanzou 蓝奏"),
+    Preset("蓝奏云", "lanzou.com", "工具", "", "lanzou 蓝奏 lanzoup lanzn"),
     Preset("迅雷", "xunlei.com", "工具", "", "thunder"),
     Preset("微云", "weiyun.com", "工具", "", ""),
     Preset("OneDrive", "onedrive.live.com", "工具", "", ""),
