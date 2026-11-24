@@ -1774,7 +1774,7 @@ Etherscan|etherscan.io|加密|`.split('\n').map(l => { const [n, d, c, a] = l.sp
       if (d.act === 'order') orderSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
-      if (d.act === 'download') window.open('https://wwbsj.lanzoup.com/b01i61djvg', '_blank', 'noopener');
+      if (d.act === 'download') window.open('https://wwbsj.lanzn.com/b01i61dn1a', '_blank', 'noopener');
       if (d.act === 'demo') loadDemo();
       if (d.act === 'demoClear') clearDemo();
       if (d.act === 'wipe') confirmSheet('清空全部数据？', Sync.on ? '所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。' : '所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。', '清空全部数据', () => { snap(); state = { identities: [], accounts: [] }; save(); render(); undoToast('已清空'); });

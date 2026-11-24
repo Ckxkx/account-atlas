@@ -165,11 +165,11 @@ fun SettingsMain(go: (String) -> Unit) {
           SettingRow(Icons.Outlined.PlaylistAdd, "载入示例") { Store.loadDemo() }
         }
       }
-      FormGroup(footer = "在蓝奏云下载，密码 bteg。直接覆盖安装，数据不会丢失。") {
+      FormGroup(footer = "在蓝奏云下载，密码 0874。直接覆盖安装，数据不会丢失。") {
         val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() }
         val uri = LocalUriHandler.current
         SettingRow(Icons.Outlined.NewReleases, "下载新版本", trailing = { if (ver != null) T("当前 $ver", 14f, color = pal.secondary) }, chevron = true) {
-          runCatching { uri.openUri("https://wwbsj.lanzoup.com/b01i61djvg") }
+          runCatching { uri.openUri("https://wwbsj.lanzn.com/b01i61dn1a") }
         }
       }
       FormGroup {
