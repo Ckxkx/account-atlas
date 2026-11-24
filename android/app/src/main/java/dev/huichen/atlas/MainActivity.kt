@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity() {
     // No forced refresh-rate mode: the system's adaptive rate (60/90/120 Hz) is left alone, which saves
     // battery and avoids mode-switch hitches on some ROMs. Smoothness comes from the animations instead.
     Store.init(applicationContext)
+    if (intent?.hasExtra("atlasRoute") == true || intent?.hasExtra("atlasTab") == true) Store.seedDemo()
     IconCache.prewarm(applicationContext)
     Sync.init()
     Store.onSaved = { Sync.schedule() }
@@ -104,12 +105,6 @@ class MainActivity : ComponentActivity() {
       "identity" -> Store.active?.let { Store.push(Route.IdentityR(it.id)) }
       "settings" -> Store.push(Route.Settings)
       "new" -> Store.push(Route.NewIdentity("email"))
-    }
-    if (savedInstanceState == null && Store.data.demo == true && intent?.hasExtra("atlasRoute") != true && intent?.hasExtra("atlasTab") != true) {
-      Store.show("这是示例数据", "清空") {
-        Store.mutate(null) { it.copy(identities = emptyList(), accounts = emptyList()) }
-        Store.setKind(Store.kind)
-      }
     }
     enableEdgeToEdge(SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
     setContent { AtlasRoot(startTab) }
@@ -154,6 +149,7 @@ fun AtlasRoot(startTab: Int) {
         Box(Modifier.fillMaxSize().drawWithContent { layer.record { this@drawWithContent.drawContent() }; drawLayer(layer) }) {
           Shell(startTab)
         }
+        DemoPrompt()
         snap?.let { img ->
           Canvas(Modifier.fillMaxSize().clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {}) {
             val o = ThemeFX.origin.takeIf { it != Offset.Zero } ?: Offset(size.width / 2, 60f)
@@ -165,6 +161,27 @@ fun AtlasRoot(startTab: Int) {
       }
     }
   }
+}
+
+/** first launch: ask once whether to load the sample data (it can be cleared later in 设置) */
+@Composable
+fun DemoPrompt() {
+  var ask by remember { mutableStateOf(false) }
+  LaunchedEffect(Unit) {
+    val prefs = Store.prefs()
+    if (Store.firstRun && !prefs.getBoolean("atlas.demoAsked", false)) {
+      prefs.edit().putBoolean("atlas.demoAsked", true).apply()
+      kotlinx.coroutines.delay(800)
+      ask = true
+    }
+  }
+  if (ask) androidx.compose.material3.AlertDialog(
+    onDismissRequest = { ask = false },
+    title = { Text("先看看示例？") },
+    text = { Text("可以载入一组示例邮箱、手机号和网站，看看用起来的效果。之后随时在右上角「更多」里清除。") },
+    confirmButton = { androidx.compose.material3.TextButton({ ask = false; Store.loadDemo() }) { Text("载入示例数据") } },
+    dismissButton = { androidx.compose.material3.TextButton({ ask = false }) { Text("不用了，直接开始") } },
+  )
 }
 
 @Composable

@@ -42,19 +42,21 @@ struct SettingsSheet: View {
         Section {
           Button { doc = BackupDoc(data: store.backupJSON()); exporting = true } label: { Label("导出备份", systemImage: "square.and.arrow.up") }
           Button { importing = true } label: { Label("导入备份", systemImage: "square.and.arrow.down") }
-          if !sync.on {
-            Button { store.mutate("已载入示例") { s in s = Store.demo() }; store.data.demo = true; store.persist(); store.setKind("email") } label: { Label("载入示例", systemImage: "text.badge.plus") }
+          if store.hasDemo {
+            Button(role: .destructive) { store.clearDemo() } label: { Label("清除示例数据", systemImage: "xmark.bin") }
+          } else if !sync.on {
+            Button { store.loadDemo() } label: { Label("载入示例", systemImage: "text.badge.plus") }
           }
         } footer: { Text("备份是 JSON 文件，和网页版通用。") }
         Section {
-          Link(destination: URL(string: "https://github.com/Ckxkx/account-atlas/releases/latest")!) {
+          Link(destination: URL(string: "https://wwbsj.lanzoup.com/b01i61djvg")!) {
             HStack {
               Label("下载新版本", systemImage: "arrow.up.forward.app")
               Spacer()
               Text((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { "当前 " + $0 } ?? "").foregroundStyle(.secondary)
             }
           }
-        } footer: { Text("在 GitHub Releases 下载，直接覆盖安装，数据不会丢失。") }
+        } footer: { Text("在蓝奏云下载，密码 bteg。直接覆盖安装，数据不会丢失。") }
         Section {
           Button(role: .destructive) { askWipe = true } label: { Label("清空全部数据", systemImage: "trash") }
         }

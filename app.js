@@ -26,15 +26,17 @@
     '#3a3a3c': ['曜石', '#76767c 0%, #3a3a3c 46%, #0d0d10 100%'],
   };
   const COLORS = Object.keys(SKINS).slice(0, 10);   // the palette; provider skins are added for login cards
-  // 微信 / Apple 登录卡: provider name, default key colour (with its own skin), field label and placeholder
+  // 微信 / QQ / Apple 登录卡: provider name, default key colour (with its own skin), field label and placeholder
   const LOGIN = {
     wechat: { name: '微信', color: '#07c160', field: '微信号', ph: 'wxid 或自定义微信号' },
+    qq: { name: 'QQ', color: '#12b7f5', field: 'QQ 号', ph: 'QQ 号或 QQ 邮箱' },
     apple: { name: 'Apple 账户', short: 'Apple', color: '#1d1d1f', field: 'Apple ID', ph: 'name@icloud.com 或手机号' },
   };
   SKINS['#07c160'] = ['微信绿', '#7ee8a2 0%, #07c160 46%, #05785a 100%'];
+  SKINS['#12b7f5'] = ['QQ 蓝', '#8fe3ff 0%, #12b7f5 46%, #0a6fb8 100%'];
   SKINS['#1d1d1f'] = ['石墨', '#c9ccd3 0%, #6e7079 34%, #2c2c30 68%, #111113 100%'];
   const KINDS = ['email', 'phone', 'login'];
-  const provOf = i => i.provider === 'apple' ? 'apple' : 'wechat';
+  const provOf = i => i.provider === 'apple' || i.provider === 'qq' ? i.provider : 'wechat';
   const typeName = i => i.type === 'login' ? LOGIN[provOf(i)].name : i.type === 'phone' ? '手机号' : '邮箱';
   const skin = c => `linear-gradient(145deg, ${SKINS[c] ? SKINS[c][1] : `color-mix(in srgb, ${c} 70%, #fff) 0%, ${c} 50%, color-mix(in srgb, ${c} 70%, #000) 100%`})`;
   const CATS = ['社交', '购物', '支付金融', '开发', 'AI', '娱乐', '游戏', '出行', '工具', '加密', '其他'];
@@ -69,9 +71,434 @@
     ['Canva', 'canva.com', '工具', '#00c4cc'], ['Coinbase', 'coinbase.com', '加密', '#0052ff'], ['Bybit', 'bybit.com', '加密', '#f7a600'], ['Bitget', 'bitget.com', '加密', '#00f0ff'],
     ['Uber', 'uber.com', '出行', '#2b2b2b'], ['Airbnb', 'airbnb.com', '出行', '#ff385c'], ['Booking', 'booking.com', '出行', '#003580'], ['Visa', 'visa.com', '支付金融', '#1a1f71'],
   ];
+  // more sites and games, only for search (not in the picker's categories): users type a name, we fill in the domain.
+  // generated from tools/sites.tsv by tools/sites.py; rows are [name, domain, category, '', '', aliases]
+  // SITES:BEGIN
+  const SITES = `原神|ys.mihoyo.com|游戏|genshin impact ys yuanshen hoyoverse
+崩坏：星穹铁道|sr.mihoyo.com|游戏|星铁 honkai star rail xqtd 崩铁
+绝区零|zzz.mihoyo.com|游戏|zenless zone zero zzz
+崩坏3|bh3.mihoyo.com|游戏|honkai impact 崩坏三
+米游社|miyoushe.com|游戏|mys
+HoYoLAB|hoyolab.com|游戏|hoyoverse
+王者荣耀|pvp.qq.com|游戏|wzry honor of kings 农药
+和平精英|gp.qq.com|游戏|hpjy 吃鸡
+英雄联盟|lol.qq.com|游戏|lol league of legends 撸啊撸
+英雄联盟手游|lolm.qq.com|游戏|lol wild rift
+穿越火线|cf.qq.com|游戏|cf crossfire
+地下城与勇士|dnf.qq.com|游戏|dnf
+QQ 飞车|speed.qq.com|游戏|qq飞车
+金铲铲之战|jcc.qq.com|游戏|jcc 云顶
+无畏契约|val.qq.com|游戏|valorant 瓦罗兰特 瓦
+三角洲行动|df.qq.com|游戏|delta force sjz
+火影忍者手游|huoying.qq.com|游戏|naruto
+天涯明月刀|wuxia.qq.com|游戏|天刀
+WeGame|wegame.com.cn|游戏|腾讯游戏平台
+蛋仔派对|party.163.com|游戏|eggy party dzpd
+阴阳师|yys.163.com|游戏|onmyoji
+第五人格|id5.163.com|游戏|identity v
+梦幻西游|xyq.163.com|游戏|mhxy
+逆水寒|n.163.com|游戏|nsh
+永劫无间|yjwujian.cn|游戏|naraka
+我的世界（中国版）|mc.163.com|游戏|minecraft 网易我的世界 mc
+网易大神|ds.163.com|游戏|
+明日方舟|ak.hypergryph.com|游戏|arknights 方舟 mrfz
+鸣潮|mc.kurogames.com|游戏|wuthering waves mingchao
+剑网3|jx3.xoyo.com|游戏|剑侠情缘 jx3
+TapTap|taptap.cn|游戏|
+4399|4399.com|游戏|4399小游戏
+小黑盒|xiaoheihe.cn|游戏|
+哔哩哔哩游戏|game.bilibili.com|游戏|b站游戏
+Roblox|roblox.com|游戏|罗布乐思
+Minecraft|minecraft.net|游戏|我的世界 mojang
+Fortnite|fortnite.com|游戏|堡垒之夜
+Riot Games|riotgames.com|游戏|拳头
+VALORANT|playvalorant.com|游戏|瓦罗兰特 无畏契约国际服
+League of Legends|leagueoflegends.com|游戏|lol 英雄联盟外服
+Battle.net|battle.net|游戏|战网 暴雪 blizzard
+Blizzard|blizzard.com|游戏|暴雪
+EA|ea.com|游戏|electronic arts origin
+Ubisoft|ubisoft.com|游戏|育碧 uplay
+Rockstar Games|rockstargames.com|游戏|r星 gta
+GOG|gog.com|游戏|
+itch.io|itch.io|游戏|
+Humble Bundle|humblebundle.com|游戏|
+PUBG|pubg.com|游戏|绝地求生 吃鸡
+Counter-Strike|counter-strike.net|游戏|cs2 csgo
+Dota 2|dota2.com|游戏|刀塔
+Supercell|supercell.com|游戏|部落冲突 皇室战争 荒野乱斗 clash
+Garena|garena.com|游戏|
+Pokémon GO|pokemongolive.com|游戏|pokemon 宝可梦
+Final Fantasy XIV|finalfantasyxiv.com|游戏|ff14 最终幻想14
+Square Enix|square-enix.com|游戏|史克威尔
+Chess.com|chess.com|游戏|国际象棋
+Lichess|lichess.org|游戏|
+QQ 空间|qzone.qq.com|社交|qzone
+百度贴吧|tieba.baidu.com|社交|贴吧 tieba
+虎扑|hupu.com|社交|
+即刻|okjike.com|社交|jike
+陌陌|immomo.com|社交|momo
+探探|tantanapp.com|社交|tantan
+Soul|soulapp.cn|社交|
+脉脉|maimai.cn|社交|
+Snapchat|snapchat.com|社交|
+Pinterest|pinterest.com|社交|
+Threads|threads.com|社交|
+Bluesky|bsky.app|社交|
+Mastodon|joinmastodon.org|社交|长毛象
+LINE|line.me|社交|
+KakaoTalk|kakao.com|社交|kakao
+Signal|signal.org|社交|
+Viber|viber.com|社交|
+Messenger|messenger.com|社交|facebook messenger
+Tumblr|tumblr.com|社交|汤不热
+Quora|quora.com|社交|
+Medium|medium.com|社交|
+Substack|substack.com|社交|
+VK|vk.com|社交|vkontakte
+Tinder|tinder.com|社交|
+Bumble|bumble.com|社交|
+Lemon8|lemon8-app.com|社交|
+虎牙直播|huya.com|娱乐|huya
+斗鱼直播|douyu.com|娱乐|douyu
+西瓜视频|ixigua.com|娱乐|
+今日头条|toutiao.com|娱乐|头条
+芒果TV|mgtv.com|娱乐|
+搜狐视频|tv.sohu.com|娱乐|
+咪咕视频|miguvideo.com|娱乐|migu
+AcFun|acfun.cn|娱乐|a站
+酷狗音乐|kugou.com|娱乐|kugou
+酷我音乐|kuwo.cn|娱乐|kuwo
+番茄小说|fanqienovel.com|娱乐|
+起点中文网|qidian.com|娱乐|起点读书
+晋江文学城|jjwxc.net|娱乐|晋江
+微信读书|weread.qq.com|娱乐|weread
+掌阅|ireader.com|娱乐|
+得到|dedao.cn|娱乐|
+蜻蜓FM|qingting.fm|娱乐|
+荔枝|lizhi.fm|娱乐|
+小宇宙|xiaoyuzhoufm.com|娱乐|播客
+Apple Music|music.apple.com|娱乐|
+YouTube Music|music.youtube.com|娱乐|
+SoundCloud|soundcloud.com|娱乐|
+Disney+|disneyplus.com|娱乐|迪士尼
+HBO Max|hbomax.com|娱乐|max hbo
+Hulu|hulu.com|娱乐|
+Prime Video|primevideo.com|娱乐|amazon prime
+Crunchyroll|crunchyroll.com|娱乐|
+pixiv|pixiv.net|娱乐|p站
+niconico|nicovideo.jp|娱乐|n站 nico
+Vimeo|vimeo.com|娱乐|
+Patreon|patreon.com|娱乐|
+Audible|audible.com|娱乐|
+Goodreads|goodreads.com|娱乐|
+天猫|tmall.com|购物|tmall
+苏宁易购|suning.com|购物|苏宁
+当当|dangdang.com|购物|
+1688|1688.com|购物|阿里巴巴
+盒马|freshhema.com|购物|hema
+叮咚买菜|100.me|购物|
+山姆会员商店|samsclub.cn|购物|sam 山姆
+Costco|costco.com|购物|开市客
+小米|mi.com|购物|小米商城 小米账号 xiaomi
+华为商城|vmall.com|购物|
+转转|zhuanzhuan.com|购物|
+识货|shihuo.cn|购物|
+网易严选|you.163.com|购物|
+eBay|ebay.com|购物|
+AliExpress|aliexpress.com|购物|速卖通
+Temu|temu.com|购物|
+SHEIN|shein.com|购物|希音
+Etsy|etsy.com|购物|
+Walmart|walmart.com|购物|沃尔玛
+Target|target.com|购物|
+Best Buy|bestbuy.com|购物|
+IKEA|ikea.com|购物|宜家
+UNIQLO|uniqlo.com|购物|优衣库
+Nike|nike.com|购物|耐克
+adidas|adidas.com|购物|阿迪达斯
+Rakuten|rakuten.co.jp|购物|乐天
+Mercari|mercari.com|购物|煤炉
+Shopee|shopee.com|购物|虾皮
+Lazada|lazada.com|购物|
+微信支付|pay.weixin.qq.com|支付金融|wechat pay
+京东金融|jr.jd.com|支付金融|
+中国银行|boc.cn|支付金融|boc 中行
+工商银行|icbc.com.cn|支付金融|icbc 工行
+建设银行|ccb.com|支付金融|ccb 建行
+农业银行|abchina.com|支付金融|abc 农行
+交通银行|bankcomm.com|支付金融|交行
+邮储银行|psbc.com|支付金融|邮政储蓄
+浦发银行|spdb.com.cn|支付金融|
+中信银行|citicbank.com|支付金融|
+平安银行|bank.pingan.com|支付金融|
+兴业银行|cib.com.cn|支付金融|
+民生银行|cmbc.com.cn|支付金融|
+光大银行|cebbank.com|支付金融|
+广发银行|cgbchina.com.cn|支付金融|
+微众银行|webank.com|支付金融|
+网商银行|mybank.cn|支付金融|
+东方财富|eastmoney.com|支付金融|
+同花顺|10jqka.com.cn|支付金融|
+雪球|xueqiu.com|支付金融|
+富途牛牛|futunn.com|支付金融|futu moomoo
+老虎证券|itiger.com|支付金融|tiger
+天天基金|1234567.com.cn|支付金融|
+中国平安|pingan.com|支付金融|
+个人所得税|etax.chinatax.gov.cn|支付金融|个税
+Wise|wise.com|支付金融|transferwise
+Revolut|revolut.com|支付金融|
+Stripe|stripe.com|支付金融|
+Robinhood|robinhood.com|支付金融|
+Interactive Brokers|interactivebrokers.com|支付金融|ibkr 盈透
+Charles Schwab|schwab.com|支付金融|嘉信
+Mastercard|mastercard.com|支付金融|万事达
+American Express|americanexpress.com|支付金融|amex 运通
+Venmo|venmo.com|支付金融|
+Cash App|cash.app|支付金融|
+Payoneer|payoneer.com|支付金融|派安盈
+HSBC|hsbc.com|支付金融|汇丰
+GitLab|gitlab.com|开发|
+Bitbucket|bitbucket.org|开发|
+Stack Overflow|stackoverflow.com|开发|
+LeetCode|leetcode.com|开发|
+力扣|leetcode.cn|开发|leetcode
+牛客网|nowcoder.com|开发|
+CSDN|csdn.net|开发|
+稀土掘金|juejin.cn|开发|掘金
+博客园|cnblogs.com|开发|
+V2EX|v2ex.com|开发|
+SegmentFault|segmentfault.com|开发|思否
+AWS|aws.amazon.com|开发|amazon web services 亚马逊云
+Google Cloud|cloud.google.com|开发|gcp
+Azure|azure.microsoft.com|开发|
+Firebase|firebase.google.com|开发|
+Netlify|netlify.com|开发|
+Heroku|heroku.com|开发|
+DigitalOcean|digitalocean.com|开发|
+Vultr|vultr.com|开发|
+Linode|linode.com|开发|akamai
+Railway|railway.com|开发|
+Render|render.com|开发|
+Fly.io|fly.io|开发|
+Supabase|supabase.com|开发|
+MongoDB|mongodb.com|开发|
+Atlassian|atlassian.com|开发|jira confluence
+JetBrains|jetbrains.com|开发|idea pycharm
+Postman|postman.com|开发|
+Kaggle|kaggle.com|开发|
+Replit|replit.com|开发|
+CodePen|codepen.io|开发|
+PyPI|pypi.org|开发|
+Sentry|sentry.io|开发|
+Apple Developer|developer.apple.com|开发|苹果开发者
+Google Play Console|play.google.com|开发|google play
+微信公众平台|mp.weixin.qq.com|开发|公众号 小程序
+微信开放平台|open.weixin.qq.com|开发|
+华为云|huaweicloud.com|开发|
+百度智能云|cloud.baidu.com|开发|
+火山引擎|volcengine.com|开发|
+七牛云|qiniu.com|开发|
+又拍云|upyun.com|开发|
+京东云|jdcloud.com|开发|
+宝塔面板|bt.cn|开发|
+GitCode|gitcode.com|开发|
+魔搭社区|modelscope.cn|开发|modelscope
+Namecheap|namecheap.com|开发|域名
+GoDaddy|godaddy.com|开发|域名
+Porkbun|porkbun.com|开发|域名
+Grok|grok.com|AI|xai
+Copilot|copilot.microsoft.com|AI|microsoft copilot
+Mistral|mistral.ai|AI|le chat
+Character.AI|character.ai|AI|
+腾讯元宝|yuanbao.tencent.com|AI|元宝
+秘塔AI搜索|metaso.cn|AI|秘塔
+海螺AI|hailuoai.com|AI|minimax
+MiniMax|minimaxi.com|AI|
+可灵AI|klingai.com|AI|kling
+即梦AI|jimeng.jianying.com|AI|
+讯飞星火|xinghuo.xfyun.cn|AI|讯飞 spark
+天工AI|tiangong.cn|AI|
+硅基流动|siliconflow.cn|AI|siliconflow
+OpenAI Platform|platform.openai.com|AI|openai api
+Anthropic Console|console.anthropic.com|AI|claude api
+Google AI Studio|aistudio.google.com|AI|gemini api
+NotebookLM|notebooklm.google.com|AI|
+Runway|runwayml.com|AI|
+Suno|suno.com|AI|
+ElevenLabs|elevenlabs.io|AI|
+Leonardo.Ai|leonardo.ai|AI|
+Windsurf|windsurf.com|AI|codeium
+Trae|trae.ai|AI|
+Manus|manus.im|AI|
+Lovable|lovable.dev|AI|
+v0|v0.app|AI|vercel v0
+Bolt|bolt.new|AI|
+Gmail|mail.google.com|工具|谷歌邮箱 google mail
+Yahoo|yahoo.com|工具|雅虎 yahoo mail
+Proton|proton.me|工具|protonmail
+126 邮箱|mail.126.com|工具|网易126
+新浪邮箱|mail.sina.com.cn|工具|
+139 邮箱|mail.10086.cn|工具|移动邮箱
+印象笔记|yinxiang.com|工具|
+Evernote|evernote.com|工具|
+有道云笔记|note.youdao.com|工具|
+网易有道|youdao.com|工具|有道词典
+语雀|yuque.com|工具|
+石墨文档|shimo.im|工具|
+腾讯文档|docs.qq.com|工具|
+金山文档|kdocs.cn|工具|
+坚果云|jianguoyun.com|工具|
+115 网盘|115.com|工具|
+天翼云盘|cloud.189.cn|工具|
+中国移动云盘|yun.139.com|工具|和彩云
+蓝奏云|woozooo.com|工具|lanzou 蓝奏
+迅雷|xunlei.com|工具|thunder
+微云|weiyun.com|工具|
+OneDrive|onedrive.live.com|工具|
+Google Drive|drive.google.com|工具|谷歌云盘
+MEGA|mega.nz|工具|
+Box|box.com|工具|
+1Password|1password.com|工具|
+Bitwarden|bitwarden.com|工具|
+LastPass|lastpass.com|工具|
+Todoist|todoist.com|工具|
+Trello|trello.com|工具|
+Asana|asana.com|工具|
+Miro|miro.com|工具|
+Obsidian|obsidian.md|工具|
+Grammarly|grammarly.com|工具|
+DeepL|deepl.com|工具|
+Adobe|adobe.com|工具|photoshop acrobat
+剪映|jianying.com|工具|
+CapCut|capcut.com|工具|剪映国际版
+美图秀秀|meitu.com|工具|
+稿定设计|gaoding.com|工具|
+墨刀|modao.cc|工具|
+即时设计|js.design|工具|
+MasterGo|mastergo.com|工具|
+Microsoft Teams|teams.microsoft.com|工具|teams
+Google Meet|meet.google.com|工具|
+Webex|webex.com|工具|
+Calendly|calendly.com|工具|
+Linktree|linktr.ee|工具|
+中国知网|cnki.net|工具|知网 cnki
+学习通|chaoxing.com|工具|超星
+中国大学MOOC|icourse163.org|工具|慕课 mooc
+学堂在线|xuetangx.com|工具|
+雨课堂|yuketang.cn|工具|
+智慧树|zhihuishu.com|工具|
+学信网|chsi.com.cn|工具|学籍 学历
+Coursera|coursera.org|工具|
+edX|edx.org|工具|
+Udemy|udemy.com|工具|
+Khan Academy|khanacademy.org|工具|可汗学院
+多邻国|duolingo.com|工具|duolingo
+扇贝|shanbay.com|工具|
+百词斩|baicizhan.com|工具|
+作业帮|zybang.com|工具|
+Quizlet|quizlet.com|工具|
+国家政务服务平台|gjzwfw.gov.cn|工具|政务
+交管12123|gab.122.gov.cn|工具|12123 驾照
+中国移动|10086.cn|工具|移动
+中国联通|10010.com|工具|联通
+中国电信|189.cn|工具|电信
+华为账号|huawei.com|工具|华为 huawei
+荣耀|honor.com|工具|honor
+OPPO|oppo.com|工具|
+vivo|vivo.com.cn|工具|
+Samsung|samsung.com|工具|三星
+360|360.cn|工具|
+维基百科|wikipedia.org|工具|wikipedia
+必应|bing.com|工具|bing
+DuckDuckGo|duckduckgo.com|工具|
+Yandex|yandex.com|工具|
+Firefox|mozilla.org|工具|火狐 mozilla
+Brave|brave.com|工具|
+Opera|opera.com|工具|
+哈啰|hellobike.com|出行|哈啰单车 hello
+航旅纵横|umetrip.com|出行|
+中国国航|airchina.com.cn|出行|国航 air china
+东方航空|ceair.com|出行|东航
+南方航空|csair.com|出行|南航
+海南航空|hainanairlines.com|出行|海航
+春秋航空|ch.com|出行|
+吉祥航空|juneyaoair.com|出行|
+四川航空|sichuanair.com|出行|川航
+厦门航空|xiamenair.com|出行|厦航
+同程旅行|ly.com|出行|同程
+途牛|tuniu.com|出行|
+马蜂窝|mafengwo.cn|出行|
+百度地图|map.baidu.com|出行|
+腾讯地图|map.qq.com|出行|
+Google Maps|maps.google.com|出行|谷歌地图
+华住会|huazhu.com|出行|汉庭 全季
+锦江|jinjiang.com|出行|锦江酒店
+万豪|marriott.com|出行|marriott bonvoy
+希尔顿|hilton.com|出行|hilton
+洲际|ihg.com|出行|ihg
+凯悦|hyatt.com|出行|hyatt
+雅高|accor.com|出行|accor
+Expedia|expedia.com|出行|
+Agoda|agoda.com|出行|
+Trip.com|trip.com|出行|携程国际版
+Skyscanner|skyscanner.net|出行|天巡
+Hotels.com|hotels.com|出行|
+Tripadvisor|tripadvisor.com|出行|猫途鹰
+Grab|grab.com|出行|
+Lyft|lyft.com|出行|
+曹操出行|caocaokeji.cn|出行|
+T3出行|t3go.cn|出行|
+货拉拉|huolala.cn|出行|
+顺丰|sf-express.com|出行|sf
+菜鸟|cainiao.com|出行|
+京东物流|jdl.com|出行|
+中国邮政|chinapost.com.cn|出行|邮政 ems
+中通快递|zto.com|出行|中通
+圆通速递|yto.net.cn|出行|圆通
+韵达快递|yundaex.com|出行|韵达
+申通快递|sto.cn|出行|申通
+DHL|dhl.com|出行|
+FedEx|fedex.com|出行|联邦快递
+UPS|ups.com|出行|
+Delta|delta.com|出行|达美
+United Airlines|united.com|出行|美联航
+American Airlines|aa.com|出行|美航
+Emirates|emirates.com|出行|阿联酋航空
+Cathay Pacific|cathaypacific.com|出行|国泰
+Singapore Airlines|singaporeair.com|出行|新加坡航空 新航
+ANA|ana.co.jp|出行|全日空
+JAL|jal.co.jp|出行|日航
+肯德基|kfc.com.cn|其他|kfc
+麦当劳|mcdonalds.com.cn|其他|mcdonald 金拱门
+星巴克|starbucks.com.cn|其他|starbucks
+瑞幸咖啡|luckincoffee.com|其他|瑞幸 luckin
+喜茶|heytea.com|其他|heytea
+蜜雪冰城|mxbc.com|其他|
+霸王茶姬|chagee.com|其他|
+必胜客|pizzahut.com.cn|其他|
+海底捞|haidilao.com|其他|
+Uber Eats|ubereats.com|其他|
+DoorDash|doordash.com|其他|
+Kraken|kraken.com|加密|
+KuCoin|kucoin.com|加密|
+Gate|gate.com|加密|gate.io
+HTX|htx.com|加密|火币 huobi
+MEXC|mexc.com|加密|抹茶
+Crypto.com|crypto.com|加密|
+Trust Wallet|trustwallet.com|加密|
+Phantom|phantom.com|加密|
+Ledger|ledger.com|加密|
+imToken|token.im|加密|
+TokenPocket|tokenpocket.pro|加密|tp钱包
+Uniswap|uniswap.org|加密|
+OpenSea|opensea.io|加密|
+Etherscan|etherscan.io|加密|`.split('\n').map(l => { const [n, d, c, a] = l.split('|'); return [n, d, c, '', '', a || '']; });
+  // SITES:END
   // the ones most people have, shown first in the picker
   // apps the user typed in by hand are remembered and show up in the picker
   const isPreset = n => PRESETS.some(p => p[0].toLowerCase() === n.toLowerCase());
+  // search match: name or domain contains the query, or an alias starts with it (SITES rows carry aliases at [5])
+  const siteHit = (p, q) => p[0].toLowerCase().includes(q) || (p[1] || '').includes(q) || (p[5] ? (' ' + p[5]).includes(' ' + q) : false);
   const readList = k => { try { const v = JSON.parse(localStorage.getItem(k) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
   // apps removed from 我添加的 (lowercase names); local only, not synced
   const hiddenApps = () => new Set(readList('atlas.custom.hidden').map(x => String(x).toLowerCase()));
@@ -121,10 +548,38 @@
       delete state.deleted[x.id];
     }
     for (const id of seen.keys()) if (!live.has(id)) state.deleted[id] = now;
+    // "pure demo" only while nothing but the sample cards is on the device
+    if (state.demo) { const d = new Set(readList(DEMO_KEY)); if ([...live].some(id => !d.has(id))) delete state.demo; }
     remember();
     localStorage.setItem(KEY, JSON.stringify(state));
     Sync.schedule();
   };
+
+  // sample data is opt-in: its ids are kept on this device so 「清除示例数据」 removes only them
+  const DEMO_KEY = 'atlas.demoIds';
+  const demoIdSet = () => state.demo ? new Set([...state.identities, ...state.accounts].map(x => x.id)) : new Set(readList(DEMO_KEY));
+  const hasDemo = () => { const d = demoIdSet(); return [...state.identities, ...state.accounts].some(x => d.has(x.id)); };
+  function loadDemo() {
+    snap();
+    const d = demo(), fresh = !state.identities.length && !state.accounts.length;
+    localStorage.setItem(DEMO_KEY, JSON.stringify([...d.identities, ...d.accounts].map(x => x.id)));
+    state.identities.push(...d.identities); state.accounts.push(...d.accounts);
+    if (fresh) state.demo = true;
+    save(); setKind('email'); render(); undoToast('已载入示例，可在右上角「更多」里清除');
+  }
+  function clearDemo() {
+    const d = demoIdSet(); snap();
+    state.identities = state.identities.filter(i => !d.has(i.id)).map(i => i.via && d.has(i.via) ? (({ via, ...r }) => r)(i) : i);
+    state.accounts = state.accounts.filter(a => !d.has(a.id)).map(a => a.identityIds.some(x => d.has(x)) ? { ...a, identityIds: a.identityIds.filter(x => !d.has(x)) } : a);
+    delete state.demo;
+    save(); setKind(ui.kind); render(); undoToast('已清除示例数据');
+  }
+  function askDemo() {
+    localStorage.setItem('atlas.demoAsked', '1');
+    openSheet(`<div class="sheet-body"><div class="alert"><h3>先看看示例？</h3><p>可以载入一组示例邮箱、手机号和网站，看看用起来的效果。之后随时在右上角「更多」里清除。</p></div>
+      <div class="alert-actions"><button id="dYes" style="font-weight:600">载入示例数据</button><button data-close>不用了，直接开始</button></div></div>`, { kind: 'confirm' });
+    setTimeout(() => { $('#dYes').onclick = () => { closeSheet(); loadDemo(); }; }, 0);
+  }
 
   function demo() {
     const ids = [
@@ -154,7 +609,7 @@
     };
   }
 
-  // the wallet shows one kind at a time: emails, phone numbers, or 微信 / Apple login cards
+  // the wallet shows one kind at a time: emails, phone numbers, or 微信 / QQ / Apple login cards
   const deck = () => state.identities.filter(i => i.type === ui.kind);
   const cur = () => deck()[ui.active];
   function setKind(k, focusId) {
@@ -225,6 +680,7 @@
     check: '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
     login: '<svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M21 12v2"/></svg>',
     wechat: '<svg viewBox="0 0 24 24"><path d="M9.5 4C5.4 4 2.5 6.6 2.5 9.8c0 1.8 1 3.4 2.5 4.5l-.6 2.2 2.6-1.4c.8.2 1.6.3 2.5.3h.4"/><path d="M15.3 9.3c-3.4 0-6.1 2.3-6.1 5.1s2.7 5.1 6.1 5.1c.7 0 1.4-.1 2-.3l2.2 1.2-.5-1.9c1.5-.9 2.4-2.4 2.4-4.1 0-2.8-2.7-5.1-6.1-5.1Z"/><circle class="f" cx="7" cy="8.6" r=".9"/><circle class="f" cx="11.4" cy="8.6" r=".9"/><circle class="f" cx="13.4" cy="13.8" r=".8"/><circle class="f" cx="17.2" cy="13.8" r=".8"/></svg>',
+    qq: '<svg viewBox="0 0 24 24"><path d="M12 2.8c-3.3 0-5.6 2.6-5.6 6 0 .8.1 1.5.3 2.1-1.1 1.4-2.2 3.3-2.2 5 0 .9.4 1.3 1 .9.5-.3 1-.9 1.3-1.5.3 1.2 1 2.3 1.8 3.1-1 .4-1.9 1-1.9 1.6 0 .8 1.6 1.2 3.4 1.2 1.1 0 2-.2 2.6-.5h.6c.6.3 1.5.5 2.6.5 1.8 0 3.4-.4 3.4-1.2 0-.6-.9-1.2-1.9-1.6.8-.8 1.5-1.9 1.8-3.1.3.6.8 1.2 1.3 1.5.6.4 1 0 1-.9 0-1.7-1.1-3.6-2.2-5 .2-.6.3-1.3.3-2.1 0-3.4-2.3-6-5.6-6Z"/><circle class="f" cx="10" cy="8.2" r=".9"/><circle class="f" cx="14" cy="8.2" r=".9"/><path d="M8.6 11.6c2.2 1 4.6 1 6.8 0"/></svg>',
     apple: '<svg viewBox="0 0 24 24"><path class="f" d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.2 1-4 2.5-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.1-1.2 2.9-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.4-.9-2.4-4ZM14 5.3c.7-.8 1.1-1.9 1-3-.9 0-2.1.6-2.8 1.4-.6.7-1.2 1.8-1 2.9 1.1.1 2.1-.5 2.8-1.3Z"/></svg>',
   };
   const idGlyph = i => i.type === 'login' ? ICON[provOf(i)] : ICON[i.type] || ICON.login;
@@ -306,12 +762,14 @@
     $('#summary').textContent = state.identities.length || a ? `${e} 个邮箱、${p} 个手机号${l ? `、${l} 个登录账号` : ''}，关联着 ${a} 个网站与 App` : '先添加一个邮箱或手机号';
     $('#sitesSummary').textContent = a ? `共 ${a} 个` : '';
     document.body.classList.toggle('is-empty', !state.identities.length && !a);
-    const demoBtn = $('#menu [data-act="demo"]'); if (demoBtn) demoBtn.hidden = Sync.on;
+    const demoOn = hasDemo();
+    const demoBtn = $('#menu [data-act="demo"]'); if (demoBtn) demoBtn.hidden = Sync.on || demoOn;
+    const clearBtn = $('#menu [data-act="demoClear"]'); if (clearBtn) clearBtn.hidden = !demoOn;
   }
 
   function renderWallet() {
     const w = $('#wallet');
-    const d = deck(), word = { email: '邮箱', phone: '手机号', login: '微信或 Apple 账号' }[ui.kind];
+    const d = deck(), word = { email: '邮箱', phone: '手机号', login: '微信、QQ 或 Apple 账号' }[ui.kind];
     renderSeg();
     w.innerHTML = d.map(i => walletCard(i)).join('') +
       (state.identities.length ? `<button class="wcard ghost ${ui.kind === 'phone' ? 'sim' : ''}" data-new="identity" data-type="${ui.kind}"><div>${ICON.plus}添加${word}</div></button>`
@@ -630,7 +1088,7 @@
   function showIdentity(id) {
     const i = idById(id); if (!i) return;
     const accs = accountsOf(id), lg = i.type === 'login', via = viaOf(i), bound = lg ? [] : boundTo(id);
-    // sites that sign in with a 微信 / Apple card bound to this number or address
+    // sites that sign in with a 微信 / QQ / Apple card bound to this number or address
     const direct = new Set(accs.map(a => a.id));
     const indirect = bound.map(b => [b, accountsOf(b.id).filter(a => !direct.has(a.id))]).filter(([, l]) => l.length);
     const idCell = (x, title) => `<button class="cell" data-identity="${x.id}">${idIcon(x)}<span class="cell-main"><span class="cell-title">${esc(title)}</span><span class="cell-sub">${esc(x.label ? x.label + ' · ' + display(x) : display(x))}</span></span>${ICON.chev}</button>`;
@@ -689,7 +1147,7 @@
     let touched = !!existing && !(i.type === 'login' && i.color === LOGIN[provider].color);
     const PH = { email: ['地址', 'name@example.com', 'email'], phone: ['号码', '+86 138 0000 0000', 'tel'] };
     const ph = () => type === 'login' ? [LOGIN[provider].field, LOGIN[provider].ph, provider === 'apple' ? 'email' : 'text'] : PH[type];
-    const palette = () => { const p = type === 'login' ? [LOGIN.wechat.color, LOGIN.apple.color, ...COLORS] : [...COLORS]; if (!p.includes(color)) p.unshift(color); return p; };
+    const palette = () => { const p = type === 'login' ? [LOGIN.wechat.color, LOGIN.qq.color, LOGIN.apple.color, ...COLORS] : [...COLORS]; if (!p.includes(color)) p.unshift(color); return p; };
     const colorsHtml = () => palette().map(c => `<button class="color ${c === color ? 'active' : ''}" style="--c:${c};--g:${skin(c)}" data-c="${c}" aria-label="${SKINS[c] ? SKINS[c][0] : c}"><span>${SKINS[c] ? SKINS[c][0] : ''}</span></button>`).join('');
     const viaHtml = () => { const opts = state.identities.filter(x => (x.type === 'email' || x.type === 'phone') && x.id !== existing?.id);
       return `<button class="check-cell ${via ? '' : 'on'}" data-via=""><i style="background:var(--tertiary)"></i><span class="cell-main"><span class="cell-title">不绑定</span></span>${ICON.tick}</button>` +
@@ -699,7 +1157,7 @@
       <div class="sheet-body form">
         <div class="preview" id="preview"></div>
         <div class="seg-inline three" id="typeSeg" style="--k:${KINDS.indexOf(type)}"><span class="thumb"></span><button data-v="email">邮箱</button><button data-v="phone">手机号</button><button data-v="login">登录</button></div>
-        <div id="provBox" ${type === 'login' ? '' : 'hidden'}><div class="prov-pills" id="provPills"><button data-p="wechat" class="${provider === 'wechat' ? 'on' : ''}">${ICON.wechat}微信</button><button data-p="apple" class="${provider === 'apple' ? 'on' : ''}">${ICON.apple}Apple</button></div></div>
+        <div id="provBox" ${type === 'login' ? '' : 'hidden'}><div class="prov-pills" id="provPills"><button data-p="wechat" class="${provider === 'wechat' ? 'on' : ''}">${ICON.wechat}微信</button><button data-p="qq" class="${provider === 'qq' ? 'on' : ''}">${ICON.qq}QQ</button><button data-p="apple" class="${provider === 'apple' ? 'on' : ''}">${ICON.apple}Apple</button></div></div>
         <div class="group" style="margin-top:16px">
           <div class="field" id="valueField"><label id="valueLabel">${l0}</label><input id="fValue" value="${esc(i.value)}" inputmode="${m0}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${p0}"></div>
           <div class="field"><label>标签</label><input id="fLabel" value="${esc(i.label)}" placeholder="主力、小号、工作…"></div>
@@ -744,10 +1202,10 @@
       $('#saveIdentity').onclick = () => {
         const value = $('#fValue').value.trim();
         const isMail = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), digits = v => v.replace(/\D/g, '').length >= 5;
-        const ok = type === 'email' ? isMail(value) : type === 'phone' ? digits(value) : provider === 'wechat' ? value.length >= 1 : isMail(value) || digits(value);
+        const ok = type === 'email' ? isMail(value) : type === 'phone' ? digits(value) : provider === 'wechat' ? value.length >= 1 : provider === 'qq' ? /^\d{5,12}$/.test(value.replace(/\s/g, '')) || isMail(value) : isMail(value) || digits(value);
         if (!ok) {
           const f = $('#valueField'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); $('#fValue').focus();
-          toast(type === 'email' ? '邮箱地址格式不对' : type === 'phone' ? '手机号至少要 5 位数字' : provider === 'wechat' ? '填一下微信号' : 'Apple ID 是邮箱或手机号'); return;
+          toast(type === 'email' ? '邮箱地址格式不对' : type === 'phone' ? '手机号至少要 5 位数字' : provider === 'wechat' ? '填一下微信号' : provider === 'qq' ? 'QQ 号是 5 到 12 位数字，或填 QQ 邮箱' : 'Apple ID 是邮箱或手机号'); return;
         }
         if (state.identities.some(x => x.id !== existing?.id && x.type === type && (type !== 'login' || provOf(x) === provider) && x.value.toLowerCase() === value.toLowerCase())) { toast('这个身份已经添加过了'); return; }
         const data = { type, value, label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim() };
@@ -804,13 +1262,25 @@
     if (!r.ok) throw 0;
     return ((await r.json()).results || []).filter(x => x.trackName && (x.artworkUrl100 || x.artworkUrl512));
   }
+  // 不知道网址: look the name up on Wikidata and take each hit's official website (P856). Free, no key, CORS ok;
+  // unreachable in some regions, which just means no suggestions. Returns [[label, domain], ...].
+  async function siteLookup(q) {
+    const api = 'https://www.wikidata.org/w/api.php?format=json&origin=*&';
+    const r = await fetch(api + `action=wbsearchentities&type=item&language=zh&uselang=zh&limit=6&search=${encodeURIComponent(q)}`);
+    if (!r.ok) throw 0;
+    const hits = ((await r.json()).search || []).slice(0, 3);
+    const got = await Promise.all(hits.map(h => fetch(api + `action=wbgetclaims&property=P856&entity=${h.id}`).then(x => x.ok ? x.json() : {}).catch(() => ({}))
+      .then(j => { const c = (j.claims?.P856 || []).sort((a, b) => (b.rank === 'preferred') - (a.rank === 'preferred'))[0]; const d = cleanDomain(c?.mainsnak?.datavalue?.value || ''); return d ? [h.label || q, d] : null; })));
+    const seen = new Set();
+    return got.filter(x => x && !seen.has(x[1]) && seen.add(x[1])).slice(0, 3);
+  }
   async function storeIcon(url) {
     if (!/^https:\/\/[a-z0-9.-]+\.mzstatic\.com\//.test(url)) throw 0;
     const r = await fetch(url, { mode: 'cors' }); if (!r.ok) throw 0;
     return makeIcon(await r.blob());
   }
 
-  // 选择身份: emails and phone numbers, then 微信 / Apple in their own 第三方登录 group
+  // 选择身份: emails and phone numbers, then 微信 / QQ / Apple in their own 第三方登录 group
   function idPicksHtml(sel, title) {
     const cell = i => `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}">${i.type === 'login' ? `<span class="lg-glyph lg-${provOf(i)}" style="--g:${skin(i.color)}">${idGlyph(i)}</span>` : '<i></i>'}<span class="cell-main"><span class="cell-title">${esc(i.type === 'login' ? (i.label ? `${LOGIN[provOf(i)].name} · ${i.label}` : LOGIN[provOf(i)].name) : i.label || display(i))}</span>${i.type === 'login' || i.label ? `<span class="cell-sub">${esc(display(i))}</span>` : ''}</span>${ICON.tick}</button>`;
     const base = state.identities.filter(i => i.type === 'email' || i.type === 'phone'), lg = state.identities.filter(i => i.type === 'login');
@@ -832,11 +1302,12 @@
           <div class="field" id="nameField"><label>名称</label><input id="aName" value="${esc(a.name)}" placeholder="GitHub、淘宝、微信…" autocomplete="off"></div>
           <div class="suggest" id="suggest"></div>
           <div class="field"><label>账号名</label><input id="aHandle" value="${esc(a.handle || '')}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="选填，用户名、昵称或 UID"></div>
-          <div class="field"><label>网址</label><input id="aDomain" value="${esc(a.domain)}" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="选填，用来显示图标"></div>
+          <div class="field"><label>网址</label><input id="aDomain" value="${esc(a.domain)}" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="选填，用来显示图标；不知道可以不填"></div>
+          <div class="suggest" id="webSuggest"></div>
         </div>
         <p class="hint dup" id="dupHint" hidden></p>
         ${idPicksHtml(sel, '用哪个邮箱或手机号注册、绑定的')}
-        <p class="hint">可以多选，比如用邮箱注册、再绑定手机号；用微信或 Apple 登录的，选下面的登录账号。</p>
+        <p class="hint">可以多选，比如用邮箱注册、再绑定手机号；用微信、QQ 或 Apple 登录的，选下面的登录账号。</p>
         <div class="sec-title">分类</div>
         <div class="group"><div class="cats" id="catPicks">${CATS.map(c => `<button class="${c === cat ? 'active' : ''}" data-c="${c}">${c}</button>`).join('')}</div></div>
         <div class="sec-title">备注</div>
@@ -871,7 +1342,7 @@
         try { const v = await makeIcon(f); if (seq === iconSeq) setIcon(v); } catch { toast('这张图片读不了，换一张试试'); }
       };
       hero();
-      const applyPreset = p => { $('#aName').value = p[0]; $('#aDomain').value = p[1]; setCat(p[2]); store = []; storeQ = ''; $('#suggest').innerHTML = ''; setIcon(p[4] || ''); };
+      const applyPreset = p => { $('#aName').value = p[0]; $('#aDomain').value = p[1]; setCat(p[2]); store = []; storeQ = ''; $('#suggest').innerHTML = ''; $('#webSuggest').innerHTML = ''; setIcon(p[4] || ''); };
       const applyStore = r => {
         $('#aName').value = storeName(r.trackName);
         const host = cleanDomain(r.sellerUrl || ''); if (host) $('#aDomain').value = host;
@@ -883,26 +1354,40 @@
         storeIcon(storeArt(r)).catch(() => storeIcon(r.artworkUrl100)).then(v => { if (seq === iconSeq) setIcon(v); }).catch(() => { if (seq === iconSeq) { $('#aHero').dataset.k = ''; hero(); } });
       };
       let store = [], storeQ = '', storeSeq = 0, storeT;
+      let web = [], webQ = '', webSeq = 0, webT;   // official sites found online for a name we don't know
+      const webDraw = () => {
+        const q = $('#aName').value.trim().toLowerCase(), box = $('#webSuggest');
+        const show = q && webQ === q && web.length && !cleanDomain($('#aDomain').value);
+        box.innerHTML = show ? `<span class="suggest-h">官网</span>` + web.map(([l, d], i) => `<button data-w="${i}">${favIcon({ name: l, domain: d })}${esc(d)}</button>`).join('') : '';
+        $$('#webSuggest button').forEach(b => b.onclick = () => { $('#aDomain').value = web[b.dataset.w][1]; box.innerHTML = ''; hero(); });
+      };
       const suggest = () => {
         const raw = $('#aName').value.trim(), q = raw.toLowerCase();
-        const ALL = [...PRESETS, ...myApps()];
-        const exact = ALL.find(p => p[0].toLowerCase() === q);
+        const ALL = [...PRESETS, ...myApps()], names = new Set(ALL.map(p => p[0].toLowerCase()));
+        const POOL = [...ALL, ...SITES.filter(p => !names.has(p[0].toLowerCase()))];
+        const exact = POOL.find(p => p[0].toLowerCase() === q);
         if (exact) { if (!$('#aDomain').value) $('#aDomain').value = exact[1]; setCat(exact[2]); hero(); }
-        const list = q && !exact ? ALL.filter(p => p[0].toLowerCase().includes(q) || p[1].includes(q)).slice(0, 8) : [];
+        const list = q && !exact ? POOL.filter(p => siteHit(p, q)).slice(0, 8) : [];
         const shown = new Set(list.map(p => p[0].toLowerCase())), seen = new Set();
         const apps = q && !exact && storeQ === q ? store.filter(r => { const n = storeName(r.trackName).toLowerCase(); if (shown.has(n) || shown.has(r.trackName.toLowerCase()) || seen.has(r.trackId)) return false; seen.add(r.trackId); return true; }) : [];
-        $('#suggest').innerHTML = list.map(p => `<button data-k="${ALL.indexOf(p)}">${favIcon({ name: p[0], domain: p[1], icon: p[4] })}${esc(p[0])}</button>`).join('') +
+        $('#suggest').innerHTML = list.map(p => `<button data-k="${POOL.indexOf(p)}">${favIcon({ name: p[0], domain: p[1], icon: p[4] })}${esc(p[0])}</button>`).join('') +
           (apps.length ? `<span class="suggest-h">App Store</span>` + apps.map(r => `<button data-s="${store.indexOf(r)}"><span class="icon fav full"><img alt="" loading="lazy" decoding="async" width="64" height="64" src="${esc(r.artworkUrl100 || storeArt(r))}"></span>${esc(storeName(r.trackName))}</button>`).join('') : '');
-        $$('#suggest button').forEach(b => b.onclick = () => b.dataset.s !== undefined ? applyStore(store[b.dataset.s]) : applyPreset(ALL[b.dataset.k]));
+        $$('#suggest button').forEach(b => b.onclick = () => b.dataset.s !== undefined ? applyStore(store[b.dataset.s]) : applyPreset(POOL[b.dataset.k]));
         // ask the App Store too (debounced; a newer query wins; offline just means presets only)
         clearTimeout(storeT);
         if (q && !exact && storeQ !== q) {
           const seq = ++storeSeq;
           storeT = setTimeout(() => storeSearch(raw).then(res => { if (seq !== storeSeq || !$('#suggest')) return; store = res; storeQ = q; suggest(); }).catch(() => {}), 350);
         } else if (!q || exact) storeSeq++;
+        // nothing we know by that name and no domain yet: look up its official site (debounced, newest query wins)
+        clearTimeout(webT);
+        const need = q && !exact && !list.length && !cleanDomain($('#aDomain').value);
+        if (need && webQ !== q) { const seq = ++webSeq; webT = setTimeout(() => siteLookup(raw).then(res => { if (seq !== webSeq || !$('#webSuggest')) return; web = res; webQ = q; webDraw(); }).catch(() => {}), 600); }
+        else if (!need) webSeq++;
+        webDraw();
       };
       $('#aName').addEventListener('input', () => { suggest(); hero(); });
-      $('#aDomain').addEventListener('input', hero);
+      $('#aDomain').addEventListener('input', () => { hero(); webDraw(); });
       if (presetName) suggest();
       $('#saveAccount').onclick = () => {
         const name = $('#aName').value.trim();
@@ -920,11 +1405,13 @@
   // ---------- add by picking: tap the apps you use, then say which email or number ----------
   function pickApps(presetId, query = '') {
     if (!state.identities.length) { identityForm(); toast('先添加一个邮箱或手机号'); return; }
-    const ALL = [...PRESETS, ...myApps()], MINE = PRESETS.length;
+    const ALL = [...PRESETS, ...myApps()], MINE = PRESETS.length, BASE = ALL.length;   // SITES (search only), then App Store picks, are appended after BASE
+    { const names = new Set(ALL.map(p => p[0].toLowerCase())); ALL.push(...SITES.filter(p => !names.has(p[0].toLowerCase()))); }
     const chosen = new Set(), handles = {}; let cat = '常用', q = query, open = -1;
+    let store = [], storeQ = '', storeSeq = 0, storeT;   // App Store results for the current search
     const have = name => state.accounts.filter(x => x.name.toLowerCase() === name.toLowerCase()).length;
     let told = false;
-    const gone = new Set(), mine = () => ALL.slice(MINE).some((p, i) => !gone.has(MINE + i));
+    const gone = new Set(), mine = () => ALL.slice(MINE, BASE).some((p, i) => !gone.has(MINE + i));
     const cats = () => ['常用', ...(mine() ? ['我添加的'] : []), ...CATS.filter(c => ALL.some((p, i) => p[2] === c && !gone.has(i)))];
     const catsHtml = () => cats().map(c => `<button data-pc="${c}" class="${c === cat ? 'active' : ''}">${c}</button>`).join('');
     openSheet(`<div class="sheet-bar"><button data-close>取消</button><span class="t" id="pkTitle">选择网站或 App</span><button id="pkNext" disabled>下一步</button></div>
@@ -935,16 +1422,26 @@
       <div class="sheet-body"><div class="pick-grid" id="pkGrid"></div></div>`, { kind: 'form' });
     const draw = () => {
       const ql = q.trim().toLowerCase();
-      let list = ql ? ALL.filter(p => p[0].toLowerCase().includes(ql) || p[1].includes(ql))
+      let list = ql ? ALL.filter(p => siteHit(p, ql)).slice(0, 60)
         : cat === '常用' ? POPULAR.slice(0, 12).map(n => PRESETS.find(p => p[0] === n)).filter(Boolean)
-        : cat === '我添加的' ? ALL.slice(MINE) : ALL.filter(p => p[2] === cat);
+        : cat === '我添加的' ? ALL.slice(MINE, BASE) : ALL.slice(0, BASE).filter(p => p[2] === cat);
       list = list.filter(p => !gone.has(ALL.indexOf(p)));
+      // App Store results for this search, minus apps already shown above
+      const shown = new Set(list.map(p => p[0].toLowerCase()));
+      const apps = ql && storeQ === ql ? store.map((r, i) => [r, i]).filter(([r]) => { const n = storeName(r.trackName).toLowerCase(); if (shown.has(n) || shown.has(r.trackName.toLowerCase())) return false; shown.add(n); return true; }) : [];
       menuOff();
       $('#pkCats').style.display = ql ? 'none' : '';
       const exact = ql && ALL.some(p => p[0].toLowerCase() === ql);
       $('#pkGrid').innerHTML = list.map(p => { const k = ALL.indexOf(p), h = have(p[0]); return `<button class="pk ${chosen.has(k) ? 'on' : ''} ${h ? 'had' : ''}" data-pk="${k}">${favIcon({ name: p[0], domain: p[1], icon: p[4] })}<span>${esc(p[0])}</span>${sub(k, h)}<i class="pk-tick">${ICON.check}</i></button>`; }).join('') +
         (ql && !exact ? `<button class="pk custom" data-pk-custom="${esc(q.trim())}"><span class="icon">${ICON.plus}</span><span>添加“${esc(q.trim())}”</span></button>` : '') +
-        (!ql ? `<button class="pk custom" data-pk-custom=""><span class="icon">${ICON.edit}</span><span>手动添加</span></button>` : '');
+        (!ql ? `<button class="pk custom" data-pk-custom=""><span class="icon">${ICON.edit}</span><span>手动添加</span></button>` : '') +
+        (apps.length ? `<div class="pk-sec">${ICON.apple}App Store</div>` + apps.map(([r, i]) => `<button class="pk" data-pk-store="${i}"><span class="icon fav full"><img alt="" loading="lazy" decoding="async" width="64" height="64" src="${esc(r.artworkUrl100 || storeArt(r))}"></span><span>${esc(storeName(r.trackName))}</span><i class="pk-tick">${ICON.check}</i></button>`).join('') : '');
+      // look the search up on the App Store (debounced), then draw again
+      clearTimeout(storeT);
+      if (ql && !exact && storeQ !== ql) {
+        const seq = ++storeSeq, raw = q.trim();
+        storeT = setTimeout(() => storeSearch(raw).then(res => { if (seq !== storeSeq || !$('#pkGrid')) return; store = res; storeQ = ql; draw(); }).catch(() => {}), 350);
+      } else if (!ql || exact) storeSeq++;
       if (open >= 0) { const t = $(`#pkGrid [data-pk="${open}"]`); t ? expand(t, false) : (open = -1); }
     };
     const sub = (k, h) => handles[k] ? `<small class="hd-on">@${esc(handles[k])}</small>` : h ? `<small>已记 ${h} 个</small>` : '';
@@ -995,7 +1492,7 @@
     // long-press (or right-click) one of your own apps to take it off the list
     const menuOff = () => { const m = $('#pkMenu'); if (!m) return; m.id = ''; m.classList.remove('open'); setTimeout(() => m.remove(), 250); };
     const menuFor = tile => {
-      const k = +tile.dataset.pk; if (k < MINE || gone.has(k)) return;
+      const k = +tile.dataset.pk; if (k < MINE || k >= BASE || gone.has(k)) return;
       menuOff(); navigator.vibrate?.(8);
       const n = have(ALL[k][0]), r = tile.getBoundingClientRect(), m = document.createElement('div');
       m.className = 'icon-menu pk-menu'; m.id = 'pkMenu';
@@ -1043,14 +1540,14 @@
       const grid = $('#pkGrid'), cancelPress = () => { clearTimeout(press); press = 0; };
       grid.addEventListener('pointerdown', e => {
         cancelPress(); pressed = false; if (e.button > 0) return;
-        const b = e.target.closest('[data-pk]'); if (!b || +b.dataset.pk < MINE) return;
+        const b = e.target.closest('[data-pk]'); if (!b || +b.dataset.pk < MINE || +b.dataset.pk >= BASE) return;
         pressAt = [e.clientX, e.clientY];
         press = setTimeout(() => { press = 0; pressed = true; menuFor(b); }, 500);
       });
       grid.addEventListener('pointermove', e => { if (press && Math.hypot(e.clientX - pressAt[0], e.clientY - pressAt[1]) > 10) cancelPress(); });
       ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => grid.addEventListener(t, cancelPress));
       grid.addEventListener('contextmenu', e => {
-        const b = e.target.closest('[data-pk]'); if (!b || +b.dataset.pk < MINE) return;
+        const b = e.target.closest('[data-pk]'); if (!b || +b.dataset.pk < MINE || +b.dataset.pk >= BASE) return;
         e.preventDefault(); if (pressed && $('#pkMenu')) return; cancelPress(); menuFor(b);
       });
       const offMenu = e => { if (!$('#pkGrid')) { document.removeEventListener('pointerdown', offMenu, true); return; } if (!e.target.closest('#pkMenu')) menuOff(); };
@@ -1060,6 +1557,18 @@
         if (pressed) { pressed = false; return; }   // the long-press already opened the menu
         const c = e.target.closest('[data-pk-custom]');
         if (c) return accountForm(null, presetId, c.dataset.pkCustom);
+        const st = e.target.closest('[data-pk-store]');
+        if (st) {   // an App Store result becomes a pick like any preset; its icon downloads in the background
+          const r = store[+st.dataset.pkStore]; if (!r) return;
+          const name = storeName(r.trackName);
+          let k = ALL.findIndex(p => p[0].toLowerCase() === name.toLowerCase());
+          if (k < 0) { const p = [name, '', storeCat(r), '', '']; p.store = true; ALL.push(p); k = ALL.length - 1;
+            storeIcon(storeArt(r)).catch(() => storeIcon(r.artworkUrl100)).then(v => { p[4] = v; if ($('#pkGrid')) { const t = $(`#pkGrid [data-pk="${k}"] .icon`); if (t) t.outerHTML = favIcon({ name: p[0], domain: p[1], icon: v }); } }).catch(() => {}); }
+          if (!chosen.has(k)) { chosen.add(k); open = k; }
+          sync(); draw();
+          const t = $(`#pkGrid [data-pk="${k}"]`); if (t) { t.animate([{ transform: 'scale(.86)' }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.34,1.45,.64,1)' }); expand(t, true); }
+          return;
+        }
         const b = e.target.closest('[data-pk]'); if (!b) return;
         const k = +b.dataset.pk, h = have(ALL[k][0]);
         if (chosen.has(k) && open !== k) { open = k; expand(b); return; }   // selected but closed: reopen its drawer
@@ -1081,7 +1590,7 @@
       <div class="sheet-body form">
         <div class="form-hero" style="--pc:${brand(fakes[0])}"><span class="pk-stack">${fakes.slice(0, 5).map(f => favIcon(f, 'lg')).join('')}</span><b>${picks.length === 1 ? esc(picks[0][0]) : `${esc(picks[0][0])} 等 ${picks.length} 个`}</b></div>
         ${idPicksHtml(sel, '用哪个邮箱或手机号注册、绑定的')}
-        <p class="hint">可以多选，比如用邮箱注册、再绑定了手机号；用微信或 Apple 登录的，选下面的登录账号。</p>
+        <p class="hint">可以多选，比如用邮箱注册、再绑定了手机号；用微信、QQ 或 Apple 登录的，选下面的登录账号。</p>
         <div class="sec-title">账号名</div>
         <div class="group">${picks.map((p, k) => { const n = state.accounts.filter(x => x.name.toLowerCase() === p[0].toLowerCase()).length; return `<div class="field hd-field">${favIcon(fakes[k])}<input data-hd="${k}" value="${esc(hds[k] || '')}" placeholder="${n ? `第 ${n + 1} 个${esc(p[0])}账号，填用户名区分` : `${esc(p[0])}的用户名或昵称（选填）`}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`; }).join('')}</div>
         <p class="hint">同一个网站有好几个账号时，靠它区分。</p>
@@ -1091,6 +1600,7 @@
       $('#pkBack').onclick = () => pickApps(presetId, q);
       $('#pkSave').onclick = () => {
         const now = Date.now(), made = picks.map((p, k) => ({ id: uid(), createdAt: now + k, name: p[0], handle: ($(`[data-hd="${k}"]`)?.value || '').trim(), domain: p[1], category: p[2], identityIds: [...sel], notes: '', ...(p[4] ? { icon: p[4] } : {}) }));
+        picks.forEach(p => { if (p.store) rememberApp(p[0], p[1], p[2], p[4]); });
         state.accounts.push(...made); save(); render();
         if (made.length === 1) showAccount(made[0].id); else if (sel.size === 1) showIdentity([...sel][0]); else closeSheet();
         toast(made.length === 1 ? `已添加 ${made[0].name}` : `已添加 ${made.length} 个`);
@@ -1264,8 +1774,9 @@
       if (d.act === 'order') orderSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
-      if (d.act === 'download') window.open('https://github.com/Ckxkx/account-atlas/releases/latest', '_blank', 'noopener');
-      if (d.act === 'demo') { snap(); state = demo(); save(); setKind('email'); render(); undoToast('已载入示例'); }
+      if (d.act === 'download') window.open('https://wwbsj.lanzoup.com/b01i61djvg', '_blank', 'noopener');
+      if (d.act === 'demo') loadDemo();
+      if (d.act === 'demoClear') clearDemo();
       if (d.act === 'wipe') confirmSheet('清空全部数据？', Sync.on ? '所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。' : '所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。', '清空全部数据', () => { snap(); state = { identities: [], accounts: [] }; save(); render(); undoToast('已清空'); });
       return;
     }
@@ -1638,8 +2149,8 @@
   // ---------- boot ----------
   if (state) remember();
   if (!state) {
-    state = demo(); save();
-    setTimeout(() => toast('这是示例数据', { label: '清空', fn: () => { state = { identities: [], accounts: [] }; save(); render(); } }), 1400);
+    state = { identities: [], accounts: [] }; save();
+    if (!localStorage.getItem('atlas.demoAsked')) setTimeout(askDemo, 900);
   }
   if (!state.identities.some(i => i.type === ui.kind)) { const t = state.identities.find(i => KINDS.includes(i.type)); if (t) ui.kind = t.type; }
 

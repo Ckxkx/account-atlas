@@ -63,4 +63,16 @@ class LoginModelTest {
     assertTrue(kindRank("login") > kindRank("phone"))
     assertEquals("#07c160", providerColor("wechat")); assertEquals("#1d1d1f", providerColor("apple"))
   }
+
+  @Test fun qqLoginCards() {
+    val q = Identity("q1", "login", "10001", color = "#12b7f5", provider = "qq")
+    assertTrue(q.isQQ); assertFalse(q.isWechat); assertFalse(q.isApple)
+    assertEquals("QQ", providerName("qq"))
+    assertEquals("#12b7f5", providerColor("qq"))
+    assertTrue(validLogin("qq", "12345678"))
+    assertTrue(validLogin("qq", "me@qq.com"))
+    assertFalse(validLogin("qq", "1234"))
+    assertFalse(validLogin("qq", "abcdefg"))
+    assertEquals("qq", decodeAtlas(encodeAtlas(AtlasData(identities = listOf(q)))).identities[0].provider)
+  }
 }

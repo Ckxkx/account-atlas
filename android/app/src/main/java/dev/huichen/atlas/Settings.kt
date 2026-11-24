@@ -49,6 +49,7 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.PlaylistAdd
+import androidx.compose.material.icons.outlined.PlaylistRemove
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -156,16 +157,19 @@ fun SettingsMain(go: (String) -> Unit) {
         SettingRow(Icons.Outlined.Upload, "导出备份") { exporter.launch("账号备份-${LocalDate.now()}.json") }
         Divider()
         SettingRow(Icons.Outlined.Download, "导入备份") { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
-        if (!Sync.on) {
+        if (Store.hasDemo) {
+          Divider()
+          SettingRow(Icons.Outlined.PlaylistRemove, "清除示例数据", color = pal.red) { Store.clearDemo() }
+        } else if (!Sync.on) {
           Divider()
           SettingRow(Icons.Outlined.PlaylistAdd, "载入示例") { Store.loadDemo() }
         }
       }
-      FormGroup(footer = "在 GitHub Releases 下载，直接覆盖安装，数据不会丢失。") {
+      FormGroup(footer = "在蓝奏云下载，密码 bteg。直接覆盖安装，数据不会丢失。") {
         val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() }
         val uri = LocalUriHandler.current
         SettingRow(Icons.Outlined.NewReleases, "下载新版本", trailing = { if (ver != null) T("当前 $ver", 14f, color = pal.secondary) }, chevron = true) {
-          runCatching { uri.openUri("https://github.com/Ckxkx/account-atlas/releases/latest") }
+          runCatching { uri.openUri("https://wwbsj.lanzoup.com/b01i61djvg") }
         }
       }
       FormGroup {
