@@ -9,6 +9,7 @@ struct WalletView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
           header
+          DemoBanner().padding(.horizontal, 20).padding(.top, 12)
           KindSwitch().padding(.horizontal, 20).padding(.top, 14)
           deck.padding(.top, 14)
           dots.padding(.top, 2)

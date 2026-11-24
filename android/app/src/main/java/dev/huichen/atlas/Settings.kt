@@ -51,6 +51,7 @@ import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.PlaylistAdd
 import androidx.compose.material.icons.outlined.PlaylistRemove
 import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -152,6 +153,8 @@ fun SettingsMain(go: (String) -> Unit) {
         }
         Divider()
         SettingRow(Icons.Outlined.SwapVert, "调整卡片顺序", chevron = true) { go("order") }
+        Divider()
+        SettingRow(Icons.Outlined.School, "使用教程", chevron = true) { Store.popAll(); Store.tourDemo = false; Store.tour = true }
       }
       FormGroup(footer = "备份是 JSON 文件，和网页版、iOS 版通用。") {
         SettingRow(Icons.Outlined.Upload, "导出备份") { exporter.launch("账号备份-${LocalDate.now()}.json") }
@@ -169,7 +172,7 @@ fun SettingsMain(go: (String) -> Unit) {
         val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() }
         val uri = LocalUriHandler.current
         SettingRow(Icons.Outlined.NewReleases, "下载新版本", trailing = { if (ver != null) T("当前 $ver", 14f, color = pal.secondary) }, chevron = true) {
-          runCatching { uri.openUri("https://wwbsj.lanzn.com/b01i61dn1a") }
+          runCatching { uri.openUri("https://wwbsj.lanzoup.com/b01i61dn1a") }
         }
       }
       FormGroup {

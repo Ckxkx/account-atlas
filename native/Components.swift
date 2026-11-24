@@ -176,7 +176,7 @@ final class IconEntry { let image: UIImage; let favicon: Bool; init(_ i: UIImage
     if let k = keyCache[ck] { return k }
     let d = cleanDomain(domain), n = name.lowercased()
     var k = ""
-    if let p = Presets.all.first(where: { (!d.isEmpty && (d == $0.domain || d.hasSuffix("." + $0.domain))) || (d.isEmpty && $0.name.lowercased() == n) }),
+    if let p = presetMatch(name: n, domain: d, byName: d.isEmpty),
        Bundle.main.path(forResource: p.domain, ofType: "png", inDirectory: "icons") != nil {
       k = "b:" + p.domain
     } else if !d.isEmpty { k = "f:" + d }

@@ -563,13 +563,21 @@ fun PickerSheet(presetIdentity: String?) {
               val k = key(p)
               val on = picked.any { key(it) == k }
               val recorded = has(p)
+              // no icon of its own and none bundled (王者荣耀 …): borrow the App Store artwork of the same name
+              val match = if (q.isEmpty() || ownIcon(p) != null || IconCache.preset(p.name, p.domain) != null) null else hits.firstOrNull { it.name.lowercase() == k }
               val sc by animateFloatAsState(if (on) 0.92f else 1f, calm(), label = "pk")
               Box(Modifier.animateItem(fadeInSpec = calm(), placementSpec = calm(), fadeOutSpec = calm()), contentAlignment = Alignment.TopCenter) {
                 Column(Modifier.fillMaxWidth().press(1f, onLongClick = if (mine) ({ hap(TICK); menuFor = k }) else null) {
-                  hap(TICK); if (on) picked.removeAll { key(it) == k } else picked.add(p)
+                  hap(TICK)
+                  if (on) { picked.removeAll { key(it) == k }; icons.remove(k); hitOf.remove(k) }
+                  else {
+                    picked.add(p)
+                    if (match != null) { hitOf[k] = match; scope.launch { AppStore.icon(match)?.let { if (picked.any { key(it) == k }) icons[k] = it } } }
+                  }
                 }, horizontalAlignment = Alignment.CenterHorizontally) {
                   Box {
-                    AppIcon(p.name, p.domain, 60.dp, Modifier.graphicsLayer { scaleX = sc; scaleY = sc }, ownIcon(p), "own-$k")
+                    if (match != null) HitThumb(match, 60.dp, Modifier.graphicsLayer { scaleX = sc; scaleY = sc })
+                    else AppIcon(p.name, p.domain, 60.dp, Modifier.graphicsLayer { scaleX = sc; scaleY = sc }, ownIcon(p), "own-$k")
                     androidx.compose.animation.AnimatedVisibility(on, Modifier.align(Alignment.TopEnd).offset(7.dp, (-7).dp), enter = scaleIn(calm()) + fadeIn(), exit = scaleOut(calm()) + fadeOut()) {
                       Box(Modifier.size(24.dp).clip(CircleShape).background(Color.White).padding(1.dp)) { Icon(Icons.Filled.CheckCircle, null, tint = pal.accent) }
                     }

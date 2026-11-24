@@ -396,7 +396,7 @@ enum Presets {
     Preset(name: "115 网盘", domain: "115.com", category: "工具", color: "", aliases: ""),
     Preset(name: "天翼云盘", domain: "cloud.189.cn", category: "工具", color: "", aliases: ""),
     Preset(name: "中国移动云盘", domain: "yun.139.com", category: "工具", color: "", aliases: "和彩云"),
-    Preset(name: "蓝奏云", domain: "woozooo.com", category: "工具", color: "", aliases: "lanzou 蓝奏"),
+    Preset(name: "蓝奏云", domain: "lanzou.com", category: "工具", color: "", aliases: "lanzou 蓝奏 lanzoup lanzn"),
     Preset(name: "迅雷", domain: "xunlei.com", category: "工具", color: "", aliases: "thunder"),
     Preset(name: "微云", domain: "weiyun.com", category: "工具", color: "", aliases: ""),
     Preset(name: "OneDrive", domain: "onedrive.live.com", category: "工具", color: "", aliases: ""),

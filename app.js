@@ -351,7 +351,7 @@ Evernote|evernote.com|工具|
 115 网盘|115.com|工具|
 天翼云盘|cloud.189.cn|工具|
 中国移动云盘|yun.139.com|工具|和彩云
-蓝奏云|woozooo.com|工具|lanzou 蓝奏
+蓝奏云|lanzou.com|工具|lanzou 蓝奏 lanzoup lanzn
 迅雷|xunlei.com|工具|thunder
 微云|weiyun.com|工具|
 OneDrive|onedrive.live.com|工具|
@@ -574,11 +574,39 @@ Etherscan|etherscan.io|加密|`.split('\n').map(l => { const [n, d, c, a] = l.sp
     delete state.demo;
     save(); setKind(ui.kind); render(); undoToast('已清除示例数据');
   }
-  function askDemo() {
-    localStorage.setItem('atlas.demoAsked', '1');
-    openSheet(`<div class="sheet-body"><div class="alert"><h3>先看看示例？</h3><p>可以载入一组示例邮箱、手机号和网站，看看用起来的效果。之后随时在右上角「更多」里清除。</p></div>
-      <div class="alert-actions"><button id="dYes" style="font-weight:600">载入示例数据</button><button data-close>不用了，直接开始</button></div></div>`, { kind: 'confirm' });
-    setTimeout(() => { $('#dYes').onclick = () => { closeSheet(); loadDemo(); }; }, 0);
+  // 新手教程: shown once on a fresh install (and from 更多 › 使用教程). Skippable on every page.
+  // Sample data is never loaded behind the user's back: the last page offers it as a labelled choice.
+  const TOUR = [
+    ['🗂️', '欢迎使用账号星图', '记下每个网站和 App 是用哪个邮箱、哪个手机号注册的。换号、注销、找回密码时，一眼就知道要改哪些。', '不保存任何密码，数据只在你的设备上。'],
+    ['✉️', '第一步：添加邮箱或手机号', '在「卡包」里，每个邮箱、手机号、微信 / QQ / Apple 登录都是一张卡。左右滑到最后一张「+」卡就能新建。', '上方可以在 邮箱 / 手机号 / 登录 之间切换。'],
+    ['🧩', '第二步：记下用它注册的 App', '点开一张卡，选「添加网站或 App」，可以一次多选。搜不到的会从 App Store 找，带上官方图标；也可以手动添加。', '同一个 App 有几个账号，可以分别记，用账号名区分。'],
+    ['🕸️', '关系图', '所有邮箱、手机号和 App 会自动连成一张图。点一个节点，就能看到它牵连着哪些账号。', '准备换手机号？先在这里看看要改多少个。'],
+    ['🛡️', '隐私与备份', '右上角「更多」里可以隐藏号码，截图也安心；还能导出备份，或开启端到端加密同步。', '以后更新数据不会丢，也可以随时在「更多」里重看教程。'],
+  ];
+  function showTour(offerDemo) {
+    localStorage.setItem('atlas.demoAsked', '1'); localStorage.setItem('atlas.tourDone', '1');
+    let k = 0;
+    const paint = () => {
+      const [emoji, title, body, tip] = TOUR[k], last = k === TOUR.length - 1;
+      const dots = TOUR.map((_, j) => `<span style="width:${j === k ? 18 : 6}px;height:6px;border-radius:3px;background:${j === k ? 'var(--tint)' : 'var(--secondary)'};opacity:${j === k ? 1 : .35};transition:all .3s"></span>`).join('');
+      const actions = last
+        ? (offerDemo && !hasDemo()
+            ? `<button id="tDemo" style="font-weight:600">载入示例数据看看</button><button data-close>直接开始</button>`
+            : `<button data-close style="font-weight:600">开始使用</button>`)
+        : `<button id="tNext" style="font-weight:600">下一步</button>`;
+      openSheet(`<div class="sheet-bar"><button id="tBack" ${k ? '' : 'style="visibility:hidden"'}>上一步</button><span class="t">${k + 1} / ${TOUR.length}</span><button data-close>${last ? '完成' : '跳过'}</button></div>
+        <div class="sheet-body"><div class="alert" style="padding-top:18px"><div style="font-size:56px;line-height:1.1">${emoji}</div><h3 style="margin-top:14px;font-size:21px">${title}</h3><p style="font-size:15px;margin-top:10px">${body}</p>
+        <p style="font-size:13px;margin-top:14px;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12)">${tip}</p></div>
+        <div style="display:flex;gap:6px;justify-content:center;margin-top:16px">${dots}</div>
+        <div class="alert-actions">${actions}</div></div>`, { kind: 'tour' });
+      setTimeout(() => {
+        const n = $('#tNext'), b = $('#tBack'), d = $('#tDemo');
+        if (n) n.onclick = () => { k++; paint(); };
+        if (b) b.onclick = () => { if (k) { k--; paint(); } };
+        if (d) d.onclick = () => { closeSheet(); loadDemo(); };
+      }, 0);
+    };
+    paint();
   }
 
   function demo() {
@@ -651,15 +679,23 @@ Etherscan|etherscan.io|加密|`.split('\n').map(l => { const [n, d, c, a] = l.sp
   // the account's own icon (uploaded, or from the App Store): a small square data: URL, synced with the data
   const customIcon = a => typeof a?.icon === 'string' && a.icon.length < 400000 && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/.test(a.icon) ? a.icon : null;
   // bundled 192px icons for every preset, so common apps are sharp and load from this site
+  // the built-in app an account is: exact domain, then (byName) the name, then the longest parent
+  // domain whose name also agrees, so 王者荣耀 on pvp.qq.com is not drawn as QQ
+  const presetMatch = (name, domain, byName) => {
+    const d = cleanDomain(domain), norm = s => (s || '').toLowerCase().replace(/\s+/g, ''), n = norm(name);
+    if (d) { const p = PRESETS.find(p => p[1] === d); if (p) return p; }
+    if (byName && n) { const p = PRESETS.find(p => norm(p[0]) === n); if (p) return p; }
+    if (!d || !n) return null;
+    return PRESETS.filter(p => d.endsWith('.' + p[1]) && n.includes(norm(p[0]))).sort((a, b) => b[1].length - a[1].length)[0] || null;
+  };
   const localIcon = a => {
-    const d = cleanDomain(a.domain), n = (a.name || '').toLowerCase();
-    const p = PRESETS.find(p => (d && (d === p[1] || d.endsWith('.' + p[1]))) || (!d && p[0].toLowerCase() === n));
+    const p = presetMatch(a.name, a.domain, !cleanDomain(a.domain));
     return p ? `icons/${p[1]}.png` : null;
   };
   const favSources = d => { d = cleanDomain(d); return d ? [`https://favicon.im/${d}?larger=true`, `https://${d}/apple-touch-icon.png`, `https://${d}/favicon.ico`, `https://www.google.com/s2/favicons?domain=${d}&sz=128`] : []; };
   function brand(a) {
     const d = cleanDomain(a.domain), n = (a.name || '').toLowerCase();
-    const p = PRESETS.find(p => (d && (d === p[1] || d.endsWith('.' + p[1]))) || p[0].toLowerCase() === n);
+    const p = presetMatch(a.name, a.domain, true);
     if (p) return p[3];
     let h = 0; for (const ch of (d || n || '?')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
     return `hsl(${h % 360} 62% 48%)`;
@@ -1774,8 +1810,9 @@ Etherscan|etherscan.io|加密|`.split('\n').map(l => { const [n, d, c, a] = l.sp
       if (d.act === 'order') orderSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
-      if (d.act === 'download') window.open('https://wwbsj.lanzn.com/b01i61dn1a', '_blank', 'noopener');
+      if (d.act === 'download') window.open('https://wwbsj.lanzoup.com/b01i61dn1a', '_blank', 'noopener');
       if (d.act === 'demo') loadDemo();
+      if (d.act === 'tour') showTour(!state.identities.length && !state.accounts.length);
       if (d.act === 'demoClear') clearDemo();
       if (d.act === 'wipe') confirmSheet('清空全部数据？', Sync.on ? '所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。' : '所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。', '清空全部数据', () => { snap(); state = { identities: [], accounts: [] }; save(); render(); undoToast('已清空'); });
       return;
@@ -2150,7 +2187,7 @@ Etherscan|etherscan.io|加密|`.split('\n').map(l => { const [n, d, c, a] = l.sp
   if (state) remember();
   if (!state) {
     state = { identities: [], accounts: [] }; save();
-    if (!localStorage.getItem('atlas.demoAsked')) setTimeout(askDemo, 900);
+    if (!localStorage.getItem('atlas.demoAsked') && !localStorage.getItem('atlas.tourDone')) setTimeout(() => showTour(true), 900);
   }
   if (!state.identities.some(i => i.type === ui.kind)) { const t = state.identities.find(i => KINDS.includes(i.type)); if (t) ui.kind = t.type; }
 

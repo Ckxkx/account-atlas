@@ -38,6 +38,7 @@ struct SettingsSheet: View {
             Text("跟随系统").tag("system")
           } label: { Label("外观", systemImage: "circle.lefthalf.filled") }
           NavigationLink { OrderView() } label: { Label("调整卡片顺序", systemImage: "arrow.up.arrow.down") }
+          NavigationLink { OnboardingView(offerDemo: false).toolbar(.hidden, for: .navigationBar) } label: { Label("使用教程", systemImage: "graduationcap") }
         }
         Section {
           Button { doc = BackupDoc(data: store.backupJSON()); exporting = true } label: { Label("导出备份", systemImage: "square.and.arrow.up") }
@@ -49,7 +50,7 @@ struct SettingsSheet: View {
           }
         } footer: { Text("备份是 JSON 文件，和网页版通用。") }
         Section {
-          Link(destination: URL(string: "https://wwbsj.lanzn.com/b01i61dn1a")!) {
+          Link(destination: URL(string: "https://wwbsj.lanzoup.com/b01i61dn1a")!) {
             HStack {
               Label("下载新版本", systemImage: "arrow.up.forward.app")
               Spacer()

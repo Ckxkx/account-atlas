@@ -200,10 +200,23 @@ struct AtlasData: Codable {
   }
   init(from d: Decoder) throws {
     let c = try d.container(keyedBy: CodingKeys.self)
-    identities = (try? c.decode([Identity].self, forKey: .identities)) ?? []
-    accounts = (try? c.decode([Account].self, forKey: .accounts)) ?? []
+    // element by element: one damaged entry is skipped instead of emptying the whole list
+    identities = (try? c.decode(Lossy<Identity>.self, forKey: .identities))?.items ?? []
+    accounts = (try? c.decode(Lossy<Account>.self, forKey: .accounts))?.items ?? []
     deleted = (try? c.decode([String: Double].self, forKey: .deleted)) ?? [:]
     demo = try? c.decode(Bool.self, forKey: .demo)
+  }
+}
+
+/// decodes an array, dropping only the elements that fail
+struct Lossy<T: Decodable>: Decodable {
+  var items: [T] = []
+  init(from d: Decoder) throws {
+    var c = try d.unkeyedContainer()
+    while !c.isAtEnd {
+      // a failed decode doesn't move the cursor: step over the element as raw JSON
+      if let x = try? c.decode(T.self) { items.append(x) } else if (try? c.decode(JSONValue.self)) == nil { break }
+    }
   }
 }
 
@@ -233,9 +246,19 @@ func cleanDomain(_ d: String) -> String {
   return String(s.split(whereSeparator: { "/?#".contains($0) }).first ?? "")
 }
 
-func presetFor(name: String, domain: String) -> Preset? {
-  let d = cleanDomain(domain), n = name.lowercased()
-  return Presets.all.first { p in (!d.isEmpty && (d == p.domain || d.hasSuffix("." + p.domain))) || p.name.lowercased() == n }
+func presetFor(name: String, domain: String) -> Preset? { presetMatch(name: name, domain: domain, byName: true) }
+
+/// The built-in app an account is. Exact domain first, then (byName) the name, then a parent domain,
+/// the longest one, and only when the names agree too: 王者荣耀 on pvp.qq.com is not QQ, and
+/// 企业微信 on work.weixin.qq.com is not 微信.
+func presetMatch(name: String, domain: String, byName: Bool) -> Preset? {
+  let d = cleanDomain(domain)
+  func norm(_ s: String) -> String { s.lowercased().filter { !$0.isWhitespace } }
+  let n = norm(name)
+  if !d.isEmpty, let p = Presets.all.first(where: { $0.domain == d }) { return p }
+  if byName, !n.isEmpty, let p = Presets.all.first(where: { norm($0.name) == n }) { return p }
+  guard !d.isEmpty, !n.isEmpty else { return nil }
+  return Presets.all.filter { d.hasSuffix("." + $0.domain) && n.contains(norm($0.name)) }.max { $0.domain.count < $1.domain.count }
 }
 
 func carrier(_ v: String) -> String {
@@ -335,6 +358,8 @@ final class Store {
   var demoFocus: String? = nil
   /// true when there was nothing saved on this device: the app starts empty and offers the sample data once
   var firstRun = false
+  /// the data file couldn't be read at launch: it was set aside (atlas.unreadable-*.json) and the last good copy loaded
+  @ObservationIgnored var recovered = false
   @ObservationIgnored var toastAction: (() -> Void)? = nil
   @ObservationIgnored var onSaved: (() -> Void)? = nil
 
@@ -345,8 +370,19 @@ final class Store {
   private let io = DispatchQueue(label: "atlas.persist", qos: .utility)
 
   init() {
-    if let d = try? Data(contentsOf: url), let s = try? JSONDecoder().decode(AtlasData.self, from: d) {
+    let raw = try? Data(contentsOf: url)
+    if let d = raw, let s = try? JSONDecoder().decode(AtlasData.self, from: d) {
       data = s
+      // keep the last copy that opened fine, so an update can never be the only copy of the data
+      if !s.identities.isEmpty || !s.accounts.isEmpty { try? d.write(to: url.deletingLastPathComponent().appendingPathComponent("atlas.prev.json"), options: .atomic) }
+    } else if let d = raw, !d.isEmpty {
+      // the file is there but can't be read: never start over on top of it. Set it aside, then fall
+      // back to the last good copy; the user is told in 设置 via the toast below.
+      let stamp = Int(Date().timeIntervalSince1970)
+      try? d.write(to: url.deletingLastPathComponent().appendingPathComponent("atlas.unreadable-\(stamp).json"), options: .atomic)
+      let prev = url.deletingLastPathComponent().appendingPathComponent("atlas.prev.json")
+      if let p = try? Data(contentsOf: prev), let s = try? JSONDecoder().decode(AtlasData.self, from: p) { data = s; recovered = true }
+      else { data = AtlasData(); recovered = true }
     } else if UserDefaults.standard.object(forKey: "atlasSeed") != nil || UserDefaults.standard.string(forKey: "atlasDemo") != nil {
       data = Store.demo()   // CI screenshots / promo clips
     } else {
@@ -407,7 +443,7 @@ final class Store {
   // every change goes through here: snapshot for undo, stamp, persist, sync.
   // Works on a copy and assigns once, so observers and the index update exactly once per change.
   func mutate(_ message: String? = nil, undo: Bool = true, _ f: (inout AtlasData) -> Void) {
-    undoSnap = data
+    if undo { undoSnap = data }   // a silent fix-up (a late icon) must not replace what 撤销 restores
     var d = data
     f(&d)
     d.demo = nil
@@ -532,6 +568,36 @@ final class Store {
     guard kept.count != hidden.count else { return }
     UserDefaults.standard.set(kept, forKey: "atlas.custom.hidden")
     customRev &+= 1
+  }
+
+  /// Accounts saved before 2.3.1 with no icon of their own and no bundled one (王者荣耀, 金铲铲之战 …)
+  /// were drawn with a parent site's logo or a 32 px favicon. Look each name up on the App Store once
+  /// and keep the artwork of an exact-name match. A few names per launch; each name is tried only once.
+  func backfillIcons() async {
+    guard data.demo != true else { return }
+    let triedKey = "atlas.iconTried"
+    var tried = Set(UserDefaults.standard.stringArray(forKey: triedKey) ?? [])
+    var names: [String] = []
+    for a in data.accounts where (a.icon ?? "").isEmpty {
+      let k = a.name.lowercased()
+      guard !k.isEmpty, !tried.contains(k), !names.contains(k),
+            !IconStore.shared.key(name: a.name, domain: a.domain).hasPrefix("b:") else { continue }
+      names.append(k)
+      if names.count == 6 { break }
+    }
+    for k in names {
+      guard let hits = await AppStoreSearch.search(k) else { return }   // offline: try again next launch
+      tried.insert(k)
+      UserDefaults.standard.set(Array(tried), forKey: triedKey)
+      guard let a = hits.first(where: { $0.cleanName.lowercased() == k || $0.trackName.lowercased() == k }),
+            let u = await a.iconDataURL() else { continue }
+      let ids = data.accounts.filter { $0.name.lowercased() == k && ($0.icon ?? "").isEmpty }.map(\.id)
+      guard !ids.isEmpty else { continue }
+      mutate(nil, undo: false) { s in
+        for i in s.accounts.indices where ids.contains(s.accounts[i].id) { s.accounts[i].icon = u }
+      }
+      IconStore.shared.prefetch(data.accounts.filter { ids.contains($0.id) })
+    }
   }
 
   func backupJSON() -> Data {
