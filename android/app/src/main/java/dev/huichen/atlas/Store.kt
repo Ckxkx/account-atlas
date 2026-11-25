@@ -31,7 +31,7 @@ sealed class Route {
 
 data class Entry(val key: Long, val route: Route)
 
-data class Toast(val text: String, val action: String? = null, val id: Long = System.nanoTime())
+data class Toast(val text: String, val action: String? = null, val id: Long = System.nanoTime(), val tap: Boolean = false)
 
 /** App state. One instance, Compose reads the mutableState fields directly. */
 object Store {
@@ -348,6 +348,15 @@ object Store {
     if (now == v) runCatching {
       if (android.os.Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip() else cm.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
     }
+  }
+
+  /** 2.6: a plain line (no button) that does something when tapped; swipe it up to dismiss */
+  fun tip(text: String, fn: () -> Unit) {
+    toastAction = fn
+    val t = Toast(text, tap = true)
+    toast = t
+    toastJob?.cancel()
+    toastJob = scope.launch { delay(6000); if (toast?.id == t.id) toast = null }
   }
 
   fun show(text: String, action: String? = null, fn: (() -> Unit)? = null) {

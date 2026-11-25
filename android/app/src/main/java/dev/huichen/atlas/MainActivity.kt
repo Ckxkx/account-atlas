@@ -1,7 +1,7 @@
 package dev.huichen.atlas
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -86,19 +86,22 @@ import androidx.compose.runtime.withFrameNanos
 import kotlin.math.hypot
 import kotlin.math.max
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     // No forced refresh-rate mode: the system's adaptive rate (60/90/120 Hz) is left alone, which saves
     // battery and avoids mode-switch hitches on some ROMs. Smoothness comes from the animations instead.
     Store.init(applicationContext)
+    AppLock.init(applicationContext)
+    AppLock.applyRecents(this)
     if (intent?.hasExtra("atlasRoute") == true || intent?.hasExtra("atlasTab") == true) Store.seedDemo()
     IconCache.prewarm(applicationContext)
     Sync.init()
     Store.onSaved = { Sync.schedule() }
     Store.backfillIcons()
-    Store.scope.launch { kotlinx.coroutines.delay(2500); Store.nudge() }
+    // 2.6: the one-time 应用锁 suggestion takes the place of the weekly 小提示 the time it shows
+    Store.scope.launch { kotlinx.coroutines.delay(2500); if (AppLock.blocking || !AppLock.maybeTip(applicationContext)) Store.nudge() }
     if (Store.recovered) Store.scope.launch { kotlinx.coroutines.delay(1000); Store.show("数据文件读取出错，已恢复到上次能打开的版本") }
     // launch extras used by the CI emulator screenshots
     intent?.getStringExtra("atlasTheme")?.let { Store.putTheme(it) }
@@ -112,9 +115,11 @@ class MainActivity : ComponentActivity() {
     enableEdgeToEdge(SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
     setContent { AtlasRoot(startTab) }
   }
-  override fun onResume() { super.onResume(); Sync.runNow(); Store.checkClipboard(applicationContext) }
+  override fun onResume() { super.onResume(); AppLock.onResume(); Sync.runNow(); Store.checkClipboard(applicationContext) }
+  // 2.6: with the 应用锁 on, the screen is covered as soon as the app leaves the front (app switcher)
+  override fun onPause() { AppLock.onPause(); super.onPause() }
   // 2.5: values shown with the eye are masked again whenever the app leaves the screen
-  override fun onStop() { super.onStop(); Store.remask() }
+  override fun onStop() { super.onStop(); AppLock.onStop(); Store.remask() }
 }
 
 object ThemeFX { var origin = Offset.Zero; var request: ((String) -> Unit)? = null }
@@ -156,13 +161,16 @@ fun AtlasRoot(startTab: Int) {
         }
         FirstRunTour()
         // 2.4: duplicates (incl. a former Apple login card and its email) are merged only after a yes, asked once
-        if (Store.mergeAsk > 0 && !Tour.on && Store.routes.isEmpty()) {
+        if (Store.mergeAsk > 0 && !Tour.on && Store.routes.isEmpty() && !AppLock.blocking) {
           androidx.compose.material3.AlertDialog(onDismissRequest = { Store.declineMerge() },
             title = { Text("合并重复的身份") },
             text = { Text("发现 ${Store.mergeAsk} 个重复的身份，合并后关系图更清晰，数据不会丢。") },
             confirmButton = { androidx.compose.material3.TextButton({ Store.mergeDuplicates() }) { Text("合并") } },
             dismissButton = { androidx.compose.material3.TextButton({ Store.declineMerge() }) { Text("暂不") } })
         }
+        // 2.6 应用锁: the lock screen / app-switcher cover goes over everything (sheets and toasts included)
+        LockOverlay()
+        BackHandler(enabled = AppLock.blocking) { (view.context as? android.app.Activity)?.moveTaskToBack(true) }
         snap?.let { img ->
           Canvas(Modifier.fillMaxSize().clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {}) {
             val o = ThemeFX.origin.takeIf { it != Offset.Zero } ?: Offset(size.width / 2, 60f)
@@ -331,7 +339,9 @@ fun ToastView(modifier: Modifier) {
     val cur = last.value ?: return@AnimatedVisibility
     Row(
       Modifier.fillMaxWidth().shadow(20.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp))
-        .background(if (pal.dark) hex("#2c2c2e") else Color.White).padding(horizontal = 14.dp, vertical = 11.dp)
+        .background(if (pal.dark) hex("#2c2c2e") else Color.White)
+        .then(if (cur.tap) Modifier.clickable { Store.toastAction?.invoke(); Store.toast = null } else Modifier)
+        .padding(horizontal = 14.dp, vertical = 11.dp)
         .pointerInput(Unit) { detectVerticalDragGestures { _, dy -> if (dy < -10) Store.toast = null } },
       verticalAlignment = Alignment.CenterVertically,
     ) {

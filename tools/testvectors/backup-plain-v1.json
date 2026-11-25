@@ -1,0 +1,14 @@
+{
+  "app": "atlas",
+  "version": 1,
+  "exportedAt": "2026-11-25T12:00:00.000Z",
+  "identities": [
+    { "id": "e1", "type": "email", "value": "sample@example.com", "label": "主力邮箱", "color": "#0a84ff", "notes": "", "apple": true, "future": { "kept": 7 } },
+    { "id": "p1", "type": "phone", "value": "+86 138 0000 0000", "label": "", "color": "#30d158", "notes": "示例号码" },
+    { "id": "q1", "type": "login", "provider": "qq", "value": "10001", "label": "", "color": "#12b7f5", "notes": "", "via": "p1", "vias": ["p1", "e1"] }
+  ],
+  "accounts": [
+    { "id": "a1", "name": "12306", "domain": "12306.cn", "category": "出行", "identityIds": ["e1", "q1"], "handle": "旅客", "notes": "", "createdAt": 1763500000000 },
+    { "id": "a2", "name": "GitHub", "domain": "github.com", "category": "工具", "identityIds": ["e1"], "notes": "", "createdAt": 1763600000000 }
+  ]
+}

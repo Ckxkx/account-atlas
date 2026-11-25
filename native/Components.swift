@@ -467,7 +467,8 @@ struct WalletCard: View {
     .overlay(alignment: .bottomTrailing) {
       if showsEye {
         let on = store.revealed.contains(i.id)
-        Button { withAnimation(Motion.snappy) { store.toggleReveal(i.id) } } label: {
+        // 2.6: with the 应用锁 on, showing a value asks for Face ID / passcode once per foreground session
+        Button { if on { withAnimation(Motion.snappy) { store.toggleReveal(i.id) } } else { AppLock.shared.reveal { withAnimation(Motion.snappy) { store.toggleReveal(i.id) } } } } label: {
           Image(systemName: on ? "eye.slash.fill" : "eye.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
             .frame(width: 32, height: 32).background(Color.white.opacity(0.2), in: Circle())
             .contentTransition(.symbolEffect(.replace))

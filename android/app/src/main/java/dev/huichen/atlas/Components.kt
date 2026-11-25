@@ -320,6 +320,7 @@ fun footNote(i: Identity): String {
 
 @Composable
 fun WalletCard(i: Identity, modifier: Modifier = Modifier, shadow: Boolean = true, reveal: Boolean = false) {
+  val ctxAct = androidx.compose.ui.platform.LocalContext.current.fragmentActivity()
   val accs = Store.accountsOf(i.id)
   val shape = CardShape(i.isPhone)
   val glow = hex(i.color)
@@ -370,7 +371,7 @@ fun WalletCard(i: Identity, modifier: Modifier = Modifier, shadow: Boolean = tru
           if (!reveal && Store.maskValues) {
             val shown = i.id in Store.revealed
             Box(Modifier.padding(start = 6.dp).size(30.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f))
-              .clickable { Store.toggleReveal(i.id) }, contentAlignment = Alignment.Center) {
+              .clickable { if (shown) Store.toggleReveal(i.id) else AppLock.reveal(ctxAct) { Store.toggleReveal(i.id) } }, contentAlignment = Alignment.Center) {
               Icon(if (shown) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (shown) "隐藏" else "显示", Modifier.size(17.dp), tint = Color.White)
             }
           }

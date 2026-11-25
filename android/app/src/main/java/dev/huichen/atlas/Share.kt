@@ -74,7 +74,7 @@ fun ShareSheet() {
         }
         val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".share", file)
         val send = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        ctx.startActivity(Intent.createChooser(send, "分享我的星图"))
+        AppLock.expectReturn(); ctx.startActivity(Intent.createChooser(send, "分享我的星图"))
       }.onFailure { Store.show("图片没生成成功") }
       busy = false
     }

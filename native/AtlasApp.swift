@@ -24,11 +24,14 @@ struct AtlasApp: App {
         .onAppear {
           ThemeFX.apply(store.theme)
           sync.store = store
+          AppLock.shared.toast = { [weak store] t in store?.show(t) }
+          LockWindow.sync()   // 2.6 应用锁: locked from the first frame when it is on
           let s = sync
           store.onSaved = { [weak s] in s?.schedule() }
           Task { await sync.run() }
         }
         .onChange(of: phase) { _, p in
+          AppLock.shared.scenePhase(p)
           if p == .active { Task { await sync.run() } }
           // 2.5: values shown with the eye are masked again whenever the app leaves the screen
           if p != .active { store.remask() }
@@ -55,6 +58,8 @@ struct RootView: View {
     .sheet(item: Binding(get: { store.route }, set: { r in store.route = r })) { r in sheet(r) }
     .overlay { TourLayer(inPicker: false).animation(Motion.smooth, value: store.tourStep) }
     .overlay(alignment: .top) { ToastView() }
+    // 2.6: the same cover as the lock window, so nothing shows for a frame before that window is up
+    .overlay { if AppLock.shared.blocking { Color(uiColor: .systemBackground).ignoresSafeArea() } }
     // the 操作演示 starts on the wallet, ends its last step on the map, and goes back to the wallet when done
     .onChange(of: store.tourStep) { _, s in
       let t = s == "map" ? 2 : (s == nil || s == "add") ? 0 : tab
@@ -90,8 +95,10 @@ struct RootView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { store.show("数据文件读取出错，已恢复到上次能打开的版本") }
       }
       if !store.firstRun && !store.recovered {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { store.nudge() }
+        // 2.6: the one-time 应用锁 suggestion takes the place of the weekly 小提示 the time it shows
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { if !AppLock.shared.blocking && !AppLock.shared.maybeTip(store) { store.nudge() } }
       }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { Task { await AppLock.shared.autoUnlock() } }
       Task { try? await Task.sleep(for: .seconds(4)); await store.backfillIcons() }
     }
   }
@@ -186,6 +193,8 @@ struct ToastView: View {
       .transition(.move(edge: .top).combined(with: .opacity))
       .id(t.id)
       .gesture(DragGesture().onEnded { v in if v.translation.height < -10 { withAnimation(Motion.snappy) { store.toast = nil } } })
+      // 2.6: a tip (plain line, no button) does its thing when tapped
+      .onTapGesture { if t.tap { store.toastAction?(); withAnimation(Motion.snappy) { store.toast = nil } } }
       .sensoryFeedback(.success, trigger: t.id)
     }
   }

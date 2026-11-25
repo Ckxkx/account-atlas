@@ -727,7 +727,7 @@ fun PickerSheet(presetIdentity: String?) {
           }
         }
       }
-      confirmRemove?.let { p ->
+      confirmRemove?.takeIf { !AppLock.blocking }?.let { p ->
         AlertDialog(onDismissRequest = { confirmRemove = null }, title = { Text("从列表移除“${p.name}”？") },
           text = { Text("只会从这个列表移除，已记录的账号不受影响。") },
           confirmButton = { TextButton({ confirmRemove = null; removeCustom(p) }) { Text("移除", color = Color(0xFFFF453A)) } },
@@ -805,6 +805,7 @@ fun ManualAdd(initial: String, onDismiss: () -> Unit, onAdd: (String, String, St
     webHits = SiteLookup.find(n.trim())
   }
   val domainHits = if (cleanDomain(d).isNotEmpty()) emptyList() else localHits.ifEmpty { webHits }
+  if (AppLock.blocking) return
   AlertDialog(onDismissRequest = onDismiss, title = { Text("手动添加") },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

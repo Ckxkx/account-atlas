@@ -58,6 +58,14 @@ jobs:
         with:
           name: Atlas-ipa
           path: Atlas.ipa
+      # 2.6: no Xcode test target, so the backup crypto is checked on its own: BackupCrypto.swift built for
+      # macOS opens the WebCrypto test vector, and the web code opens what iOS wrote (cross-platform files)
+      - name: Backup encryption test vector (iOS <-> web)
+        run: |
+          set -euo pipefail
+          xcrun swiftc -O -swift-version 5 native/BackupCrypto.swift tools/ios-backup-test/main.swift -o build/backuptest
+          build/backuptest tools/testvectors build/ios-enc.json
+          node tools/test-backup-crypto.mjs build/ios-enc.json 1234
 
   # simulator screenshots: only when run by hand (Actions -> Run workflow)
   preview:

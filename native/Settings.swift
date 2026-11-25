@@ -13,13 +13,18 @@ struct SettingsSheet: View {
   @Environment(Store.self) var store
   @EnvironmentObject var sync: Sync
   @Environment(\.dismiss) var dismiss
-  @State private var exporting = false
   @State private var importing = false
   @State private var askWipe = false
   @State private var askDemo = false
   @State private var askRestore = false
   @State private var pendingImport: Data? = nil
-  @State private var doc = BackupDoc(data: Data())
+  // 2.6 password-protected backups
+  @State private var exportForm = false
+  @State private var encImport: Data? = nil
+  @State private var askPass = false
+  @State private var encPass = ""
+  @State private var encError = ""
+  private var lock: AppLock { AppLock.shared }
 
   var body: some View {
     NavigationStack {
@@ -34,7 +39,10 @@ struct SettingsSheet: View {
           }
         }
         Section {
-          Toggle(isOn: Binding(get: { store.maskValues }, set: { v in store.maskValues = v }).animation(Motion.smooth)) { Label("默认隐藏账号", systemImage: "eye.slash") }
+          // 2.6: with the 应用锁 on, showing every value (turning this off) asks for Face ID / passcode first
+          Toggle(isOn: Binding(get: { store.maskValues }, set: { v in
+            if v { withAnimation(Motion.smooth) { store.maskValues = true } } else { lock.reveal { withAnimation(Motion.smooth) { store.maskValues = false } } }
+          })) { Label("默认隐藏账号", systemImage: "eye.slash") }
           Toggle(isOn: Binding(get: { store.hideNames }, set: { v in store.hideNames = v }).animation(Motion.smooth)) { Label("隐藏用户名", systemImage: "person.crop.circle.badge.xmark") }
           Picker(selection: Binding(get: { store.theme }, set: { ThemeFX.set($0, store: store) })) {
             Text("深色").tag("dark")
@@ -44,11 +52,13 @@ struct SettingsSheet: View {
           NavigationLink { OrderView() } label: { Label("调整卡片顺序", systemImage: "arrow.up.arrow.down") }
           Button { store.startTour(firstRun: false) } label: { Label("操作演示", systemImage: "hand.tap") }
         } footer: { Text("账号默认打码，卡片上的眼睛可以临时显示，App 退到后台会重新打码。") }
+        lockSection
         Section {
           Button { store.route = .share } label: { Label("分享我的星图", systemImage: "square.and.arrow.up.on.square") }
         } footer: { Text("生成一张卡片图片：有哪些 App、各用哪个身份。默认不显示任何邮箱和号码。") }
         Section {
-          Button { doc = BackupDoc(data: store.backupJSON()); exporting = true } label: { Label("导出备份", systemImage: "square.and.arrow.up") }
+          // 2.6: exporting always asks for Face ID / passcode first, then offers a password for the file
+          Button { Task { if await lock.require("导出备份") { exportForm = true } } } label: { Label("导出备份", systemImage: "square.and.arrow.up") }
           Button { importing = true } label: { Label("导入备份", systemImage: "square.and.arrow.down") }
           if store.hasDemo {
             Button(role: .destructive) { store.clearDemo() } label: { Label("清除示例数据", systemImage: "xmark.bin") }
@@ -89,16 +99,20 @@ struct SettingsSheet: View {
       .tint(.accentColor)
       .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.bold() } }
-      .fileExporter(isPresented: $exporting, document: doc, contentType: .json, defaultFilename: "账号备份-\(Date().formatted(.iso8601.year().month().day()))") { r in
-        if case .success = r { store.show("备份已导出") }
-      }
+      .navigationDestination(isPresented: $exportForm) { ExportView() }
       .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { r in
         guard case .success(let url) = r else { return }
         let ok = url.startAccessingSecurityScopedResource(); defer { if ok { url.stopAccessingSecurityScopedResource() } }
-        guard let d = try? Data(contentsOf: url), store.readBackup(d) != nil else { store.show("这不是账号星图的备份文件"); return }
-        // replacing what is there is asked first; the old data is kept as a restore point either way
-        if store.data.identities.isEmpty && store.data.accounts.isEmpty { if store.importBackup(d) { dismiss() } } else { pendingImport = d }
+        guard let d = try? Data(contentsOf: url) else { store.show("这不是账号星图的备份文件"); return }
+        // 2.6: a password-protected backup is opened first, then goes down the same path
+        if BackupCrypto.isEnvelope(d) { encImport = d; encPass = ""; encError = ""; askPass = true; return }
+        importPlain(d)
       }
+      .alert("加密的备份", isPresented: $askPass) {
+        SecureField("备份密码", text: $encPass)
+        Button("解锁") { openEncrypted() }
+        Button("取消", role: .cancel) { encImport = nil; encPass = "" }
+      } message: { Text(encError.isEmpty ? "这份备份设置了密码，输入导出时设的密码。" : encError) }
       .confirmationDialog("清空全部数据？", isPresented: $askWipe, titleVisibility: .visible) {
         Button("清空全部数据", role: .destructive) {
           store.saveRestorePoint("wipe")
@@ -120,6 +134,55 @@ struct SettingsSheet: View {
       } message: { Text("会把数据换回那时的样子。现在的数据也会先存一份，可以再换回来。") }
     }
   }
+  /// the existing import path: a plain backup (straight from the file, or just decrypted)
+  func importPlain(_ d: Data) {
+    guard store.readBackup(d) != nil else { store.show("这不是账号星图的备份文件"); return }
+    // replacing what is there is asked first; the old data is kept as a restore point either way
+    if store.data.identities.isEmpty && store.data.accounts.isEmpty { if store.importBackup(d) { dismiss() } } else { pendingImport = d }
+  }
+  func openEncrypted() {
+    guard let env = encImport else { return }
+    let pw = encPass
+    encPass = ""
+    Task {
+      let r = await Task.detached { () -> Result<Data, BackupCrypto.Failure> in
+        do { return .success(try BackupCrypto.decrypt(env, pass: pw)) }
+        catch let f as BackupCrypto.Failure { return .failure(f) }
+        catch { return .failure(.badFormat) }
+      }.value
+      switch r {
+      case .success(let plain):
+        encImport = nil; encError = ""
+        try? await Task.sleep(for: .milliseconds(350))   // let the password alert go before the next one
+        importPlain(plain)
+      case .failure(.wrongPassword):
+        // 密码错误: ask again
+        encError = "密码错误"
+        try? await Task.sleep(for: .milliseconds(350))
+        askPass = true
+      case .failure:
+        encImport = nil
+        store.show("这不是账号星图的备份文件")
+      }
+    }
+  }
+
+  // 2.6 应用锁
+  @ViewBuilder var lockSection: some View {
+    let ok = AppLock.available()
+    Section {
+      Toggle(isOn: Binding(get: { lock.enabled }, set: { v in Task { await lock.setEnabled(v) } })) { Label("应用锁", systemImage: "lock") }
+        .disabled(!ok && !lock.enabled)
+      if lock.enabled {
+        Picker(selection: Binding(get: { lock.relockSec }, set: { lock.setRelock($0) })) {
+          ForEach(AppLock.relockOptions, id: \.self) { s in Text(AppLock.relockName(s)).tag(s) }
+        } label: { Label("重新锁定", systemImage: "timer") }
+      }
+    } footer: {
+      Text(ok ? "打开账号星图、或离开后再回来时，要验证\(AppLock.biometryName == "锁屏密码" ? "" : AppLock.biometryName + "或")锁屏密码。开启后，查看完整账号也要先验证。" : "请先在系统设置中设置锁屏密码")
+    }
+  }
+
   var syncStatus: String {
     switch sync.state {
     case "off": return "未开启"
@@ -238,6 +301,63 @@ struct SyncView: View {
     .navigationTitle("加密同步").navigationBarTitleDisplayMode(.inline)
     .confirmationDialog("关闭同步？", isPresented: $askOff, titleVisibility: .visible) {
       Button("关闭同步", role: .destructive) { sync.disable() }
+    }
+  }
+}
+
+/// 2.6 导出备份: 「设置密码加密」 is on by default; off exports the plain JSON exactly as before.
+struct ExportView: View {
+  @Environment(Store.self) var store
+  @Environment(\.dismiss) var dismiss
+  @State private var encrypt = true
+  @State private var p1 = ""
+  @State private var p2 = ""
+  @State private var error = ""
+  @State private var busy = false
+  @State private var exporting = false
+  @State private var doc = BackupDoc(data: Data())
+
+  var body: some View {
+    Form {
+      Section {
+        Toggle(isOn: $encrypt.animation(Motion.smooth)) { Label("设置密码加密", systemImage: "lock.doc") }
+      } footer: {
+        if !encrypt { Text("不加密的备份是明文 JSON，拿到文件的人能看到里面所有的邮箱和手机号。") }
+      }
+      if encrypt {
+        Section {
+          SecureField("密码（至少 4 位）", text: $p1).textContentType(.newPassword)
+          SecureField("再输一次", text: $p2).textContentType(.newPassword)
+        } footer: {
+          VStack(alignment: .leading, spacing: 6) {
+            if !error.isEmpty { Text(error).foregroundStyle(.red) }
+            Text("忘记密码将无法恢复这份备份，我们也无法找回").foregroundStyle(.orange)
+          }
+        }
+      }
+      Section {
+        Button { go() } label: {
+          HStack { Spacer(); if busy { ProgressView() } else { Text("导出").bold() }; Spacer() }
+        }.disabled(busy)
+      }
+    }
+    .navigationTitle("导出备份").navigationBarTitleDisplayMode(.inline)
+    .fileExporter(isPresented: $exporting, document: doc, contentType: .json, defaultFilename: "账号备份-\(Date().formatted(.iso8601.year().month().day()))") { r in
+      if case .success = r { store.show("备份已导出"); dismiss() }
+    }
+  }
+
+  func go() {
+    let plain = store.backupJSON()
+    guard encrypt else { doc = BackupDoc(data: plain); exporting = true; return }
+    guard p1.count >= 4 else { error = "密码至少 4 位"; return }
+    guard p1 == p2 else { error = "两次输入的密码不一样"; return }
+    error = ""; busy = true
+    let pw = p1
+    Task {
+      let out = await Task.detached { try? BackupCrypto.encrypt(plain, pass: pw) }.value
+      busy = false
+      if let out { doc = BackupDoc(data: out); exporting = true } else { error = "加密失败" }
     }
   }
 }

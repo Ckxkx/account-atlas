@@ -831,3 +831,8 @@ html[data-theme=light] .tour-a .tour-go{color:#fff}
 /* 分享我的星图 preview */
 .share-prev{display:flex;justify-content:center}
 .share-prev img{width:min(320px,100%);border-radius:24px;box-shadow:0 16px 40px rgba(0,0,0,.35);min-height:200px;background:rgba(127,127,127,.1)}
+/* 2.6 export: 设置密码加密 */
+.chk-row{cursor:pointer;min-height:50px}
+.chk-row input{width:22px;height:22px;flex:none;accent-color:var(--tint);margin:0}
+.hint.warn{color:#ff9f0a}
+.hint.err{color:var(--red)}

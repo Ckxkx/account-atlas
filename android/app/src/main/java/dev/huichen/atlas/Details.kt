@@ -87,6 +87,7 @@ fun ActionTile(t: String, icon: ImageVector, modifier: Modifier, destructive: Bo
 
 @Composable
 fun Confirm(title: String, message: String, action: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+  if (AppLock.blocking) return   // a dialog is its own window: never leave one usable on top of the lock screen
   AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(message) },
     confirmButton = { TextButton({ onDismiss(); onConfirm() }) { Text(action, color = pal.red) } },
     dismissButton = { TextButton(onDismiss) { Text("取消") } })
@@ -213,7 +214,7 @@ fun AccountDetail(id: String) {
     }
     T("添加于 " + dayOf(a.createdAt).format(DateTimeFormatter.ofPattern("yyyy年M月d日", Locale.CHINA)), 12f, color = pal.tertiary, modifier = Modifier.padding(top = 24.dp))
   }
-  if (chooser) AlertDialog(onDismissRequest = { chooser = false }, title = { Text("复制哪个账号？") },
+  if (chooser && !AppLock.blocking) AlertDialog(onDismissRequest = { chooser = false }, title = { Text("复制哪个账号？") },
     text = {
       Column {
         linked.forEach { i ->

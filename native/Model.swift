@@ -452,6 +452,8 @@ struct Toast: Identifiable, Equatable {
   let id = UUID()
   var text: String
   var action: String? = nil
+  /// 2.6: a plain line that does something when tapped (no button)
+  var tap = false
   static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
 }
 
@@ -757,6 +759,15 @@ final class Store {
     guard let p = pick, now - oldest >= 14 * day else { return }
     d.set(now, forKey: "atlas.nudgeAt")
     _ = p; show("好久没来记录新账号啦，要不要来看看呢～")   // plain text only: no address, number or name on screen
+  }
+
+  func tip(_ text: String, _ fn: @escaping () -> Void) {
+    toastAction = fn
+    withAnimation(Motion.smooth) { toast = Toast(text: text, tap: true) }
+    let t = toast
+    DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+      if self?.toast == t { withAnimation(.easeInOut(duration: 0.3)) { self?.toast = nil } }
+    }
   }
 
   func show(_ text: String, action: String? = nil, _ fn: (() -> Void)? = nil) {

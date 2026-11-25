@@ -20,6 +20,7 @@
   <key>UIStatusBarStyle</key><string>UIStatusBarStyleLightContent</string>
   <key>UIViewControllerBasedStatusBarAppearance</key><true/>
   <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
+  <key>NSFaceIDUsageDescription</key><string>用于解锁账号星图和查看完整账号</string>
   <key>ITSAppUsesNonExemptEncryption</key><false/>
 </dict>
 </plist>

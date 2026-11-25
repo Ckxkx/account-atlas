@@ -1,2 +1,3 @@
 "CFBundleDisplayName" = "账号星图";
 "CFBundleName" = "Atlas";
+"NSFaceIDUsageDescription" = "用于解锁账号星图和查看完整账号";

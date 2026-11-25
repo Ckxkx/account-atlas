@@ -76,3 +76,55 @@ object AtlasCrypto {
   fun sealData(d: AtlasData, key: ByteArray, saltB64: String) = seal(encodeAtlas(d).toByteArray(Charsets.UTF_8), key, saltB64)
   fun openData(text: String, key: ByteArray): AtlasData = decodeAtlas(String(open(text, key), Charsets.UTF_8))
 }
+
+/**
+ * 2.6 password-protected backups. Same file as the web app (app.js BackupCrypto) and iOS (BackupCrypto.swift):
+ *   {"atlasEncrypted":1,"app":"atlas","kdf":"PBKDF2-SHA256","iter":210000,"salt":b64(16),"iv":b64(12),"ct":b64(ciphertext || tag[16])}
+ *   key = PBKDF2-HMAC-SHA256(UTF-8 password, salt, iter, 32 bytes) (AtlasCrypto.derive, byte-exact with
+ *   WebCrypto / CommonCrypto), AES-256-GCM. The plaintext is exactly the plain backup file (UTF-8).
+ */
+object BackupCrypto {
+  const val ITERATIONS = 210_000
+  private val pretty = Json { prettyPrint = true }
+  class BadFormat : Exception("这不是账号星图的备份文件")
+  class WrongPassword : Exception("密码错误")
+
+  /** true for anything that claims to be an encrypted backup (so it is never mistaken for a plain one) */
+  fun isEnvelope(text: String): Boolean =
+    runCatching { Json.parseToJsonElement(text).jsonObject.containsKey("atlasEncrypted") }.getOrDefault(false)
+
+  fun encrypt(plain: String, pass: String, iterations: Int = ITERATIONS): String {
+    val salt = AtlasCrypto.randomBytes(16)
+    val iv = AtlasCrypto.randomBytes(12)
+    val key = AtlasCrypto.derive(pass, salt, iterations)
+    val c = Cipher.getInstance("AES/GCM/NoPadding")
+    c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+    val ct = c.doFinal(plain.toByteArray(Charsets.UTF_8))   // Java appends the 16-byte tag: ct || tag
+    val env = JsonObject(linkedMapOf(
+      "atlasEncrypted" to JsonPrimitive(1), "app" to JsonPrimitive("atlas"), "kdf" to JsonPrimitive("PBKDF2-SHA256"),
+      "iter" to JsonPrimitive(iterations), "salt" to JsonPrimitive(AtlasCrypto.b64(salt)),
+      "iv" to JsonPrimitive(AtlasCrypto.b64(iv)), "ct" to JsonPrimitive(AtlasCrypto.b64(ct)),
+    ))
+    return pretty.encodeToString(JsonObject.serializer(), env)
+  }
+
+  /** Throws BadFormat for a broken / unknown file and WrongPassword when the password doesn't open it. */
+  fun decrypt(text: String, pass: String): String {
+    val o = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: throw BadFormat()
+    fun str(k: String) = runCatching { o[k]?.jsonPrimitive?.takeIf { it.isString }?.content }.getOrNull()
+    val version = runCatching { o["atlasEncrypted"]?.jsonPrimitive?.content?.toIntOrNull() }.getOrNull()
+    val iter = runCatching { o["iter"]?.jsonPrimitive?.content?.toIntOrNull() }.getOrNull()
+    val salt = str("salt")?.let { runCatching { AtlasCrypto.unb64(it) }.getOrNull() }
+    val iv = str("iv")?.let { runCatching { AtlasCrypto.unb64(it) }.getOrNull() }
+    val ct = str("ct")?.let { runCatching { AtlasCrypto.unb64(it) }.getOrNull() }
+    if (version != 1 || str("kdf") != "PBKDF2-SHA256" || iter == null || iter < 1000 || iter > 10_000_000 ||
+      salt == null || salt.size < 8 || iv == null || iv.size != 12 || ct == null || ct.size <= 16) throw BadFormat()
+    val key = AtlasCrypto.derive(pass, salt, iter)
+    val plain = try {
+      val c = Cipher.getInstance("AES/GCM/NoPadding")
+      c.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+      c.doFinal(ct)
+    } catch (e: javax.crypto.AEADBadTagException) { throw WrongPassword() }
+    return String(plain, Charsets.UTF_8)
+  }
+}

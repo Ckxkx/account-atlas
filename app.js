@@ -1526,28 +1526,122 @@
   function markSpot() { $$('#spotResults .reel, #spotResults .cell').forEach((c, k) => c.classList.toggle('sel', k === spotSel)); }
 
   // ---------- import / export ----------
-  function exportData() {
-    if (native) { native.postMessage({ file: `账号备份-${new Date().toISOString().slice(0, 10)}.json`, text: JSON.stringify({ app: 'atlas', version: 1, exportedAt: new Date().toISOString(), identities: state.identities, accounts: state.accounts }, null, 2) }); return; }
-    const blob = new Blob([JSON.stringify({ app: 'atlas', version: 1, exportedAt: new Date().toISOString(), identities: state.identities, accounts: state.accounts }, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `账号备份-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+  // 2.6: a backup can be locked with a password. Same file on web, iOS and Android:
+  //   {"atlasEncrypted":1,"app":"atlas","kdf":"PBKDF2-SHA256","iter":210000,"salt":b64(16 bytes),"iv":b64(12 bytes),"ct":b64(ciphertext || 16-byte tag)}
+  //   key = PBKDF2-HMAC-SHA256(UTF-8 password, salt, iter, 32 bytes); AES-256-GCM; standard base64 with padding.
+  //   The plaintext is exactly the plain backup file (UTF-8), so a decrypted backup imports like a plain one.
+  const BackupCrypto = (() => {
+    const ITER = 210000, enc = new TextEncoder(), dec = new TextDecoder();
+    const b64 = buf => { const u = new Uint8Array(buf); let s = ''; for (let k = 0; k < u.length; k += 0x8000) s += String.fromCharCode(...u.subarray(k, k + 0x8000)); return btoa(s); };
+    const unb64 = s => Uint8Array.from(atob(String(s).trim()), c => c.charCodeAt(0));
+    async function key(pass, salt, iter, use) {
+      const base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+      return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, [use]);
+    }
+    const isEnvelope = o => !!o && typeof o === 'object' && !Array.isArray(o) && o.atlasEncrypted !== undefined;
+    async function seal(text, pass) {
+      const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await key(pass, salt, ITER, 'encrypt'), enc.encode(text));
+      return JSON.stringify({ atlasEncrypted: 1, app: 'atlas', kdf: 'PBKDF2-SHA256', iter: ITER, salt: b64(salt), iv: b64(iv), ct: b64(ct) }, null, 2);
+    }
+    // throws Error('format') for a broken / unknown file, Error('password') for a wrong password
+    async function open(o, pass) {
+      let salt, iv, ct;
+      try { salt = unb64(o.salt); iv = unb64(o.iv); ct = unb64(o.ct); } catch { throw new Error('format'); }
+      const iter = o.iter;
+      if (o.atlasEncrypted !== 1 || o.kdf !== 'PBKDF2-SHA256' || !Number.isInteger(iter) || iter < 1000 || iter > 10000000 || salt.length < 8 || iv.length !== 12 || ct.length <= 16) throw new Error('format');
+      let pt;
+      try { pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, await key(pass, salt, iter, 'decrypt'), ct); } catch { throw new Error('password'); }
+      return dec.decode(pt);
+    }
+    return { ITER, isEnvelope, seal, open };
+  })();
+  const backupText = () => JSON.stringify({ app: 'atlas', version: 1, exportedAt: new Date().toISOString(), identities: state.identities, accounts: state.accounts }, null, 2);
+  function saveBackupFile(text) {
+    const name = `账号备份-${new Date().toISOString().slice(0, 10)}.json`;
+    if (native) { native.postMessage({ file: name, text }); return; }
+    const blob = new Blob([text], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1500); toast('备份已导出');
+  }
+  // 导出备份: 「设置密码加密」 is on by default; turning it off exports the plain JSON as before
+  function exportData() {
+    openSheet(`${bar('取消', '导出备份', '导出', 'id="expGo"')}<div class="sheet-body form">
+      <div class="group"><label class="cell chk-row"><span class="cell-main"><span class="cell-title">设置密码加密</span></span><input type="checkbox" id="expEnc" checked></label></div>
+      <div id="expPwBox">
+        <div class="sec-title">备份密码</div>
+        <div class="group"><div class="field" id="expF1"><input id="expP1" type="password" placeholder="至少 4 位" autocomplete="new-password"></div><div class="field" id="expF2"><input id="expP2" type="password" placeholder="再输一次" autocomplete="new-password"></div></div>
+        <p class="hint err" id="expErr" hidden></p>
+        <p class="hint warn">忘记密码将无法恢复这份备份，我们也无法找回</p>
+      </div>
+      <p class="hint" id="expPlain" hidden>不加密的备份是明文 JSON，拿到文件的人能看到里面所有的邮箱和手机号。</p>
+    </div>`, { kind: 'form' });
+    setTimeout(() => {
+      const paint = () => { const on = $('#expEnc').checked; $('#expPwBox').hidden = !on; $('#expPlain').hidden = on; };
+      $('#expEnc').onchange = paint; paint();
+      const fail = (id, msg) => { const f = $(id); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); const e = $('#expErr'); e.textContent = msg; e.hidden = false; };
+      const go = async () => {
+        const btn = $('#expGo'); if (!btn || btn.disabled) return;
+        if (!$('#expEnc').checked) { closeSheet(); saveBackupFile(backupText()); return; }
+        const p1 = $('#expP1').value, p2 = $('#expP2').value;
+        if (p1.length < 4) return fail('#expF1', '密码至少 4 位');
+        if (p1 !== p2) return fail('#expF2', '两次输入的密码不一样');
+        btn.disabled = true; btn.textContent = '加密中…';
+        try { const text = await BackupCrypto.seal(backupText(), p1); closeSheet(); saveBackupFile(text); }
+        catch { btn.disabled = false; btn.textContent = '导出'; toast('加密失败，这个浏览器可能不支持'); }
+      };
+      $('#expGo').onclick = go;
+      $('#expP2').onkeydown = e => { if (e.key === 'Enter') go(); };
+    }, 0);
   }
   function importData(file) {
     const r = new FileReader();
     r.onload = () => {
-      try {
-        const d = JSON.parse(r.result);
-        if (!Array.isArray(d.identities) || !Array.isArray(d.accounts)) throw 0;
-        const go = () => {
-          saveRestorePoint('import');   // what it replaces can always be brought back from 更多
-          snap(); state.identities = d.identities; state.accounts = d.accounts; save(); setKind(ui.kind); render();
-          undoToast(`已导入 ${d.identities.length} 个身份和 ${d.accounts.length} 个网站`);
-        };
-        if (state.identities.length || state.accounts.length) confirmSheet('导入备份？', `导入会替换现在的 ${state.identities.length} 个身份和 ${state.accounts.length} 个网站与 App。替换前的数据会先存一份，可以在「更多」里恢复。`, '导入', go, false);
-        else go();
-      } catch { toast('这不是 Atlas 的备份文件'); }
+      let d;
+      try { d = JSON.parse(r.result); } catch { return toast('这不是 Atlas 的备份文件'); }
+      if (BackupCrypto.isEnvelope(d)) return askBackupPassword(d);
+      importParsed(d);
     };
     r.readAsText(file);
+  }
+  // the existing import path: a plain backup object (straight from a plain file, or decrypted)
+  function importParsed(d) {
+    if (!d || !Array.isArray(d.identities) || !Array.isArray(d.accounts)) return toast('这不是 Atlas 的备份文件');
+    const go = () => {
+      saveRestorePoint('import');   // what it replaces can always be brought back from 更多
+      snap(); state.identities = d.identities; state.accounts = d.accounts; save(); setKind(ui.kind); render();
+      undoToast(`已导入 ${d.identities.length} 个身份和 ${d.accounts.length} 个网站`);
+    };
+    if (state.identities.length || state.accounts.length) confirmSheet('导入备份？', `导入会替换现在的 ${state.identities.length} 个身份和 ${state.accounts.length} 个网站与 App。替换前的数据会先存一份，可以在「更多」里恢复。`, '导入', go, false);
+    else go();
+  }
+  // an encrypted backup: ask for its password; a wrong one can be tried again
+  function askBackupPassword(env) {
+    openSheet(`${bar('取消', '加密的备份', '解锁', 'id="impGo"')}<div class="sheet-body form">
+      <p class="hint" style="margin-top:18px">这份备份设置了密码，输入导出时设的密码。</p>
+      <div class="group" style="margin-top:10px"><div class="field" id="impF"><input id="impP" type="password" placeholder="备份密码" autocomplete="current-password"></div></div>
+      <p class="hint err" id="impErr" hidden></p>
+    </div>`, { kind: 'form' });
+    setTimeout(() => {
+      const go = async () => {
+        const btn = $('#impGo'); if (!btn || btn.disabled) return;
+        const pw = $('#impP').value; if (!pw) return;
+        btn.disabled = true; btn.textContent = '解锁中…';
+        let text;
+        try { text = await BackupCrypto.open(env, pw); }
+        catch (e) {
+          btn.disabled = false; btn.textContent = '解锁';
+          if (e.message !== 'password') { closeSheet(); return toast('这不是 Atlas 的备份文件'); }
+          const f = $('#impF'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid');
+          const er = $('#impErr'); er.textContent = '密码错误'; er.hidden = false; $('#impP').select(); return;
+        }
+        let d; try { d = JSON.parse(text); } catch { closeSheet(); return toast('这不是 Atlas 的备份文件'); }
+        closeSheet(); importParsed(d);
+      };
+      $('#impGo').onclick = go;
+      $('#impP').onkeydown = e => { if (e.key === 'Enter') go(); };
+      $('#impP').focus();
+    }, 0);
   }
 
   // ---------- 2.5: eye, copying an account value ----------

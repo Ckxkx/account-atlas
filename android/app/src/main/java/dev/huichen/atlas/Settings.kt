@@ -56,6 +56,8 @@ import androidx.compose.material.icons.outlined.PersonOff
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Upload
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -125,21 +127,36 @@ fun SettingsMain(go: (String) -> Unit) {
   val ctx = LocalContext.current
   var askWipe by remember { mutableStateOf(false) }
   var themeMenu by remember { mutableStateOf(false) }
+  val act = ctx.fragmentActivity()
+  // 2.6: what 导出 writes (encrypted or plain) is made first, then the file picker saves exactly that
+  var pendingExport by remember { mutableStateOf<String?>(null) }
+  var askExport by remember { mutableStateOf(false) }
   val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-    if (uri != null) runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(Store.backupJSON().toByteArray()) } }
+    val text = pendingExport; pendingExport = null
+    if (uri != null && text != null) runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(text.toByteArray(Charsets.UTF_8)) } }
       .onSuccess { Store.show("备份已导出") }.onFailure { Store.show("导出失败") }
   }
   var pendingImport by remember { mutableStateOf<String?>(null) }
+  var encImport by remember { mutableStateOf<String?>(null) }
+  var relockMenu by remember { mutableStateOf(false) }
+  // a plain backup (as read from the file, or just decrypted) goes down the existing import path
+  val importPlain: (String) -> Unit = { text ->
+    when {
+      Store.readBackup(text) == null -> Store.show("这不是账号星图的备份文件")
+      // replacing what is there is asked first; the old data is kept as a restore point either way
+      Store.data.identities.isNotEmpty() || Store.data.accounts.isNotEmpty() -> pendingImport = text
+      Store.importBackup(text) -> Store.popAll()
+    }
+  }
   var askDemo by remember { mutableStateOf(false) }
   var askRestore by remember { mutableStateOf(false) }
   val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
     if (uri != null) {
-      val text = runCatching { ctx.contentResolver.openInputStream(uri)!!.use { String(it.readBytes()) } }.getOrNull()
+      val text = runCatching { ctx.contentResolver.openInputStream(uri)!!.use { String(it.readBytes(), Charsets.UTF_8) } }.getOrNull()
       when {
-        text == null || Store.readBackup(text) == null -> Store.show("这不是账号星图的备份文件")
-        // replacing what is there is asked first; the old data is kept as a restore point either way
-        Store.data.identities.isNotEmpty() || Store.data.accounts.isNotEmpty() -> pendingImport = text
-        Store.importBackup(text) -> Store.popAll()
+        text == null -> Store.show("这不是账号星图的备份文件")
+        BackupCrypto.isEnvelope(text) -> encImport = text   // 2.6: password-protected backup
+        else -> importPlain(text)
       }
     }
   }
@@ -150,9 +167,11 @@ fun SettingsMain(go: (String) -> Unit) {
         SettingRow(Icons.Outlined.Cloud, "加密同步", trailing = { T(syncStatus(), 14f, color = pal.secondary) }, chevron = true) { go("sync") }
       }
       FormGroup {
+        // 2.6: with the 应用锁 on, showing every value (turning this off) asks for authentication first
+        val setMask: (Boolean) -> Unit = { v -> if (v) Store.putMask(true) else AppLock.reveal(act) { Store.putMask(false) } }
         SettingRow(Icons.Outlined.VisibilityOff, "默认隐藏账号", trailing = {
-          Switch(Store.maskValues, { Store.putMask(it) }, colors = SwitchDefaults.colors(checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
-        }) { Store.putMask(!Store.maskValues) }
+          Switch(Store.maskValues, { setMask(it) }, colors = SwitchDefaults.colors(checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
+        }) { setMask(!Store.maskValues) }
         Divider()
         SettingRow(Icons.Outlined.PersonOff, "隐藏用户名", trailing = {
           Switch(Store.hideNames, { Store.putHideNames(it) }, colors = SwitchDefaults.colors(checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
@@ -171,6 +190,23 @@ fun SettingsMain(go: (String) -> Unit) {
         Divider()
         SettingRow(Icons.Outlined.School, "操作演示", chevron = true) { Tour.start(firstRun = false) }
       }
+      // 2.6 应用锁
+      val lockOK = remember(AppLock.resumeTick) { AppLock.available(ctx) }
+      FormGroup(footer = if (!lockOK) "请先在系统设置中设置锁屏密码" else "打开账号星图、或离开后再回来时，要验证指纹、面部或锁屏密码。开启后，查看完整账号也要先验证。") {
+        SettingRow(Icons.Outlined.Lock, "应用锁", color = if (lockOK || AppLock.enabled) null else pal.tertiary, trailing = {
+          Switch(AppLock.enabled, { on -> act?.let { AppLock.setEnabled(it, on) } }, enabled = lockOK || AppLock.enabled,
+            colors = SwitchDefaults.colors(checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
+        }) { if (lockOK || AppLock.enabled) act?.let { AppLock.setEnabled(it, !AppLock.enabled) } }
+        if (AppLock.enabled) {
+          Divider()
+          Box {
+            SettingRow(Icons.Outlined.Timer, "重新锁定", trailing = { T(AppLock.relockLabel(), 17f, color = pal.secondary) }) { relockMenu = true }
+            DropdownMenu(relockMenu, { relockMenu = false }, Modifier.align(Alignment.TopEnd)) {
+              AppLock.RELOCK.forEach { (sec, n) -> DropdownMenuItem({ Text(if (sec == 0) "立即" else "离开 $n 后") }, { relockMenu = false; AppLock.setRelock(sec) }) }
+            }
+          }
+        }
+      }
       FormGroup(footer = "生成一张卡片图片：有哪些 App、各用哪个身份。默认不显示任何邮箱和号码。") {
         SettingRow(Icons.Outlined.Share, "分享我的星图", chevron = true) { Store.push(Route.Share) }
       }
@@ -180,9 +216,10 @@ fun SettingsMain(go: (String) -> Unit) {
         Demo.hasReal(Store.data) -> "已经有自己的数据时不能载入示例，免得和真实数据混在一起。"
         else -> ""
       }) {
-        SettingRow(Icons.Outlined.Upload, "导出备份") { exporter.launch("账号备份-${LocalDate.now()}.json") }
+        // 2.6: exporting always asks for the screen lock first (when the device has one), then for a password
+        SettingRow(Icons.Outlined.Upload, "导出备份") { act?.let { AppLock.require(it, "导出备份") { askExport = true } } }
         Divider()
-        SettingRow(Icons.Outlined.Download, "导入备份") { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
+        SettingRow(Icons.Outlined.Download, "导入备份") { AppLock.expectReturn(); importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
         if (Store.hasDemo) {
           Divider()
           SettingRow(Icons.Outlined.PlaylistRemove, "清除示例数据", color = pal.red) { Store.clearDemo() }
@@ -226,6 +263,11 @@ fun SettingsMain(go: (String) -> Unit) {
       if (Store.importBackup(text)) Store.popAll() else Store.show("这不是账号星图的备份文件")
     }
   }
+  if (askExport) ExportDialog({ askExport = false }) { text ->
+    askExport = false; pendingExport = text
+    AppLock.expectReturn(); exporter.launch("账号备份-${LocalDate.now()}.json")
+  }
+  encImport?.let { env -> BackupPasswordDialog(env, { encImport = null }) { plain -> encImport = null; importPlain(plain) } }
   if (askDemo) Confirm("载入示例数据？", "会加入几个虚构的邮箱、手机号和 App，都带示例标记，「清除示例数据」只会删掉它们。", "载入", { askDemo = false }) {
     Store.loadDemo(); Store.pop()
   }
@@ -432,3 +474,94 @@ fun SecretField(value: String, onChange: (String) -> Unit, hint: String) {
   }
 }
 
+
+// MARK: 2.6 password-protected backups (same file as the web app and iOS, see BackupCrypto)
+
+/** 导出备份: 「设置密码加密」 is on by default; off exports the plain JSON exactly as before. */
+@Composable
+fun ExportDialog(onDismiss: () -> Unit, onReady: (String) -> Unit) {
+  if (AppLock.blocking) return
+  var encrypt by remember { mutableStateOf(true) }
+  var p1 by remember { mutableStateOf("") }
+  var p2 by remember { mutableStateOf("") }
+  var error by remember { mutableStateOf("") }
+  var busy by remember { mutableStateOf(false) }
+  val scope = rememberCoroutineScope()
+  androidx.compose.material3.AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("导出备份") },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth().press(1f) { encrypt = !encrypt; error = "" }, verticalAlignment = Alignment.CenterVertically) {
+          androidx.compose.material3.Checkbox(encrypt, { encrypt = it; error = "" })
+          Text("设置密码加密")
+        }
+        if (encrypt) {
+          PasswordBox(p1, { p1 = it; error = "" }, "密码（至少 4 位）")
+          PasswordBox(p2, { p2 = it; error = "" }, "再输一次")
+          if (error.isNotEmpty()) Text(error, color = pal.red)
+          Text("忘记密码将无法恢复这份备份，我们也无法找回", color = hex("#ff9f0a"), fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp))
+        } else {
+          Text("不加密的备份是明文 JSON，拿到文件的人能看到里面所有的邮箱和手机号。", color = pal.secondary, fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp))
+        }
+      }
+    },
+    confirmButton = {
+      androidx.compose.material3.TextButton({
+        if (busy) return@TextButton
+        val plain = Store.backupJSON()
+        if (!encrypt) { onReady(plain); return@TextButton }
+        when {
+          p1.length < 4 -> error = "密码至少 4 位"
+          p1 != p2 -> error = "两次输入的密码不一样"
+          else -> {
+            busy = true
+            scope.launch {
+              val out = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { BackupCrypto.encrypt(plain, p1) } }.getOrNull()
+              busy = false
+              if (out != null) onReady(out) else error = "加密失败"
+            }
+          }
+        }
+      }, enabled = !busy) { if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("导出") }
+    },
+    dismissButton = { androidx.compose.material3.TextButton({ onDismiss() }, enabled = !busy) { Text("取消") } })
+}
+
+/** An encrypted backup was picked: ask for its password; a wrong one shows 密码错误 and can be tried again. */
+@Composable
+fun BackupPasswordDialog(env: String, onDismiss: () -> Unit, onPlain: (String) -> Unit) {
+  if (AppLock.blocking) return
+  var pass by remember { mutableStateOf("") }
+  var error by remember { mutableStateOf("") }
+  var busy by remember { mutableStateOf(false) }
+  val scope = rememberCoroutineScope()
+  androidx.compose.material3.AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("加密的备份") },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("这份备份设置了密码，输入导出时设的密码。", color = pal.secondary)
+        PasswordBox(pass, { pass = it; error = "" }, "备份密码")
+        if (error.isNotEmpty()) Text(error, color = pal.red)
+      }
+    },
+    confirmButton = {
+      androidx.compose.material3.TextButton({
+        if (busy || pass.isEmpty()) return@TextButton
+        busy = true
+        scope.launch {
+          val r = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { BackupCrypto.decrypt(env, pass) } }
+          busy = false
+          r.onSuccess { onPlain(it) }.onFailure { e ->
+            if (e is BackupCrypto.WrongPassword) error = "密码错误"
+            else { onDismiss(); Store.show("这不是账号星图的备份文件") }
+          }
+        }
+      }, enabled = !busy && pass.isNotEmpty()) { if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("解锁") }
+    },
+    dismissButton = { androidx.compose.material3.TextButton({ onDismiss() }, enabled = !busy) { Text("取消") } })
+}
+
+@Composable
+fun PasswordBox(value: String, onChange: (String) -> Unit, hint: String) {
+  androidx.compose.material3.OutlinedTextField(value, onChange, Modifier.fillMaxWidth(), singleLine = true,
+    placeholder = { Text(hint) }, visualTransformation = PasswordVisualTransformation(),
+    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
+}
