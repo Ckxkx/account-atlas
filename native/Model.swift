@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import UIKit
 import Observation
+import UniformTypeIdentifiers
 
 // MARK: - data (same JSON shape as the web app, so backups and sync interoperate)
 
@@ -64,12 +65,17 @@ struct Identity: Codable, Identifiable, Hashable {
   var provider: String? = nil
   /// email / phone: this address or number is also an Apple ID (2.4). Written only when true.
   var apple: Bool? = nil
-  /// login only: id of the email / phone identity it is bound to. Omitted when empty; a dangling id counts as none.
+  /// login only: id of the email / phone identity it is bound to (the first one). Omitted when empty; a dangling id counts as none.
   var via: String? = nil
+  /// 2.5, login only: every binding when there are two or more (via stays the first, for older clients).
+  /// Read as the union of via and vias. Omitted when there is at most one.
+  var vias: [String]? = nil
+  /// 2.5: part of the sample data (「清除示例数据」 removes exactly these). Written only when true.
+  var demo: Bool? = nil
   /// fields from newer clients, written back untouched
   var extra: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "type", "value", "label", "color", "notes", "updatedAt", "order", "esim", "provider", "via", "apple"]
+  static let knownKeys: Set<String> = ["id", "type", "value", "label", "color", "notes", "updatedAt", "order", "esim", "provider", "via", "apple", "vias", "demo"]
 
   init(id: String = newID(), type: String, value: String, label: String = "", color: String, notes: String = "", esim: Bool = false, provider: String? = nil, via: String? = nil, apple: Bool = false) {
     self.id = id; self.type = type; self.value = value; self.label = label; self.color = color; self.notes = notes
@@ -94,6 +100,9 @@ struct Identity: Codable, Identifiable, Hashable {
     provider = (p?.isEmpty ?? true) ? nil : p
     let v = try? c.decode(String.self, forKey: AnyKey("via"))
     via = (v?.isEmpty ?? true) ? nil : v
+    let vs = (try? c.decode([String].self, forKey: AnyKey("vias")))?.filter { !$0.isEmpty }
+    vias = (vs?.isEmpty ?? true) ? nil : vs
+    demo = (try? c.decode(Bool.self, forKey: AnyKey("demo"))) == true ? true : nil
     extra = unknownFields(d, known: Identity.knownKeys)
   }
   func encode(to e: Encoder) throws {
@@ -111,7 +120,24 @@ struct Identity: Codable, Identifiable, Hashable {
     if apple == true { try c.encode(true, forKey: AnyKey("apple")) }
     if let provider, !provider.isEmpty { try c.encode(provider, forKey: AnyKey("provider")) }
     if let via, !via.isEmpty { try c.encode(via, forKey: AnyKey("via")) }
+    if let vias, vias.count > 1 { try c.encode(vias, forKey: AnyKey("vias")) }
+    if demo == true { try c.encode(true, forKey: AnyKey("demo")) }
   }
+  /// 2.5: every email / phone id this 微信 / QQ is bound to, via first (union of via and vias, no repeats)
+  var bindIDs: [String] {
+    var out: [String] = []
+    if let via, !via.isEmpty { out.append(via) }
+    for x in vias ?? [] where !x.isEmpty && !out.contains(x) { out.append(x) }
+    return out
+  }
+  /// bound to exactly these ids: via = the first, vias only when there are two or more
+  mutating func setBinds(_ ids: [String]) {
+    var u: [String] = []
+    for x in ids where !x.isEmpty && x != id && !u.contains(x) { u.append(x) }
+    via = u.first
+    vias = u.count > 1 ? u : nil
+  }
+  var isDemo: Bool { demo == true }
   var isPhone: Bool { type == "phone" }
   var isESim: Bool { isPhone && esim == true }
   var isLogin: Bool { type == "login" }
@@ -163,7 +189,7 @@ func idKey(_ i: Identity) -> String? { idKey(type: i.type, provider: i.provider,
   }
   for k in d.identities.indices {
     let i = d.identities[k]
-    guard i.type == "login", i.provider == "qq", (i.via ?? "").isEmpty, i.value.contains("@") else { continue }
+    guard i.type == "login", i.provider == "qq", i.bindIDs.isEmpty, i.value.contains("@") else { continue }
     if let m = d.identities.first(where: { $0.type == "email" && normEmail($0.value) == normEmail(i.value) }) {
       d.identities[k].via = m.id; changed = true
     }
@@ -195,7 +221,8 @@ func dupCount24(_ d: AtlasData) -> Int { dupGroups24(d).reduce(0) { $0 + $1.coun
       if !o.notes.isEmpty && !keep.notes.contains(o.notes) { keep.notes = keep.notes.isEmpty ? o.notes : keep.notes + "\n" + o.notes }
       if o.apple == true { keep.apple = true }
       if o.esim == true && keep.type == "phone" { keep.esim = true }
-      if (keep.via ?? "").isEmpty, let v = o.via, !v.isEmpty, v != keep.id { keep.via = v }
+      if o.bindIDs.contains(where: { $0 != keep.id && !keep.bindIDs.contains($0) }) { keep.setBinds(keep.bindIDs + o.bindIDs) }
+      if keep.demo == true && o.demo != true { keep.demo = nil }   // merged with a real one: real
       if keep.order == nil { keep.order = o.order }
       for (k, v) in o.extra where keep.extra[k] == nil { keep.extra[k] = v }
       d.identities[kk] = keep
@@ -203,8 +230,8 @@ func dupCount24(_ d: AtlasData) -> Int { dupGroups24(d).reduce(0) { $0 + $1.coun
   }
   if to.isEmpty { return 0 }
   d.identities.removeAll { to[$0.id] != nil }
-  for k in d.identities.indices {
-    if let v = d.identities[k].via, let t = to[v] { d.identities[k].via = t == d.identities[k].id ? nil : t }
+  for k in d.identities.indices where d.identities[k].bindIDs.contains(where: { to[$0] != nil }) {
+    d.identities[k].setBinds(d.identities[k].bindIDs.map { to[$0] ?? $0 })
   }
   for k in d.accounts.indices {
     var out: [String] = []
@@ -219,6 +246,27 @@ func bindTag(_ v: Identity) -> String {
   let parts = v.value.split(separator: "@", maxSplits: 1).map(String.init)
   return String((parts.first ?? "").prefix(2)) + "•••" + (parts.count > 1 ? "@" + parts[1] : "")
 }
+/// 2.5 map / picker tag of every binding: the first one, then "+1" for each more
+func bindTags(_ binds: [Identity]) -> String {
+  guard let f = binds.first else { return "" }
+  let t = bindTag(f)
+  return t.isEmpty || binds.count < 2 ? t : t + " +\(binds.count - 1)"
+}
+/// 2.5 level 1: the value with most of it hidden: ab•••@gmail.com, ••• •••• 1234, wx•••, •••45 (mirrors Model.kt)
+func maskValue(_ i: Identity) -> String {
+  let v = i.value
+  if i.type == "email" || (i.isLogin && v.contains("@")) {
+    let parts = v.split(separator: "@", maxSplits: 1).map(String.init)
+    return String((parts.first ?? "").prefix(2)) + "•••" + (parts.count > 1 ? "@" + parts[1] : "")
+  }
+  if i.isLogin && !i.isQQ && !i.isApple { return String(v.prefix(2)) + "•••" }
+  let digits = v.filter(\.isNumber)
+  if digits.count > 7 { return "••• •••• " + String(digits.suffix(4)) }
+  return digits.count >= 4 ? "•••" + String(digits.suffix(2)) : "••••"
+}
+/// 2.5 level 2: a label or username with all but its first character hidden
+func maskName(_ s: String) -> String { s.isEmpty ? s : String(s.prefix(1)) + "•••" }
+
 /// what's wrong with a value for this kind ("email" | "phone" | "wechat" | "qq"), or nil when it's fine
 func idValueError(_ kind: String, _ value: String) -> String? {
   let v = value.trimmingCharacters(in: .whitespaces)
@@ -258,6 +306,8 @@ struct Account: Codable, Identifiable, Hashable {
   var updatedAt: Double? = nil
   /// custom / App Store icon: a data:image/png|jpeg;base64 URL (square, ≤128 px). nil = preset/favicon.
   var icon: String? = nil
+  /// 2.5: part of the sample data. Written only when true.
+  var demo: Bool? = nil
   /// fields from newer clients, written back untouched
   var extra: [String: JSONValue] = [:]
 
@@ -279,9 +329,10 @@ struct Account: Codable, Identifiable, Hashable {
     updatedAt = try? c.decode(Double.self, forKey: .updatedAt)
     let ic = try? c.decode(String.self, forKey: .icon)
     icon = (ic?.isEmpty ?? true) ? nil : ic
+    demo = (try? c.decode(Bool.self, forKey: .demo)) == true ? true : nil
     extra = unknownFields(d, known: Set(CodingKeys.allCases.map(\.rawValue)))
   }
-  enum CodingKeys: String, CodingKey, CaseIterable { case id, name, domain, category, identityIds, notes, handle, createdAt, updatedAt, icon }
+  enum CodingKeys: String, CodingKey, CaseIterable { case id, name, domain, category, identityIds, notes, handle, createdAt, updatedAt, icon, demo }
   // written by hand so an empty icon is never written (old clients just see the key missing)
   func encode(to e: Encoder) throws {
     if !extra.isEmpty {
@@ -300,6 +351,7 @@ struct Account: Codable, Identifiable, Hashable {
     try c.encode(createdAt, forKey: .createdAt)
     try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
     if let icon, !icon.isEmpty { try c.encode(icon, forKey: .icon) }
+    if demo == true { try c.encode(true, forKey: .demo) }
   }
 }
 
@@ -405,6 +457,9 @@ struct Toast: Identifiable, Equatable {
 
 enum Route: Identifiable, Equatable {
   case identity(String), account(String), newIdentity(String), editIdentity(String), editAccount(String), picker(String?), settings
+  /// 2.5: a new 微信 / QQ already bound to this email / phone
+  case newBound(String)
+  case share
   var id: String {
     switch self {
     case .identity(let s): return "i" + s
@@ -414,6 +469,8 @@ enum Route: Identifiable, Equatable {
     case .editAccount(let s): return "ea" + s
     case .picker(let s): return "p" + (s ?? "")
     case .settings: return "s"
+    case .newBound(let s): return "nb" + s
+    case .share: return "sh"
     }
   }
 }
@@ -441,7 +498,9 @@ struct AtlasIndex {
       if i.type == "email" { emails.append(i) } else if i.type == "phone" { phones.append(i) } else if i.type == "login" { logins.append(i) }
     }
     for l in logins {
-      if let v = l.via, let t = identityByID[v], t.type == "email" || t.type == "phone" { boundLogins[v, default: []].append(l) }
+      for v in l.bindIDs {
+        if let t = identityByID[v], t.type == "email" || t.type == "phone" { boundLogins[v, default: []].append(l) }
+      }
     }
     for a in byName {
       accountByID[a.id] = a
@@ -462,7 +521,22 @@ final class Store {
   // toast no longer invalidates every view of every tab the way one ObservableObject did.
   var data = AtlasData() { didSet { index = AtlasIndex(data) } }
   private(set) var index = AtlasIndex()
-  var privacy: Bool = UserDefaults.standard.bool(forKey: "atlas.privacy") { didSet { UserDefaults.standard.set(privacy, forKey: "atlas.privacy") } }
+  /// 2.5 level 1: account values are masked everywhere unless turned off (默认隐藏账号, on by default)
+  var maskValues: Bool = UserDefaults.standard.object(forKey: "atlas.maskValues") as? Bool ?? true { didSet { UserDefaults.standard.set(maskValues, forKey: "atlas.maskValues"); revealed = [] } }
+  /// 2.5 level 2: labels and usernames are hidden too (隐藏用户名, off by default)
+  var hideNames: Bool = UserDefaults.standard.bool(forKey: "atlas.hideNames") { didSet { UserDefaults.standard.set(hideNames, forKey: "atlas.hideNames") } }
+  /// cards opened with the eye; forgotten when the app goes to the background
+  var revealed: Set<String> = []
+  /// 操作演示: the screen shows sandbox data; nothing is saved or synced until it ends
+  private(set) var sandbox = false
+  @ObservationIgnored private var realSnap: AtlasData? = nil
+  /// 操作演示 step: add -> pick -> next -> who -> save -> map; nil = off
+  var tourStep: String? = nil
+  var tourFirstRun = false
+  var tourRects: [String: CGRect] = [:]
+  /// the restore point offered in 设置 (demo | import | wipe | restore)
+  var restoreWhy: String? = nil
+  var restoreAt: Double = UserDefaults.standard.double(forKey: "atlas.restoreAt")
   var kind: String = Store.savedKind() { didSet { UserDefaults.standard.set(kind, forKey: "atlas.kind") } }
   var theme: String = UserDefaults.standard.string(forKey: "atlas.theme") ?? "dark" { didSet { UserDefaults.standard.set(theme, forKey: "atlas.theme") } }
   var activeID: String? = nil
@@ -499,17 +573,24 @@ final class Store {
       if let p = try? Data(contentsOf: prev), let s = try? JSONDecoder().decode(AtlasData.self, from: p) { data = s; recovered = true }
       else { data = AtlasData(); recovered = true }
     } else if UserDefaults.standard.object(forKey: "atlasSeed") != nil || UserDefaults.standard.string(forKey: "atlasDemo") != nil {
-      data = Store.demo()   // CI screenshots / promo clips
+      var d = Store.demo()   // CI screenshots / promo clips
+      for k in d.identities.indices { d.identities[k].demo = true }
+      for k in d.accounts.indices { d.accounts[k].demo = true }
+      data = d
     } else {
       data = AtlasData()
       firstRun = true
     }
     index = AtlasIndex(data)
     remember()
+    restoreWhy = FileManager.default.fileExists(atPath: restoreURL.path) ? UserDefaults.standard.string(forKey: "atlas.restoreWhy") : nil
+    // 2.5: sample data is marked per item. Older builds kept a device list of sample ids (and a whole-file
+    // flag): exactly the listed items get the marker, never anything else.
+    adoptLegacyDemo()
     // 2.4 (atlas.prev.json above is still the untouched copy): Apple login cards become their email /
     // phone, silently and losslessly. Duplicates are merged only after the user says yes, asked once.
     migrate24()
-    if data.demo != true && UserDefaults.standard.string(forKey: "atlas.merge24") != "no" { mergeAsk = dupCount24(data) }
+    if hasReal && UserDefaults.standard.string(forKey: "atlas.merge24") != "no" { mergeAsk = dupCount24(data) }
     activeID = deck.first?.id
     // decode every icon the first screens will show, off the main thread, before they're needed
     IconStore.shared.prefetch(data.accounts)
@@ -527,11 +608,13 @@ final class Store {
     default: return data.identities.filter { $0.type == kind }
     }
   }
-  /// the email / phone a login card is bound to; a dangling or wrong-typed id counts as none
-  func via(_ i: Identity) -> Identity? {
-    guard i.isLogin, let v = i.via, let t = index.identityByID[v], t.type == "email" || t.type == "phone" else { return nil }
-    return t
+  /// every email / phone a login card is bound to (2.5: can be several); dangling or wrong-typed ids count as none
+  func binds(_ i: Identity) -> [Identity] {
+    guard i.isLogin else { return [] }
+    return i.bindIDs.compactMap { index.identityByID[$0] }.filter { ($0.type == "email" || $0.type == "phone") && $0.id != i.id }
   }
+  /// the first binding (what older clients show)
+  func via(_ i: Identity) -> Identity? { binds(i).first }
   /// login cards bound to this email / phone
   func boundLogins(_ id: String) -> [Identity] { index.boundLogins[id] ?? [] }
   var active: Identity? { deck.first { $0.id == activeID } ?? (activeID == "add" ? nil : deck.first) }
@@ -539,25 +622,16 @@ final class Store {
   func account(_ id: String) -> Account? { index.accountByID[id] }
   func accounts(of id: String) -> [Account] { index.byIdentity[id] ?? [] }
 
-  func display(_ i: Identity) -> String {
-    guard privacy else { return i.value }
-    func mail(_ v: String) -> String {
-      let parts = v.split(separator: "@", maxSplits: 1).map(String.init)
-      return String((parts.first ?? "").prefix(2)) + "•••" + (parts.count > 1 ? "@" + parts[1] : "")
-    }
-    func number(_ v: String) -> String {
-      let digits = v.filter(\.isNumber)
-      return digits.count > 7 ? "••• •••• " + digits.suffix(4) : "••••"
-    }
-    if i.type == "email" { return mail(i.value) }
-    if i.isLogin {
-      if i.isApple || i.isQQ { return i.value.contains("@") ? mail(i.value) : number(i.value) }
-      return String(i.value.prefix(2)) + "•••"
-    }
-    return number(i.value)
-  }
-  func handleText(_ h: String) -> String { privacy ? String(h.prefix(1)) + "•••" : h }
-  func title(_ i: Identity) -> String { i.label.isEmpty ? display(i) : i.label }
+  /// the value as shown: masked by default (2.5 level 1) unless revealed with the eye
+  func display(_ i: Identity) -> String { isRevealed(i.id) ? i.value : maskValue(i) }
+  func isRevealed(_ id: String) -> Bool { !maskValues || revealed.contains(id) }
+  func toggleReveal(_ id: String) { if revealed.contains(id) { revealed.remove(id) } else { revealed.insert(id) } }
+  /// the app went to the background: every value is masked again
+  func remask() { if !revealed.isEmpty { revealed = [] } }
+  /// labels and usernames: shown unless 隐藏用户名 is on (2.5 level 2)
+  func labelText(_ s: String) -> String { hideNames ? maskName(s) : s }
+  func handleText(_ h: String) -> String { labelText(h) }
+  func title(_ i: Identity) -> String { i.label.isEmpty ? display(i) : labelText(i.label) }
 
   // every change goes through here: snapshot for undo, stamp, persist, sync.
   // Works on a copy and assigns once, so observers and the index update exactly once per change.
@@ -609,10 +683,11 @@ final class Store {
   private func afterSave() {
     remember()
     persist()
-    onSaved?()
+    if !sandbox { onSaved?() }
   }
   /// encoding is cheap; the file write happens off the main thread so a tap never waits on disk
   func persist() {
+    if sandbox { return }   // 操作演示: nothing reaches the file
     guard let d = try? JSONEncoder().encode(data) else { return }
     let u = url
     io.async { try? d.write(to: u, options: .atomic) }
@@ -639,14 +714,18 @@ final class Store {
   /// the identity with this value, or a new one (reuse first: no value is ever typed in twice).
   /// Returns the id and whether it already existed.
   @discardableResult func ensureIdentity(type: String, value: String, provider: String? = nil, via: String? = nil) -> (String, Bool) {
+    ensureIdentity(type: type, value: value, provider: provider, binds: via.map { [$0] } ?? [])
+  }
+  @discardableResult func ensureIdentity(type: String, value: String, provider: String?, binds: [String]) -> (String, Bool) {
     let v = value.trimmingCharacters(in: .whitespaces)
     if let k = idKey(type: type, provider: provider, value: v), let hit = data.identities.first(where: { idKey($0) == k }) { return (hit.id, true) }
-    var bound = via
-    if bound == nil, type == "login", provider == "qq", v.contains("@") {
-      bound = data.identities.first { $0.type == "email" && normEmail($0.value) == normEmail(v) }?.id
-    }
+    var bound = binds
+    // a QQ whose QQ is an email you already have is bound to that email too, without typing it twice
+    if type == "login", provider == "qq", v.contains("@"),
+       let m = data.identities.first(where: { $0.type == "email" && normEmail($0.value) == normEmail(v) }), !bound.contains(m.id) { bound.append(m.id) }
     let color = type == "login" ? loginDefaultColor(provider ?? "wechat") : COLORS[data.identities.count % COLORS.count]
-    let i = Identity(type: type, value: v, color: color, provider: type == "login" ? provider : nil, via: type == "login" ? bound : nil)
+    var i = Identity(type: type, value: v, color: color, provider: type == "login" ? provider : nil)
+    if type == "login" { i.setBinds(bound) }
     mutate(nil, undo: false) { $0.identities.append(i) }
     return (i.id, false)
   }
@@ -658,6 +737,7 @@ final class Store {
 
   // replace everything (sync merge), without new stamps
   func adopt(_ d: AtlasData) {
+    if sandbox { realSnap = d; writeReal(d); return }   // the real data changed under the 操作演示
     data = d; remember(); persist()
     migrate24()   // an older client may still add an Apple login card
     IconStore.shared.prefetch(d.accounts)
@@ -667,7 +747,7 @@ final class Store {
   /// 小提示: at most once a week, the card that hasn't had a new site in two weeks or more
   func nudge() {
     let d = UserDefaults.standard, now = nowMS(), day = 86_400_000.0
-    guard data.demo != true, now - d.double(forKey: "atlas.nudgeAt") >= 7 * day else { return }
+    guard hasReal, !sandbox, now - d.double(forKey: "atlas.nudgeAt") >= 7 * day else { return }
     let demo = demoIDs
     var pick: Identity? = nil, oldest = Double.infinity
     for i in data.identities where !demo.contains(i.id) {
@@ -748,7 +828,7 @@ final class Store {
   /// were drawn with a parent site's logo or a 32 px favicon. Look each name up on the App Store once
   /// and keep the artwork of an exact-name match. A few names per launch; each name is tried only once.
   func backfillIcons() async {
-    guard data.demo != true else { return }
+    guard hasReal, !sandbox else { return }
     let triedKey = "atlas.iconTried"
     var tried = Set(UserDefaults.standard.stringArray(forKey: triedKey) ?? [])
     var names: [String] = []
@@ -781,44 +861,148 @@ final class Store {
     let o: [String: Any] = ["app": "atlas", "version": 1, "exportedAt": iso, "identities": ids, "accounts": accs]
     return (try? JSONSerialization.data(withJSONObject: o, options: [.prettyPrinted, .sortedKeys])) ?? Data()
   }
-  func importBackup(_ d: Data) -> Bool {
+  /// a backup file, read but not applied (nil when it isn't one)
+  func readBackup(_ d: Data) -> AtlasData? {
     guard let b = try? JSONDecoder().decode(AtlasData.self, from: d),
-          let raw = try? JSONSerialization.jsonObject(with: d) as? [String: Any], raw["identities"] is [Any], raw["accounts"] is [Any] else { return false }
+          let raw = try? JSONSerialization.jsonObject(with: d) as? [String: Any], raw["identities"] is [Any], raw["accounts"] is [Any] else { return nil }
+    return b
+  }
+  func importBackup(_ d: Data) -> Bool {
+    guard let b = readBackup(d) else { return false }
+    saveRestorePoint("import")   // the data it replaces can always be brought back from 设置
     mutate("已导入 \(b.identities.count) 个身份和 \(b.accounts.count) 个网站") { s in s.identities = b.identities; s.accounts = b.accounts }
     setKind(kind)
     return true
   }
 
-  // sample data is opt-in; its ids stay on this device so 「清除示例数据」 removes only them
+  // 2.5 sample data: every sample item carries demo: true. It is only ever added next to what is there (and
+  // only while there is nothing of the user's own), and 「清除示例数据」 removes exactly the marked items.
   private static let demoKey = "atlas.demoIds"
-  var demoIDs: Set<String> {
-    if data.demo == true { return Set(data.identities.map(\.id) + data.accounts.map(\.id)) }
-    return Set(UserDefaults.standard.stringArray(forKey: Store.demoKey) ?? [])
+  var demoIDs: Set<String> { Set(data.identities.filter(\.isDemo).map(\.id) + data.accounts.filter { $0.demo == true }.map(\.id)) }
+  var hasDemo: Bool { data.identities.contains(where: \.isDemo) || data.accounts.contains { $0.demo == true } }
+  /// anything the user made themselves
+  var hasReal: Bool { Store.hasReal(data) }
+  static func hasReal(_ d: AtlasData) -> Bool { d.identities.contains { !$0.isDemo } || d.accounts.contains { $0.demo != true } }
+  private func adoptLegacyDemo() {
+    let list = Set(UserDefaults.standard.stringArray(forKey: Store.demoKey) ?? [])
+    guard !list.isEmpty || data.demo != nil else { return }
+    var d = data
+    for k in d.identities.indices where list.contains(d.identities[k].id) { d.identities[k].demo = true }
+    for k in d.accounts.indices where list.contains(d.accounts[k].id) { d.accounts[k].demo = true }
+    d.demo = nil
+    data = d; save()
+    UserDefaults.standard.removeObject(forKey: Store.demoKey)
   }
-  var hasDemo: Bool {
-    let d = demoIDs
-    return data.identities.contains { d.contains($0.id) } || data.accounts.contains { d.contains($0.id) }
-  }
+  /// sync is on on this device (sample data is never loaded then)
+  var syncOn: Bool { UserDefaults.standard.string(forKey: "atlas.sync") != nil }
+  /// 载入示例 is offered only while there is nothing of the user's own
+  var canLoadDemo: Bool { !sandbox && !syncOn && !hasReal && !hasDemo }
+  func setTourRect(_ id: String, _ r: CGRect) { if tourRects[id] != r { tourRects[id] = r } }
   func loadDemo() {
-    let d = Store.demo()
-    let fresh = data.identities.isEmpty && data.accounts.isEmpty
-    UserDefaults.standard.set(d.identities.map(\.id) + d.accounts.map(\.id), forKey: Store.demoKey)
-    mutate("已载入示例，可在「更多」里清除") { s in s.identities += d.identities; s.accounts += d.accounts }
-    if fresh { data.demo = true; persist() }
+    if hasReal { show("已有自己的数据，不能载入示例"); return }
+    if syncOn { show("开着同步时不能载入示例"); return }
+    saveRestorePoint("demo")
+    var d = Store.demo()
+    for k in d.identities.indices { d.identities[k].demo = true }
+    for k in d.accounts.indices { d.accounts[k].demo = true }
+    let have = Set(data.identities.map(\.id) + data.accounts.map(\.id))
+    mutate("已载入示例，可在「设置」里清除") { s in
+      s.identities += d.identities.filter { !have.contains($0.id) }
+      s.accounts += d.accounts.filter { !have.contains($0.id) }
+    }
     IconStore.shared.prefetch(data.accounts)
     setKind("email")
   }
   func clearDemo() {
     let d = demoIDs
-    mutate("已清除示例数据") { s in
-      s.identities = s.identities.filter { !d.contains($0.id) }.map { i in
-        var i = i; if let v = i.via, d.contains(v) { i.via = nil }; return i
-      }
-      s.accounts = s.accounts.filter { !d.contains($0.id) }.map { a in
-        var a = a; a.identityIds.removeAll { d.contains($0) }; return a
-      }
-    }
+    mutate("已清除示例数据") { s in Store.strip(&s, d) }
     setKind(kind)
+  }
+  /// takes these items out; real items just lose their links to them
+  static func strip(_ s: inout AtlasData, _ d: Set<String>) {
+    s.identities = s.identities.filter { !d.contains($0.id) }.map { i in
+      var i = i; if i.bindIDs.contains(where: { d.contains($0) }) { i.setBinds(i.bindIDs.filter { !d.contains($0) }) }; return i
+    }
+    s.accounts = s.accounts.filter { !d.contains($0.id) }.map { a in
+      var a = a; a.identityIds.removeAll { d.contains($0) }; return a
+    }
+  }
+
+  // MARK: restore point: written before anything that replaces data (sample, import, wipe, restore)
+
+  private var restoreURL: URL { url.deletingLastPathComponent().appendingPathComponent("atlas.restore.json") }
+  func saveRestorePoint(_ why: String) {
+    guard !sandbox, !(data.identities.isEmpty && data.accounts.isEmpty), let d = try? JSONEncoder().encode(data) else { return }
+    guard (try? d.write(to: restoreURL, options: .atomic)) != nil else { return }
+    restoreWhy = why; restoreAt = nowMS()
+    UserDefaults.standard.set(why, forKey: "atlas.restoreWhy"); UserDefaults.standard.set(restoreAt, forKey: "atlas.restoreAt")
+  }
+  var restoreTitle: String? {
+    switch restoreWhy {
+    case nil: return nil
+    case "demo": return "恢复导入示例前的数据"
+    case "import": return "恢复导入备份前的数据"
+    case "wipe": return "恢复清空前的数据"
+    default: return "撤回刚才的恢复"
+    }
+  }
+  func restore() {
+    guard let raw = try? Data(contentsOf: restoreURL), let b = try? JSONDecoder().decode(AtlasData.self, from: raw) else { show("备份读不出来了"); return }
+    let keep = try? JSONEncoder().encode(data)
+    mutate("已恢复 \(b.identities.count) 个身份和 \(b.accounts.count) 个网站") { s in s.identities = b.identities; s.accounts = b.accounts }
+    // the data that was just replaced becomes the new restore point, so a restore can be taken back too
+    if let keep, (try? keep.write(to: restoreURL, options: .atomic)) != nil {
+      restoreWhy = "restore"; restoreAt = nowMS()
+      UserDefaults.standard.set("restore", forKey: "atlas.restoreWhy"); UserDefaults.standard.set(restoreAt, forKey: "atlas.restoreAt")
+    }
+    IconStore.shared.prefetch(data.accounts)
+    setKind(kind)
+  }
+
+  // MARK: 操作演示 sandbox: the tour runs on the real screens with throwaway data
+
+  /// what is really saved, even while the 操作演示 shows sandbox data
+  var realData: AtlasData { sandbox ? (realSnap ?? data) : data }
+  private func writeReal(_ d: AtlasData) {
+    guard let b = try? JSONEncoder().encode(d) else { return }
+    let u = url
+    io.async { try? b.write(to: u, options: .atomic) }
+  }
+  func startTour(firstRun: Bool) {
+    guard tourStep == nil else { return }
+    route = nil
+    realSnap = data
+    sandbox = true
+    undoSnap = nil
+    var sample = Identity(type: "email", value: "me@example.com", label: "示例邮箱", color: COLORS[0])
+    sample.demo = true
+    data = AtlasData(identities: [sample])
+    remember()
+    setKind("email", focus: sample.id)
+    tourFirstRun = firstRun
+    tourStep = "add"
+  }
+  func tourAdvance(_ from: String, _ to: String) { if tourStep == from { tourStep = to } }
+  /// the sandbox app was saved: show it on the map
+  func tourSaved() { if tourStep == "save" { tourStep = "map" } }
+  func endTour(loadDemo demoAfter: Bool = false) {
+    guard tourStep != nil else { return }
+    tourStep = nil
+    route = nil
+    if let r = realSnap { data = r }
+    realSnap = nil; sandbox = false; undoSnap = nil
+    remember()
+    setKind(kind)
+    UserDefaults.standard.set(true, forKey: "atlas.tourDone")
+    onSaved?()
+    if demoAfter { loadDemo() }
+  }
+
+  // MARK: 2.5 copying an account value: local only, expires after 60 s
+
+  func copySecret(_ i: Identity) {
+    UIPasteboard.general.setItems([[UTType.plainText.identifier: i.value]], options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(60)])
+    show("已复制 \(maskValue(i)) · 60 秒后自动清除")
   }
 
   static func demo() -> AtlasData {
@@ -846,6 +1030,6 @@ final class Store {
       mk("哔哩哔哩", "bilibili.com", "娱乐", [p2], 40), mk("Steam", "steampowered.com", "游戏", [q], 60, "令牌在主力手机上"),
       mk("Apple ID", "apple.com", "工具", [g, p1], 90), mk("Notion", "notion.so", "工具", [a], 120), mk("网易云音乐", "music.163.com", "娱乐", [p2], 150),
       mk("美团", "meituan.com", "出行", [w], 20), mk("拼多多", "pinduoduo.com", "购物", [w], 25),
-    ], demo: true)
+    ])
   }
 }

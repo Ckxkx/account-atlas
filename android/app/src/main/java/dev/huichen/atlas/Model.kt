@@ -52,7 +52,25 @@ data class Identity(
   val via: String? = null,
   /** Email / phone: this address or number is also an Apple ID (2.4). Written only when true. */
   val apple: Boolean? = null,
+  /** 2.5, login only: every email / phone it is bound to when there is more than one (via stays the first,
+   *  for older clients). Read as the union of via and vias. Key omitted when there is at most one. */
+  val vias: List<String>? = null,
+  /** 2.5: part of the sample data (「清除示例数据」 removes exactly these). Written only when true. */
+  val demo: Boolean? = null,
 ) {
+  /** 2.5: every email / phone id this 微信 / QQ is bound to, via first (union of via and vias, no repeats) */
+  val bindIds: List<String> get() {
+    val out = ArrayList<String>()
+    via?.takeIf { it.isNotEmpty() }?.let { out += it }
+    vias?.forEach { if (it.isNotEmpty() && it !in out) out += it }
+    return out
+  }
+  /** the same identity bound to exactly these ids: via = the first, vias only when there are two or more */
+  fun withBinds(ids: List<String>): Identity {
+    val u = ids.filter { it.isNotEmpty() && it != id }.distinct()
+    return copy(via = u.firstOrNull(), vias = if (u.size > 1) u else null)
+  }
+  val isDemo get() = demo == true
   val isPhone get() = type == "phone"
   val isESim get() = isPhone && esim == true
   val isLogin get() = type == "login"
@@ -127,15 +145,15 @@ object Migrate24 {
         if (o.notes.isNotEmpty() && !keep.notes.contains(o.notes)) keep = keep.copy(notes = if (keep.notes.isEmpty()) o.notes else keep.notes + "\n" + o.notes)
         if (o.apple == true) keep = keep.copy(apple = true)
         if (o.esim == true && keep.type == "phone") keep = keep.copy(esim = true)
-        if (keep.via.isNullOrEmpty() && !o.via.isNullOrEmpty() && o.via != keep.id) keep = keep.copy(via = o.via)
+        if (o.bindIds.any { it != keep.id && it !in keep.bindIds }) keep = keep.withBinds(keep.bindIds + o.bindIds)
         if (keep.order == null && o.order != null) keep = keep.copy(order = o.order)
+        if (keep.demo == true && o.demo != true) keep = keep.copy(demo = null)   // merged with a real one: real
       }
       byId[keep.id] = keep
     }
     if (to.isEmpty()) return d to 0
     val ids = d.identities.filter { it.id !in to }.map { byId[it.id] ?: it }.map { i ->
-      val v = i.via?.let { to[it] } ?: return@map i
-      i.copy(via = if (v == i.id) null else v)
+      if (i.bindIds.none { it in to }) i else i.withBinds(i.bindIds.map { to[it] ?: it })
     }
     val accs = d.accounts.map { a ->
       val out = ArrayList<String>()
@@ -152,6 +170,68 @@ fun bindTag(v: Identity): String {
   val parts = v.value.split("@", limit = 2)
   return parts[0].take(2) + "•••" + (if (parts.size > 1) "@" + parts[1] else "")
 }
+/** 2.5 map / picker tag of every binding: the first one, then "+1" for each more */
+fun bindTags(binds: List<Identity>): String {
+  val first = binds.firstOrNull()?.let { bindTag(it) }.orEmpty()
+  if (first.isEmpty()) return ""
+  return if (binds.size > 1) first + " +" + (binds.size - 1) else first
+}
+
+// MARK: 2.5 masking (level 1: values; level 2: labels / usernames) — mirrors app.js / Model.swift
+
+/** The value with most of it hidden: ab•••@gmail.com, ••• •••• 1234, wx•••. */
+fun maskValue(i: Identity): String {
+  val v = i.value
+  if (i.type == "email" || (i.isLogin && v.contains('@'))) {
+    val parts = v.split("@", limit = 2)
+    return parts[0].take(2) + "•••" + (if (parts.size > 1) "@" + parts[1] else "")
+  }
+  if (i.isLogin && !i.isQQ && !i.isApple) return v.take(2) + "•••"
+  val digits = v.filter { it.isDigit() }
+  return if (digits.length > 7) "••• •••• " + digits.takeLast(4) else if (digits.length >= 4) "•••" + digits.takeLast(2) else "••••"
+}
+/** A label or username with all but its first character hidden. */
+fun maskName(s: String): String = if (s.isEmpty()) s else s.take(1) + "•••"
+/** what kind of identity this is, in words */
+fun kindName(i: Identity): String = if (i.isLogin) providerName(i.provider) else if (i.isPhone) "手机号" else "邮箱"
+
+// MARK: 2.5 sample data: marked per item, added next to real data, removed by marker only
+
+object Demo {
+  fun ids(d: AtlasData): Set<String> = (d.identities.filter { it.isDemo }.map { it.id } + d.accounts.filter { it.demo == true }.map { it.id }).toSet()
+  fun has(d: AtlasData) = d.identities.any { it.isDemo } || d.accounts.any { it.demo == true }
+  /** anything the user made themselves */
+  fun hasReal(d: AtlasData) = d.identities.any { !it.isDemo } || d.accounts.any { it.demo != true }
+  /** Older builds kept the sample ids in a device list (and a whole-file flag). Mark exactly the items in
+   *  that list; nothing else is ever treated as sample data. Same instance when nothing changed. */
+  fun adoptLegacy(d: AtlasData, list: Set<String>): AtlasData {
+    if (list.isEmpty() && d.demo == null) return d
+    var changed = d.demo != null
+    val ids = d.identities.map { if (it.id in list && !it.isDemo) { changed = true; it.copy(demo = true) } else it }
+    val accs = d.accounts.map { if (it.id in list && it.demo != true) { changed = true; it.copy(demo = true) } else it }
+    return if (changed) d.copy(identities = ids, accounts = accs, demo = null) else d
+  }
+  /** Adds the sample next to what is there; never replaces or edits a real item. */
+  fun add(d: AtlasData, sample: AtlasData): AtlasData {
+    val have = (d.identities.map { it.id } + d.accounts.map { it.id }).toSet()
+    return d.copy(
+      identities = d.identities + sample.identities.filter { it.id !in have }.map { it.copy(demo = true) },
+      accounts = d.accounts + sample.accounts.filter { it.id !in have }.map { it.copy(demo = true) },
+      demo = null,
+    )
+  }
+  /** Removes only marked items; real items just lose their links to them. */
+  fun clear(d: AtlasData): AtlasData {
+    val gone = ids(d)
+    if (gone.isEmpty()) return d
+    return d.copy(
+      identities = d.identities.filter { it.id !in gone }.map { if (it.bindIds.any { b -> b in gone }) it.withBinds(it.bindIds.filter { b -> b !in gone }) else it },
+      accounts = d.accounts.filter { it.id !in gone }.map { a -> if (a.identityIds.any { it in gone }) a.copy(identityIds = a.identityIds.filter { it !in gone }) else a },
+      demo = null,
+    )
+  }
+}
+
 /** What's wrong with a value for this kind ("email" | "phone" | "wechat" | "qq"), or null when it's fine. */
 fun idValueError(kind: String, value: String): String? {
   val v = value.trim()
@@ -196,6 +276,8 @@ data class Account(
   @Serializable(with = MsSerializer::class) val updatedAt: Double? = null,
   /** Custom / App Store icon: data:image/png|jpeg;base64 URL of a square image (<= 128 px). Omitted when absent. */
   val icon: String? = null,
+  /** 2.5: part of the sample data. Written only when true. */
+  val demo: Boolean? = null,
 )
 
 @Serializable
@@ -235,9 +317,12 @@ fun decodeAtlas(text: String): AtlasData {
     if (x.apple == false) x = x.copy(apple = null)
     if (x.provider != null && x.provider!!.isBlank()) x = x.copy(provider = null)
     if (x.via != null && x.via!!.isBlank()) x = x.copy(via = null)
+    if (x.vias != null && x.vias!!.none { it.isNotBlank() }) x = x.copy(vias = null)
+    if (x.demo == false) x = x.copy(demo = null)
     x
   }, accounts = d.accounts.map { a ->
     var x = a
+    if (x.demo == false) x = x.copy(demo = null)
     if (x.handle != null && x.handle!!.isEmpty()) x = x.copy(handle = null)
     if (x.icon != null && x.icon!!.isBlank()) x = x.copy(icon = null)
     x
@@ -339,7 +424,12 @@ data class AppHit(
   val genreIds: List<String> = emptyList(),
   val artworkUrl100: String? = null,
   val artworkUrl512: String? = null,
+  val contentAdvisoryRating: String? = null,
+  val trackContentRating: String? = null,
+  val advisories: List<String> = emptyList(),
 ) {
+  /** 18+ / sexual content: never shown in search (see [isAdultApp]) */
+  val adult: Boolean get() = isAdultApp(trackName, primaryGenreName, genres, contentAdvisoryRating, trackContentRating, advisories)
   /** "支付宝-你的AI生活伙伴" -> "支付宝"; only when what is left before the dash is >= 2 chars. */
   val name: String get() = appStoreName(trackName)
   val domain: String get() = sellerUrl?.let { cleanDomain(it) } ?: ""
@@ -349,7 +439,19 @@ data class AppHit(
 }
 
 fun appStoreURL(term: String): String =
-  "https://itunes.apple.com/search?term=" + java.net.URLEncoder.encode(term.trim(), "UTF-8") + "&country=cn&entity=software&limit=8"
+  "https://itunes.apple.com/search?term=" + java.net.URLEncoder.encode(term.trim(), "UTF-8") + "&country=cn&entity=software&limit=10&explicit=No"
+
+/** 2.5: adult apps never show up in App Store search. An 18+ rating, a frequent / intense (or graphic)
+ *  sexual-content or nudity advisory, or an adult word in the name or genre. Mild advisories (common on
+ *  social apps and games) are fine. Mirrors app.js / AppStore.swift. */
+private val ADULT_WORDS = Regex("""\b(sex|sexy|porn|porno|nsfw|hentai|adult|xxx|nude|nudes|onlyfans|camgirl|hookup)\b|18\s*\+|18禁|性爱|色情|约炮|裸聊|福利姬|情色|黄片|一夜情|成年人|av女优|成人(?!教育|高考|自考|学历|英语|本科|大学|学习)""", RegexOption.IGNORE_CASE)
+private val SEXUAL = Regex("""sexual|nudity|性内容|性相关|裸露|色情""", RegexOption.IGNORE_CASE)
+private val STRONG = Regex("""\b(frequent|intense|graphic)\b|频繁|强烈|极端|大量""", RegexOption.IGNORE_CASE)
+fun isAdultApp(name: String, genre: String = "", genres: List<String> = emptyList(), rating: String? = null, trackRating: String? = null, advisories: List<String> = emptyList()): Boolean {
+  if (listOf(rating, trackRating).any { it?.trim()?.startsWith("18") == true }) return true
+  if (advisories.any { SEXUAL.containsMatchIn(it) && STRONG.containsMatchIn(it) }) return true
+  return ADULT_WORDS.containsMatchIn(name) || ADULT_WORDS.containsMatchIn(genre) || genres.any { ADULT_WORDS.containsMatchIn(it) }
+}
 
 fun appStoreName(raw: String): String {
   val t = raw.trim()
@@ -387,8 +489,9 @@ fun parseAppStore(text: String): List<AppHit> = runCatching {
     val o = e as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
     val n = o.str("trackName")?.trim().orEmpty()
     if (n.isEmpty()) null
-    else AppHit(n, o.str("sellerUrl"), o.str("primaryGenreName").orEmpty(), o.list("genres"), o.list("genreIds"), o.str("artworkUrl100"), o.str("artworkUrl512"))
-  }
+    else AppHit(n, o.str("sellerUrl"), o.str("primaryGenreName").orEmpty(), o.list("genres"), o.list("genreIds"), o.str("artworkUrl100"), o.str("artworkUrl512"),
+      o.str("contentAdvisoryRating"), o.str("trackContentRating"), o.list("advisories"))
+  }.filter { !it.adult }
 }.getOrDefault(emptyList())
 
 /** Natural, locale-aware-ish name order (like localizedStandardCompare). */

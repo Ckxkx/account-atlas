@@ -414,6 +414,9 @@ struct LoginGlyph: View {
 struct WalletCard: View {
   @Environment(Store.self) var store
   let identity: Identity
+  /// the identity form's preview shows what is being typed
+  var reveal = false
+  var showsEye: Bool { !reveal && store.maskValues }
   var body: some View {
     let i = identity
     let accs = store.accounts(of: i.id)
@@ -438,9 +441,10 @@ struct WalletCard: View {
           }
         }
         Spacer(minLength: 6)
-        Text(store.display(i))
+        Text(reveal ? i.value : store.display(i))
           .font(.system(size: 21, weight: .semibold, design: .rounded)).monospacedDigit()
           .lineLimit(1).minimumScaleFactor(0.6)
+          .padding(.trailing, showsEye ? 38 : 0)
         HStack(alignment: .bottom) {
           Text(footNote(i)).font(.system(size: 12.5, weight: .medium)).opacity(0.75).lineLimit(1)
           Spacer()
@@ -458,15 +462,31 @@ struct WalletCard: View {
     // Metal-rendered layer, so the coverflow's per-frame 3D transform moves a single texture
     // instead of re-compositing a dozen blended layers.
     .drawingGroup()
+    // 2.5: the eye shows or hides this card's value for now (masked again when the app goes to the background).
+    // Outside the flattened face so it stays a real button; it sits at the end of the value line.
+    .overlay(alignment: .bottomTrailing) {
+      if showsEye {
+        let on = store.revealed.contains(i.id)
+        Button { withAnimation(Motion.snappy) { store.toggleReveal(i.id) } } label: {
+          Image(systemName: on ? "eye.slash.fill" : "eye.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+            .frame(width: 32, height: 32).background(Color.white.opacity(0.2), in: Circle())
+            .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(PressStyle(scale: 0.86))
+        .accessibilityLabel(on ? "隐藏账号" : "显示账号")
+        .padding(.trailing, 14).padding(.bottom, 51)
+      }
+    }
     .bakedShadow(shape, key: "card\(i.isPhone)\(i.color)", color: Color(hex: i.color).opacity(0.45), radius: 22, y: 14)
   }
   func cardTitle(_ i: Identity) -> String {
-    if i.isLogin { return i.label.isEmpty ? i.kindName : i.kindName + " · " + i.label }
-    return i.label.isEmpty ? i.kindName : i.label
+    if i.isLogin { return i.label.isEmpty ? i.kindName : i.kindName + " · " + store.labelText(i.label) }
+    return i.label.isEmpty ? i.kindName : store.labelText(i.label)
   }
   func footNote(_ i: Identity) -> String {
     if i.isLogin {
-      if let v = store.via(i) { return "绑定 " + store.title(v) }
+      let b = store.binds(i)
+      if let v = b.first { return "绑定 " + store.title(v) + (b.count > 1 ? " 等 \(b.count) 个" : "") }
       return i.notes.isEmpty ? (i.isApple ? "Apple ID" : i.isQQ ? "QQ 号" : "微信号") : i.notes
     }
     let ap = i.isAppleID ? "Apple ID" : ""

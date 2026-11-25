@@ -52,6 +52,9 @@ import androidx.compose.material.icons.outlined.PlaylistAdd
 import androidx.compose.material.icons.outlined.PlaylistRemove
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.PersonOff
+import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -126,10 +129,18 @@ fun SettingsMain(go: (String) -> Unit) {
     if (uri != null) runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(Store.backupJSON().toByteArray()) } }
       .onSuccess { Store.show("备份已导出") }.onFailure { Store.show("导出失败") }
   }
+  var pendingImport by remember { mutableStateOf<String?>(null) }
+  var askDemo by remember { mutableStateOf(false) }
+  var askRestore by remember { mutableStateOf(false) }
   val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
     if (uri != null) {
       val text = runCatching { ctx.contentResolver.openInputStream(uri)!!.use { String(it.readBytes()) } }.getOrNull()
-      if (text != null && Store.importBackup(text)) Store.popAll() else Store.show("这不是账号星图的备份文件")
+      when {
+        text == null || Store.readBackup(text) == null -> Store.show("这不是账号星图的备份文件")
+        // replacing what is there is asked first; the old data is kept as a restore point either way
+        Store.data.identities.isNotEmpty() || Store.data.accounts.isNotEmpty() -> pendingImport = text
+        Store.importBackup(text) -> Store.popAll()
+      }
     }
   }
   Column {
@@ -139,9 +150,13 @@ fun SettingsMain(go: (String) -> Unit) {
         SettingRow(Icons.Outlined.Cloud, "加密同步", trailing = { T(syncStatus(), 14f, color = pal.secondary) }, chevron = true) { go("sync") }
       }
       FormGroup {
-        SettingRow(Icons.Outlined.VisibilityOff, "隐藏号码", trailing = {
-          Switch(Store.privacy, { Store.putPrivacy(it) }, colors = SwitchDefaults.colors(checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
-        }) { Store.putPrivacy(!Store.privacy) }
+        SettingRow(Icons.Outlined.VisibilityOff, "默认隐藏账号", trailing = {
+          Switch(Store.maskValues, { Store.putMask(it) }, colors = SwitchDefaults.colors(checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
+        }) { Store.putMask(!Store.maskValues) }
+        Divider()
+        SettingRow(Icons.Outlined.PersonOff, "隐藏用户名", trailing = {
+          Switch(Store.hideNames, { Store.putHideNames(it) }, colors = SwitchDefaults.colors(checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
+        }) { Store.putHideNames(!Store.hideNames) }
         Divider()
         Box {
           SettingRow(Icons.Outlined.Contrast, "外观", trailing = { T(mapOf("dark" to "深色", "light" to "浅色", "system" to "跟随系统")[Store.theme] ?: "深色", 17f, color = pal.secondary) }) { themeMenu = true }
@@ -154,18 +169,33 @@ fun SettingsMain(go: (String) -> Unit) {
         Divider()
         SettingRow(Icons.Outlined.SwapVert, "调整卡片顺序", chevron = true) { go("order") }
         Divider()
-        SettingRow(Icons.Outlined.School, "使用教程", chevron = true) { Store.popAll(); Store.tourDemo = false; Store.tour = true }
+        SettingRow(Icons.Outlined.School, "操作演示", chevron = true) { Tour.start(firstRun = false) }
       }
-      FormGroup(footer = "备份是 JSON 文件，和网页版、iOS 版通用。") {
+      FormGroup(footer = "生成一张卡片图片：有哪些 App、各用哪个身份。默认不显示任何邮箱和号码。") {
+        SettingRow(Icons.Outlined.Share, "分享我的星图", chevron = true) { Store.push(Route.Share) }
+      }
+      FormGroup(footer = "备份是 JSON 文件，和网页版、iOS 版通用。" + when {
+        Store.hasDemo -> ""
+        Sync.on -> "开着同步时不能载入示例。"
+        Demo.hasReal(Store.data) -> "已经有自己的数据时不能载入示例，免得和真实数据混在一起。"
+        else -> ""
+      }) {
         SettingRow(Icons.Outlined.Upload, "导出备份") { exporter.launch("账号备份-${LocalDate.now()}.json") }
         Divider()
         SettingRow(Icons.Outlined.Download, "导入备份") { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
         if (Store.hasDemo) {
           Divider()
           SettingRow(Icons.Outlined.PlaylistRemove, "清除示例数据", color = pal.red) { Store.clearDemo() }
-        } else if (!Sync.on) {
+        } else {
           Divider()
-          SettingRow(Icons.Outlined.PlaylistAdd, "载入示例") { Store.loadDemo() }
+          val ok = Store.canLoadDemo
+          SettingRow(Icons.Outlined.PlaylistAdd, "载入示例", color = if (ok) null else pal.tertiary) { if (ok) askDemo = true }
+        }
+        Store.restoreTitle()?.let { t ->
+          Divider()
+          SettingRow(Icons.Outlined.Restore, t, trailing = {
+            T(java.text.SimpleDateFormat("M月d日 HH:mm", java.util.Locale.CHINA).format(java.util.Date(Store.restoreAt)), 13f, color = pal.secondary)
+          }) { askRestore = true }
         }
       }
       FormGroup(footer = "在蓝奏云下载，密码 0874。直接覆盖安装，数据不会丢失。") {
@@ -187,8 +217,20 @@ fun SettingsMain(go: (String) -> Unit) {
   if (askWipe) Confirm("清空全部数据？",
     if (Sync.on) "所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。" else "所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。",
     "清空全部数据", { askWipe = false }) {
+    Store.saveRestorePoint("wipe")
     Store.mutate("已清空") { it.copy(identities = emptyList(), accounts = emptyList()) }
     Store.setKind(Store.kind); Store.pop()
+  }
+  pendingImport?.let { text ->
+    Confirm("导入备份？", "导入会替换现在的 ${Store.data.identities.size} 个身份和 ${Store.data.accounts.size} 个网站与 App。替换前的数据会先存一份，可以在设置里恢复。", "导入", { pendingImport = null }) {
+      if (Store.importBackup(text)) Store.popAll() else Store.show("这不是账号星图的备份文件")
+    }
+  }
+  if (askDemo) Confirm("载入示例数据？", "会加入几个虚构的邮箱、手机号和 App，都带示例标记，「清除示例数据」只会删掉它们。", "载入", { askDemo = false }) {
+    Store.loadDemo(); Store.pop()
+  }
+  if (askRestore) Confirm(Store.restoreTitle() ?: "恢复数据", "会把数据换回那时的样子。现在的数据也会先存一份，可以再换回来。", "恢复", { askRestore = false }) {
+    Store.restore(); Store.pop()
   }
 }
 

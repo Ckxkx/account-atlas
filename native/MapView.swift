@@ -121,7 +121,7 @@ struct MapView: View {
   func mini(_ i: Identity, members: [String], width: CGFloat) -> some View {
     let n = Set(members.flatMap { store.accounts(of: $0).map(\.id) }).count
     let apple = members.contains { store.identity($0)?.isAppleID == true }
-    let tag = store.via(i).map(bindTag) ?? ""
+    let tag = bindTags(store.binds(i))
     let shape = CardShape(sim: i.isPhone)
     return VStack(alignment: .leading, spacing: 2) {
       HStack(spacing: 5) {

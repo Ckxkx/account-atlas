@@ -1,145 +1,166 @@
 package dev.huichen.atlas
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountTree
-import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Style
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 
-// 新手教程: shown once on a fresh install (and from 设置 › 使用教程). Skippable on every page.
-// Sample data is never loaded behind the user's back: the last page offers it as a labelled choice,
-// and the wallet then says it's sample data with a one-tap 清除.
+// 2.5 操作演示: a hands-on tour on the real screens. A spotlight sits on the control to use and says what
+// to tap; the step moves on when the user does it. It runs on sandbox data (one 示例邮箱), so nothing is
+// saved or synced, and the real data is back the moment it ends. 「跳过」 is always there.
 
-private data class TourPage(val icon: ImageVector, val tint: String, val title: String, val body: String, val tip: String)
+object Tour {
+  /** add -> pick -> next -> who -> save -> map; null = off */
+  var step by mutableStateOf<String?>(null)
+  var offerDemo = false
+  val rects = mutableStateMapOf<String, Rect>()
+  var requestTab: ((Int) -> Unit)? = null
+  val on get() = step != null
+  val ORDER = listOf("add", "pick", "next", "who", "save", "map")
 
-private val TOUR = listOf(
-  TourPage(Icons.Filled.Style, "#0a84ff", "欢迎使用账号星图",
-    "记下每个网站和 App 是用哪个邮箱、哪个手机号注册的。换号、注销、找回密码时，一眼就知道要改哪些。",
-    "不保存任何密码，数据只在你的手机上。"),
-  TourPage(Icons.Filled.Apps, "#30d158", "第一步：添加 App",
-    "点右上角「+」，选你用的网站和 App（可以多选），再选它怎么登录：哪个邮箱、手机号，还是微信、QQ。列表里没有的，当场新建就行。",
-    "搜不到的 App 会从 App Store 找，带上官方图标。"),
-  TourPage(Icons.Filled.Email, "#5e5ce6", "卡包：每个身份一张卡",
-    "每个邮箱、手机号、微信、QQ 都是一张卡。点开一张，就能看到它关联的全部 App，包括通过绑定它的微信 / QQ 登录的。Apple ID 是邮箱或手机号上的一个标记，不用单独建卡。",
-    "上方可以在 邮箱 / 手机号 / 微信/QQ 之间切换。"),
-  TourPage(Icons.Filled.AccountTree, "#ff9f0a", "关系图",
-    "所有邮箱、手机号和 App 会自动连成一张图。点一个节点，就能看到它牵连着哪些账号。",
-    "准备换手机号？先在这里看看要改多少个。"),
-  TourPage(Icons.Filled.Security, "#ff375f", "隐私与备份",
-    "右上角可以一键打码，截图也安心。在「设置」里能导出备份，或加密同步到你自己的 Gist。",
-    "以后更新直接覆盖安装，数据不会丢。"),
-)
+  fun start(firstRun: Boolean) {
+    if (step != null) return
+    offerDemo = firstRun
+    Store.popAll()
+    Store.beginSandbox()
+    requestTab?.invoke(0)
+    step = "add"
+  }
+  fun advance(from: String, to: String) { if (step == from) step = to }
+  /** the sandbox app was saved: show it on the map */
+  fun saved() { if (step == "save") { step = "map"; requestTab?.invoke(2) } }
+  fun finish(loadDemo: Boolean = false) {
+    if (step == null) return
+    step = null
+    Store.endSandbox()
+    Store.prefs().edit().putBoolean("atlas.tourDone", true).apply()
+    requestTab?.invoke(0)
+    if (loadDemo) Store.loadDemo()
+  }
+}
 
-/** first launch: open the tour once (replaces the old 「先看看示例？」 dialog) */
+/** marks a control the tour can point at */
+fun Modifier.tourAnchor(id: String) = this.onGloballyPositioned { val r = it.boundsInRoot(); if (Tour.rects[id] != r) Tour.rects[id] = r }
+
+private data class TourStep(val target: String?, val title: String, val body: String)
+private fun stepOf(s: String) = when (s) {
+  "add" -> TourStep("add", "点右上角的 +", "先添加一个 App 试试。这是演示，不会保存。")
+  "pick" -> TourStep("tile", "点一个 App 选上它", "也可以在上面搜索，搜不到的会从 App Store 找。")
+  "next" -> TourStep("next", "点「下一步」", "接下来选它怎么登录。")
+  "who" -> TourStep("who", "点「示例邮箱」", "选这个 App 用哪个邮箱、手机号、微信或 QQ 登录，可以多选。")
+  "save" -> TourStep("save", "点「保存」", "就记下来了。")
+  else -> TourStep(null, "它已经连到关系图上了", "以后换手机号、注销邮箱前，来这里看一眼牵连了哪些 App。演示数据会在结束时清掉。")
+}
+
+/** first launch: start the 操作演示 once */
 @Composable
 fun FirstRunTour() {
   LaunchedEffect(Unit) {
     val prefs = Store.prefs()
     if (Store.firstRun && !prefs.getBoolean("atlas.tourDone", false) && !prefs.getBoolean("atlas.demoAsked", false)) {
       prefs.edit().putBoolean("atlas.demoAsked", true).apply()
-      kotlinx.coroutines.delay(400)
-      Store.tourDemo = true
-      Store.tour = true
+      kotlinx.coroutines.delay(500)
+      Tour.start(firstRun = true)
     }
   }
-  AnimatedVisibility(Store.tour, enter = fadeIn(calm()), exit = fadeOut(calm())) { Onboarding(Store.tourDemo) }
+  TourOverlay()
 }
 
 @Composable
-fun Onboarding(offerDemo: Boolean) {
-  val pager = rememberPagerState { TOUR.size }
-  val scope = rememberCoroutineScope()
-  val hap = haptics()
-  val last = pager.currentPage == TOUR.size - 1
-  fun finish() {
-    Store.prefs().edit().putBoolean("atlas.tourDone", true).apply()
-    Store.tour = false
+fun TourOverlay() {
+  val step = Tour.step
+  // the picker was closed half way: start again from the + button
+  LaunchedEffect(step, Store.routes) {
+    if (step in listOf("pick", "next", "who", "save") && Store.routes.none { it.route is Route.Picker }) Tour.step = "add"
   }
-  BackHandler { finish() }
-  Box(Modifier.fillMaxSize().background(pal.bg).clickable(remember { MutableInteractionSource() }, null) {}) {
-    Glow()
-    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-      Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-        if (!last) T("跳过", 16f, FontWeight.Medium, pal.secondary, Modifier.press(0.94f) { finish() }.padding(8.dp))
+  AnimatedVisibility(step != null, enter = fadeIn(calm()), exit = fadeOut(calm())) {
+    val s = stepOf(step ?: "map")
+    val hole = s.target?.let { Tour.rects[it] }
+    val pulse by rememberInfiniteTransition(label = "tour").animateFloat(0f, 1f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "pulse")
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+      val h = constraints.maxHeight.toFloat()
+      // the dim layer has no pointer input: taps go straight through to the real control under the hole
+      Canvas(Modifier.fillMaxSize()) {
+        val pad = 8.dp.toPx()
+        if (hole != null) {
+          val r = Rect(hole.left - pad, hole.top - pad, hole.right + pad, hole.bottom + pad)
+          val rr = RoundRect(r, CornerRadius(16.dp.toPx()))
+          clipPath(Path().apply { addRoundRect(rr) }, ClipOp.Difference) { drawRect(Color.Black.copy(alpha = 0.58f)) }
+          val g = (2 + 4 * pulse).dp.toPx()
+          drawRoundRect(Color.White.copy(alpha = 0.9f - 0.5f * pulse), androidx.compose.ui.geometry.Offset(r.left - g / 2, r.top - g / 2),
+            androidx.compose.ui.geometry.Size(r.width + g, r.height + g), CornerRadius(16.dp.toPx() + g / 2), style = Stroke(2.dp.toPx()))
+        } else drawRect(Color.Black.copy(alpha = if (s.target == null) 0.45f else 0.58f))
       }
-      HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth()) { i ->
-        val p = TOUR[i]
-        Column(Modifier.fillMaxSize().padding(horizontal = 30.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-          Box(Modifier.size(128.dp).clip(RoundedCornerShape(34.dp)).background(Brush.verticalGradient(listOf(hex(p.tint).copy(alpha = 0.8f), hex(p.tint)))), contentAlignment = Alignment.Center) {
-            Icon(p.icon, null, tint = Color.White, modifier = Modifier.size(58.dp))
+      val top = hole == null || hole.center.y > h * 0.5f
+      val n = Tour.ORDER.indexOf(step).coerceAtLeast(0) + 1
+      Column(Modifier.align(if (top) Alignment.TopCenter else Alignment.BottomCenter).fillMaxWidth()
+        .then(if (top) Modifier.statusBarsPadding().padding(top = 56.dp) else Modifier.navigationBarsPadding().padding(bottom = 86.dp))
+        .padding(horizontal = 18.dp).clip(RoundedCornerShape(18.dp)).background(if (pal.dark) hex("#2c2c2e") else Color.White)
+        .clickable(remember { MutableInteractionSource() }, null) {}.padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(if (s.target == null) Icons.Filled.Info else Icons.Filled.TouchApp, null, Modifier.size(20.dp), tint = pal.accent)
+          Spacer(Modifier.width(8.dp))
+          T(s.title, 17f, FontWeight.SemiBold, modifier = Modifier.weight(1f))
+          T("$n / ${Tour.ORDER.size}", 13f, color = pal.secondary)
+        }
+        T(s.body, 14f, color = pal.secondary, modifier = Modifier.padding(top = 6.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+          if (step == "map") {
+            if (Tour.offerDemo && !Demo.hasReal(Store.realData()) && !Sync.on)
+              T("载入示例看看", 15f, FontWeight.Medium, pal.accent, Modifier.press(0.95f) { Tour.finish(loadDemo = true) }.padding(horizontal = 12.dp, vertical = 8.dp))
+            T("完成", 15f, FontWeight.SemiBold, Color.White, Modifier.press(0.95f) { Tour.finish() }.clip(CircleShape).background(pal.accent).padding(horizontal = 18.dp, vertical = 8.dp))
+          } else {
+            T("跳过演示", 15f, FontWeight.Medium, pal.secondary, Modifier.press(0.95f) { Tour.finish() }.padding(horizontal = 12.dp, vertical = 8.dp))
           }
-          Spacer(Modifier.height(30.dp))
-          T(p.title, 26f, FontWeight.Bold, align = TextAlign.Center)
-          Spacer(Modifier.height(16.dp))
-          T(p.body, 16f, color = pal.secondary, align = TextAlign.Center)
-          Spacer(Modifier.height(20.dp))
-          Row(Modifier.glass(RoundedCornerShape(50)).padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Lightbulb, null, tint = hex("#ffd60a"), modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            T(p.tip, 13f, FontWeight.Medium)
-          }
-        }
-      }
-      Row(Modifier.fillMaxWidth().padding(bottom = 22.dp), horizontalArrangement = Arrangement.Center) {
-        TOUR.indices.forEach { i ->
-          val w by animateDpAsState(if (i == pager.currentPage) 18.dp else 7.dp, calm(), label = "dot")
-          Box(Modifier.padding(horizontal = 3.5.dp).size(w, 7.dp).clip(CircleShape).background(if (i == pager.currentPage) pal.primary else pal.tertiary))
-        }
-      }
-      Column(Modifier.fillMaxWidth().padding(horizontal = 28.dp).padding(bottom = 24.dp).height(150.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(50)).background(pal.accent).press(0.97f) {
-          hap(TICK)
-          if (last) finish() else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
-        }, contentAlignment = Alignment.Center) {
-          T(if (last) "开始使用" else "下一步", 17f, FontWeight.SemiBold, Color.White)
-        }
-        if (last && offerDemo && Store.data.identities.isEmpty() && Store.data.accounts.isEmpty()) {
-          T("先载入示例数据看看", 15f, FontWeight.Medium, pal.accent, Modifier.padding(top = 4.dp).press(0.96f) { Store.loadDemo(); finish() }.padding(12.dp))
-          T("示例是虚构的邮箱和 App，随时可以一键清除。", 12f, color = pal.secondary, align = TextAlign.Center)
         }
       }
     }
@@ -149,11 +170,11 @@ fun Onboarding(offerDemo: Boolean) {
 /** over the wallet while sample data is on the device, so nobody wonders where it came from */
 @Composable
 fun DemoBanner(modifier: Modifier = Modifier) {
-  AnimatedVisibility(Store.hasDemo, modifier, enter = fadeIn(calm()), exit = fadeOut(calm())) {
+  AnimatedVisibility(Store.hasDemo && !Store.sandbox, modifier, enter = fadeIn(calm()), exit = fadeOut(calm())) {
     Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
       Icon(Icons.Filled.Info, null, tint = pal.accent, modifier = Modifier.size(18.dp))
       Spacer(Modifier.width(10.dp))
-      T("现在显示的是示例数据", 14f, FontWeight.Medium, modifier = Modifier.weight(1f))
+      T("现在显示的有示例数据", 14f, FontWeight.Medium, modifier = Modifier.weight(1f))
       T("清除示例", 14f, FontWeight.SemiBold, pal.accent, Modifier.press(0.94f) { Store.clearDemo() }.padding(4.dp))
     }
   }

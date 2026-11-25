@@ -21,11 +21,12 @@ import kotlin.random.Random
 sealed class Route {
   data class IdentityR(val id: String) : Route()
   data class AccountR(val id: String) : Route()
-  data class NewIdentity(val type: String) : Route()
+  data class NewIdentity(val type: String, val via: String? = null) : Route()
   data class EditIdentity(val id: String) : Route()
   data class EditAccount(val id: String) : Route()
   data class Picker(val preset: String?) : Route()
   data object Settings : Route()
+  data object Share : Route()
 }
 
 data class Entry(val key: Long, val route: Route)
@@ -39,7 +40,18 @@ object Store {
   val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
   var data by mutableStateOf(AtlasData())
-  var privacy by mutableStateOf(false)
+  /** 2.5 level 1: account values (email, number, QQ, 微信号) are masked everywhere unless turned off */
+  var maskValues by mutableStateOf(true)
+  /** 2.5 level 2: labels and usernames are hidden too (off by default) */
+  var hideNames by mutableStateOf(false)
+  /** cards whose values were revealed with the eye; forgotten when the app goes to the background */
+  var revealed by mutableStateOf(setOf<String>())
+  /** 操作演示: the screen shows sandbox data; nothing is saved or synced until it ends */
+  var sandbox by mutableStateOf(false); private set
+  private var realSnap: AtlasData? = null
+  /** the restore point offered in 设置 (reason: demo | import | wipe | restore), null when there is none */
+  var restoreWhy by mutableStateOf<String?>(null); private set
+  var restoreAt by mutableStateOf(0L); private set
   var kind by mutableStateOf("email")
   var theme by mutableStateOf("dark")
   var activeID by mutableStateOf<String?>(null)
@@ -55,9 +67,6 @@ object Store {
   var firstRun = false; private set
   /** the data file couldn't be read at launch: it was set aside and the last good copy loaded */
   var recovered = false; private set
-  /** 新手教程 overlay (first launch, or 设置 › 使用教程); tourDemo = offer the sample data on its last page */
-  var tour by mutableStateOf(false)
-  var tourDemo = false
   /** 2.4: how many duplicate identities wait on the one-time 合并 question (0 = don't ask) */
   var mergeAsk by mutableIntStateOf(0)
 
@@ -90,7 +99,10 @@ object Store {
     if (ready) return
     prefs = ctx.getSharedPreferences("atlas", Context.MODE_PRIVATE)
     file = File(ctx.filesDir, "atlas.json")
-    privacy = prefs.getBoolean("atlas.privacy", false)
+    maskValues = prefs.getBoolean("atlas.maskValues", true)
+    hideNames = prefs.getBoolean("atlas.hideNames", false)
+    restoreWhy = prefs.getString("atlas.restoreWhy", null)?.takeIf { File(ctx.filesDir, "atlas.restore.json").exists() }
+    restoreAt = prefs.getLong("atlas.restoreAt", 0L)
     kind = prefs.getString("atlas.kind", "email")?.takeIf { it in KINDS } ?: "email"
     theme = prefs.getString("atlas.theme", "dark") ?: "dark"
     val raw = if (file.exists()) runCatching { file.readText() }.getOrNull() else null
@@ -108,16 +120,29 @@ object Store {
         runCatching { decodeAtlas(File(ctx.filesDir, "atlas.prev.json").readText()) }.getOrDefault(AtlasData())
       })
     remember()
+    // 2.5: sample data is marked per item. Older builds kept a device list of sample ids (and a whole-file
+    // flag): exactly the listed items get the marker, never anything else.
+    run {
+      val legacy = prefs.getStringSet(DEMO_KEY, emptySet()) ?: emptySet()
+      val m = Demo.adoptLegacy(data, legacy)
+      if (m !== data) { data = m; save() }
+      if (legacy.isNotEmpty()) prefs.edit().remove(DEMO_KEY).apply()
+    }
     // 2.4 (atlas.prev.json above is still the untouched copy): Apple login cards become their email /
     // phone, silently and losslessly. Duplicates are merged only after the user says yes, asked once.
     migrate24()
-    if (data.demo != true && prefs.getString("atlas.merge24", "") != "no") mergeAsk = Migrate24.dupCount(data)
+    if (Demo.hasReal(data) && prefs.getString("atlas.merge24", "") != "no") mergeAsk = Migrate24.dupCount(data)
     activeID = deck.firstOrNull()?.id
     ready = true
   }
   fun prefs() = prefs
 
-  fun putPrivacy(v: Boolean) { privacy = v; prefs.edit().putBoolean("atlas.privacy", v).apply() }
+  fun putMask(v: Boolean) { maskValues = v; revealed = emptySet(); prefs.edit().putBoolean("atlas.maskValues", v).apply() }
+  fun putHideNames(v: Boolean) { hideNames = v; prefs.edit().putBoolean("atlas.hideNames", v).apply() }
+  fun isRevealed(id: String) = !maskValues || id in revealed
+  fun toggleReveal(id: String) { revealed = if (id in revealed) revealed - id else revealed + id }
+  /** the app went to the background: every value is masked again */
+  fun remask() { if (revealed.isNotEmpty()) revealed = emptySet() }
   fun putTheme(v: String) { theme = v; prefs.edit().putString("atlas.theme", v).apply() }
   private fun setKindPref(v: String) { kind = v; prefs.edit().putString("atlas.kind", v).apply() }
 
@@ -130,28 +155,24 @@ object Store {
   fun identity(id: String) = data.identities.firstOrNull { it.id == id }
   fun account(id: String) = data.accounts.firstOrNull { it.id == id }
   fun accountsOf(id: String) = data.accounts.filter { id in it.identityIds }.sortedWith(compareBy(nameOrder) { it.name })
-  /** The email / phone a login card is bound to; a dangling or odd reference counts as none. */
-  fun viaOf(i: Identity): Identity? = if (!i.isLogin) null else i.via?.let { identity(it) }?.takeIf { !it.isLogin && it.id != i.id }
-  /** 微信 / Apple cards bound to this email / phone. */
-  fun loginsVia(id: String) = data.identities.filter { it.isLogin && it.via == id }
+  /** Every email / phone a 微信 / QQ is bound to (2.5: can be several); dangling or odd references count as none. */
+  fun bindsOf(i: Identity): List<Identity> = if (!i.isLogin) emptyList() else i.bindIds.mapNotNull { identity(it) }.filter { !it.isLogin && it.id != i.id }
+  /** the first binding (what older clients show) */
+  fun viaOf(i: Identity): Identity? = bindsOf(i).firstOrNull()
+  /** 微信 / QQ cards bound to this email / phone. */
+  fun loginsVia(id: String) = data.identities.filter { it.isLogin && id in it.bindIds }
   /** Sites that log in with a 微信 / Apple card bound to this email / phone, minus the ones using it directly. */
   fun indirectAccounts(id: String): List<Pair<Identity, List<Account>>> {
     val direct = data.accounts.filter { id in it.identityIds }.map { it.id }.toSet()
     return loginsVia(id).map { l -> l to accountsOf(l.id).filter { it.id !in direct } }.filter { it.second.isNotEmpty() }
   }
 
-  fun display(i: Identity): String {
-    if (!privacy) return i.value
-    if (i.isWechat) return i.value.take(2) + "•••"
-    if (i.type == "email" || (i.isLogin && i.value.contains('@'))) {
-      val parts = i.value.split("@", limit = 2)
-      return parts[0].take(2) + "•••" + (if (parts.size > 1) "@" + parts[1] else "")
-    }
-    val digits = i.value.filter { it.isDigit() }
-    return if (digits.length > 7) "••• •••• " + digits.takeLast(4) else "••••"
-  }
-  fun handleText(h: String) = if (privacy) h.take(1) + "•••" else h
-  fun title(i: Identity) = i.label.ifEmpty { if (i.isLogin) providerName(i.provider) else display(i) }
+  /** the value as shown: masked by default (2.5 level 1) unless revealed with the eye */
+  fun display(i: Identity): String = if (isRevealed(i.id)) i.value else maskValue(i)
+  /** labels and usernames: shown unless 隐藏用户名 is on (2.5 level 2) */
+  fun labelText(s: String) = if (hideNames) maskName(s) else s
+  fun handleText(h: String) = labelText(h)
+  fun title(i: Identity) = if (i.label.isNotEmpty()) labelText(i.label) else if (i.isLogin) providerName(i.provider) else display(i)
 
   // every change goes through here: snapshot for undo, stamp, persist, sync
   fun mutate(message: String? = null, undo: Boolean = true, f: (AtlasData) -> AtlasData) {
@@ -175,15 +196,75 @@ object Store {
     val accs = data.accounts.map { x -> live += x.id; del.remove(x.id); if (seen[x.id] != x.copy(updatedAt = null) || x.updatedAt == null) x.copy(updatedAt = now) else x }
     for (id in seen.keys) if (id !in live) del[id] = now
     data = data.copy(identities = ids, accounts = accs, deleted = del)
-    remember(); persist(); onSaved?.invoke()
+    remember(); persist(); if (!sandbox) onSaved?.invoke()
   }
   fun persist() {
+    if (sandbox) return   // 操作演示: nothing reaches the file
     runCatching {
       val tmp = File(file.parentFile, "atlas.json.tmp"); tmp.writeText(encodeAtlas(data)); tmp.renameTo(file)
     }
   }
   /** replace everything (sync merge), without new stamps */
-  fun adopt(d: AtlasData) { data = d; remember(); persist(); migrate24(); fixActive() }   // an older client may still add an Apple login card
+  fun adopt(d: AtlasData) {
+    if (sandbox) { realSnap = d; writeFile(d); return }   // the real data changed under the 操作演示
+    data = d; remember(); persist(); migrate24(); fixActive()   // an older client may still add an Apple login card
+  }
+  /** what is really saved, even while the 操作演示 shows sandbox data */
+  fun realData(): AtlasData = if (sandbox) realSnap ?: data else data
+  private fun writeFile(d: AtlasData) {
+    runCatching { val tmp = File(file.parentFile, "atlas.json.tmp"); tmp.writeText(encodeAtlas(d)); tmp.renameTo(file) }
+  }
+
+  // MARK: 操作演示 sandbox: the tour runs on the real screens with throwaway data
+
+  fun beginSandbox() {
+    if (sandbox) return
+    realSnap = data
+    sandbox = true
+    undoSnap = null
+    val sample = Identity(newID(), "email", "me@example.com", "示例邮箱", COLORS[0], demo = true)
+    data = AtlasData(identities = listOf(sample))
+    remember()
+    setKind("email", sample.id)
+  }
+  fun endSandbox() {
+    if (!sandbox) return
+    data = realSnap ?: data
+    realSnap = null; sandbox = false; undoSnap = null
+    remember(); fixActive()
+    popAll()
+  }
+
+  // MARK: restore point: written before anything that replaces data (sample, import, wipe, restore)
+
+  fun saveRestorePoint(why: String) {
+    if (sandbox) return
+    val d = data
+    if (d.identities.isEmpty() && d.accounts.isEmpty()) return   // nothing to lose
+    runCatching { File(file.parentFile, "atlas.restore.json").writeText(encodeAtlas(d)) }.onSuccess {
+      restoreWhy = why; restoreAt = System.currentTimeMillis()
+      prefs.edit().putString("atlas.restoreWhy", why).putLong("atlas.restoreAt", restoreAt).apply()
+    }
+  }
+  fun restoreTitle(): String? = when (restoreWhy) {
+    null -> null
+    "demo" -> "恢复导入示例前的数据"
+    "import" -> "恢复导入备份前的数据"
+    "wipe" -> "恢复清空前的数据"
+    else -> "撤回刚才的恢复"
+  }
+  fun restore() {
+    val f = File(file.parentFile, "atlas.restore.json")
+    val b = runCatching { decodeAtlas(f.readText()) }.getOrNull() ?: run { show("备份读不出来了"); return }
+    val keep = runCatching { encodeAtlas(data) }.getOrNull()
+    mutate("已恢复 ${b.identities.size} 个身份和 ${b.accounts.size} 个网站") { it.copy(identities = b.identities, accounts = b.accounts) }
+    // the data that was just replaced becomes the new restore point, so a restore can be taken back too
+    if (keep != null) runCatching { f.writeText(keep) }.onSuccess {
+      restoreWhy = "restore"; restoreAt = System.currentTimeMillis()
+      prefs.edit().putString("atlas.restoreWhy", "restore").putLong("atlas.restoreAt", restoreAt).apply()
+    }
+    setKind(kind)
+  }
 
   /** the silent part of the 2.4 migration; safe to run any time (idempotent) */
   fun migrate24() {
@@ -210,14 +291,17 @@ object Store {
     return data.identities.firstOrNull { it.id != except && idKey(it) == k }
   }
   /** The identity with this value, or a new one (reuse first: no value is ever typed in twice). Returns its id and whether it existed. */
-  fun ensureIdentity(type: String, value: String, provider: String? = null, via: String? = null): Pair<String, Boolean> {
+  fun ensureIdentity(type: String, value: String, provider: String? = null, via: String? = null): Pair<String, Boolean> =
+    ensureIdentity(type, value, provider, listOfNotNull(via))
+  fun ensureIdentity(type: String, value: String, provider: String?, binds: List<String>): Pair<String, Boolean> {
     val v = value.trim()
     existing(type, provider, v)?.let { return it.id to true }
-    var bound = via
-    if (bound == null && type == "login" && provider == "qq" && v.contains('@'))
-      bound = data.identities.firstOrNull { it.type == "email" && normEmail(it.value) == normEmail(v) }?.id
+    val bound = binds.toMutableList()
+    // a QQ whose QQ is an email you already have is bound to that email, without typing it twice
+    if (type == "login" && provider == "qq" && v.contains('@'))
+      data.identities.firstOrNull { it.type == "email" && normEmail(it.value) == normEmail(v) }?.id?.let { if (it !in bound) bound += it }
     val color = if (type == "login") providerColor(provider) else COLORS[data.identities.size % COLORS.size]
-    val i = Identity(newID(), type, v, "", color, "", provider = if (type == "login") provider else null, via = if (type == "login") bound else null)
+    val i = Identity(newID(), type, v, "", color, "", provider = if (type == "login") provider else null).let { if (type == "login") it.withBinds(bound) else it }
     mutate(null, undo = false) { it.copy(identities = it.identities + i) }
     return i.id to false
   }
@@ -226,8 +310,8 @@ object Store {
   /** 小提示: at most once a week, the card that hasn't had a new site in two weeks or more */
   fun nudge() {
     val now = nowMS(); val day = 86_400_000.0
-    if (firstRun || recovered || data.demo == true || now - prefs.getFloat("atlas.nudgeAtDays", 0f).toDouble() * day < 7 * day) return
-    val demo = demoIds()
+    if (firstRun || recovered || sandbox || !Demo.hasReal(data) || now - prefs.getFloat("atlas.nudgeAtDays", 0f).toDouble() * day < 7 * day) return
+    val demo = Demo.ids(data)
     var pick: Identity? = null; var oldest = Double.MAX_VALUE
     for (i in data.identities) {
       if (i.id in demo) continue
@@ -238,6 +322,32 @@ object Store {
     if (now - oldest < 14 * day) return
     prefs.edit().putFloat("atlas.nudgeAtDays", (now / day).toFloat()).apply()
     show("好久没来记录新账号啦，要不要来看看呢～")   // plain text only: no address, number or name on screen
+  }
+
+  // MARK: 2.5 copying an account value: marked sensitive (no clipboard preview), cleared after 60 s
+
+  private var clip: Pair<String, Long>? = null
+  fun copySecret(ctx: Context, value: String, shown: String) {
+    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    val c = android.content.ClipData.newPlainText("账号", value)
+    c.description.extras = android.os.PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
+    runCatching { cm.setPrimaryClip(c) }.onFailure { show("复制失败"); return }
+    clip = value to System.currentTimeMillis()
+    show("已复制 $shown · 60 秒后自动清除")
+    val app = ctx.applicationContext
+    scope.launch { delay(60_500); checkClipboard(app) }
+  }
+  /** clears the clipboard if it still holds what was copied 60 s ago (also checked when the app comes back) */
+  fun checkClipboard(ctx: Context) {
+    val (v, at) = clip ?: return
+    if (System.currentTimeMillis() - at < 60_000) return
+    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    // in the background Android doesn't let an app read the clipboard: try again when it's back
+    val now = runCatching { cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString() }.getOrNull() ?: return
+    clip = null
+    if (now == v) runCatching {
+      if (android.os.Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip() else cm.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+    }
   }
 
   fun show(text: String, action: String? = null, fn: (() -> Unit)? = null) {
@@ -303,45 +413,44 @@ object Store {
     }
     return kotlinx.serialization.json.Json { prettyPrint = true }.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), o)
   }
+  /** a backup file, read but not applied (null when it isn't one) */
+  fun readBackup(text: String): AtlasData? {
+    val raw = runCatching { JSON.parseToJsonElement(text) as? kotlinx.serialization.json.JsonObject }.getOrNull() ?: return null
+    if (raw["identities"] !is kotlinx.serialization.json.JsonArray || raw["accounts"] !is kotlinx.serialization.json.JsonArray) return null
+    return runCatching { decodeAtlas(text) }.getOrNull()
+  }
   fun importBackup(text: String): Boolean {
-    val raw = runCatching { JSON.parseToJsonElement(text) as? kotlinx.serialization.json.JsonObject }.getOrNull() ?: return false
-    if (raw["identities"] !is kotlinx.serialization.json.JsonArray || raw["accounts"] !is kotlinx.serialization.json.JsonArray) return false
-    val b = runCatching { decodeAtlas(text) }.getOrNull() ?: return false
+    val b = readBackup(text) ?: return false
+    saveRestorePoint("import")   // the data it replaces can always be brought back from 设置
     mutate("已导入 ${b.identities.size} 个身份和 ${b.accounts.size} 个网站") { it.copy(identities = b.identities, accounts = b.accounts) }
     setKind(kind)
     return true
   }
 
-  // sample data is opt-in; its ids stay on this device so 「清除示例数据」 removes only them
+  // 2.5 sample data: every sample item carries demo: true; it is only ever added next to what is there,
+  // and 「清除示例数据」 removes exactly the marked items. Older builds' device id list is converted at launch.
   private const val DEMO_KEY = "atlas.demoIds"
-  fun demoIds(): Set<String> =
-    if (data.demo == true) (data.identities.map { it.id } + data.accounts.map { it.id }).toSet()
-    else prefs.getStringSet(DEMO_KEY, emptySet()) ?: emptySet()
-  val hasDemo: Boolean get() { val d = demoIds(); return data.identities.any { it.id in d } || data.accounts.any { it.id in d } }
+  fun demoIds(): Set<String> = Demo.ids(data)
+  val hasDemo: Boolean get() = Demo.has(data)
+  /** 载入示例 is offered only while there is nothing of the user's own */
+  val canLoadDemo: Boolean get() = !sandbox && !Sync.on && !Demo.hasReal(data) && !Demo.has(data)
 
   fun loadDemo() {
+    if (Demo.hasReal(data)) { show("已有自己的数据，不能载入示例"); return }
+    saveRestorePoint("demo")
     val d = demo()
-    val fresh = data.identities.isEmpty() && data.accounts.isEmpty()
-    prefs.edit().putStringSet(DEMO_KEY, (d.identities.map { it.id } + d.accounts.map { it.id }).toSet()).apply()
-    mutate("已载入示例，可在「更多」里清除") { it.copy(identities = it.identities + d.identities, accounts = it.accounts + d.accounts) }
-    if (fresh) { data = data.copy(demo = true); persist() }
+    mutate("已载入示例，可在「设置」里清除") { Demo.add(it, d) }
     setKind("email")
   }
   fun clearDemo() {
-    val d = demoIds()
-    mutate("已清除示例数据") { s ->
-      s.copy(
-        identities = s.identities.filter { it.id !in d }.map { if (it.via != null && it.via in d) it.copy(via = null) else it },
-        accounts = s.accounts.filter { it.id !in d }.map { a -> if (a.identityIds.any { it in d }) a.copy(identityIds = a.identityIds.filter { it !in d }) else a },
-      )
-    }
+    mutate("已清除示例数据") { Demo.clear(it) }
     setKind(kind)
   }
   /** CI screenshots start from the sample data */
   fun seedDemo() {
     if (!firstRun) return
     firstRun = false
-    data = demo(); remember(); persist(); fixActive()
+    data = Demo.add(AtlasData(), demo()); remember(); persist(); fixActive()
   }
 
   fun demo(): AtlasData {

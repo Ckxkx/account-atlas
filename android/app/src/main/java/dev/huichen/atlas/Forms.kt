@@ -89,7 +89,7 @@ import kotlinx.coroutines.launch
 // MARK: - form kit (grouped, like an iOS Form)
 
 @Composable
-fun SheetBar(left: String?, title: String, right: String?, rightEnabled: Boolean = true, onLeft: () -> Unit = { Store.pop() }, leftIcon: Boolean = false, onRight: () -> Unit = {}) {
+fun SheetBar(left: String?, title: String, right: String?, rightEnabled: Boolean = true, onLeft: () -> Unit = { Store.pop() }, leftIcon: Boolean = false, rightAnchor: String? = null, onRight: () -> Unit = {}) {
   Box(Modifier.fillMaxWidth().padding(top = 18.dp).height(44.dp).padding(horizontal = 8.dp)) {
     if (left != null) Row(Modifier.align(Alignment.CenterStart).press(0.94f, onClick = onLeft).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
       if (leftIcon) Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, null, tint = pal.accent)
@@ -97,7 +97,8 @@ fun SheetBar(left: String?, title: String, right: String?, rightEnabled: Boolean
     }
     T(title, 17f, FontWeight.SemiBold, modifier = Modifier.align(Alignment.Center))
     if (right != null) T(right, 17f, FontWeight.SemiBold, if (rightEnabled) pal.accent else pal.tertiary,
-      Modifier.align(Alignment.CenterEnd).press(0.94f, enabled = rightEnabled, onClick = onRight).padding(horizontal = 8.dp, vertical = 6.dp))
+      Modifier.align(Alignment.CenterEnd).then(if (rightAnchor != null) Modifier.tourAnchor(rightAnchor) else Modifier)
+        .press(0.94f, enabled = rightEnabled, onClick = onRight).padding(horizontal = 8.dp, vertical = 6.dp))
   }
 }
 
@@ -147,23 +148,28 @@ fun IdentityToggles(selected: List<String>, onChange: (List<String>) -> Unit) {
   val hap = haptics()
   val all = Store.data.identities.filter { it.type in KINDS }
   val rank = { i: Identity -> when { i.type == "email" -> 0; i.type == "phone" -> 1; i.isQQ -> 3; else -> 2 } }
-  val list = all.withIndex().sortedWith(compareBy({ rank(it.value) }, { it.index })).map { it.value }
+  val sorted = all.withIndex().sortedWith(compareBy({ rank(it.value) }, { it.index })).map { it.value }
+  // 2.5: a 微信 / QQ sits right under the (first) phone or email it is bound to; unbound ones come last
+  val under = sorted.filter { it.isLogin }.groupBy { l -> Store.bindsOf(l).firstOrNull()?.id }
+  val list = sorted.filter { !it.isLogin }.flatMap { listOf(it) + (under[it.id] ?: emptyList()) } + (under[null] ?: emptyList())
   var creating by remember { mutableStateOf(false) }
   var nKind by remember { mutableStateOf("email") }
   var nValue by remember { mutableStateOf("") }
   var nVia by remember { mutableStateOf<String?>(null) }
-  @Composable fun row(i: Identity) {
+  @Composable fun row(i: Identity, first: Boolean) {
     val on = i.id in selected
     val sc by animateFloatAsState(if (on) 1f else 0.85f, calm(), label = "chk")
-    Row(Modifier.fillMaxWidth().press(1f) { hap(TICK); onChange(if (on) selected - i.id else selected + i.id) }.padding(horizontal = 16.dp, vertical = 10.dp),
+    val nested = i.isLogin && Store.bindsOf(i).isNotEmpty()
+    Row(Modifier.fillMaxWidth().then(if (first) Modifier.tourAnchor("who") else Modifier).press(1f) { hap(TICK); onChange(if (on) selected - i.id else selected + i.id) }
+      .padding(start = if (nested) 34.dp else 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
       verticalAlignment = Alignment.CenterVertically) {
       SmallCard(i, kindIcon(i), 36.dp, 24.dp)
       Spacer(Modifier.width(12.dp))
       Column(Modifier.weight(1f)) {
         if (i.isLogin) {
-          T(providerName(i.provider) + (if (i.label.isNotEmpty()) " · " + i.label else ""), 16f)
-          val tag = Store.viaOf(i)?.let { bindTag(it) }.orEmpty()
-          T(Store.display(i) + (if (tag.isNotEmpty()) " · 绑定$tag" else ""), 12f, color = pal.secondary)
+          val tag = bindTags(Store.bindsOf(i))
+          T(providerName(i.provider) + " " + Store.display(i) + (if (tag.isNotEmpty()) " · 绑定 $tag" else ""), 16f, lines = 1)
+          if (i.label.isNotEmpty()) T(Store.labelText(i.label), 12f, color = pal.secondary)
         } else {
           Row(verticalAlignment = Alignment.CenterVertically) {
             T(Store.title(i), 16f)
@@ -176,7 +182,7 @@ fun IdentityToggles(selected: List<String>, onChange: (List<String>) -> Unit) {
         tint = if (on) hex(i.color) else pal.secondary.copy(alpha = 0.5f))
     }
   }
-  list.forEachIndexed { k, i -> if (k > 0) Divider(); row(i) }
+  list.forEachIndexed { k, i -> if (k > 0) Divider(); row(i, k == 0) }
   if (list.isNotEmpty()) Divider()
   Row(Modifier.fillMaxWidth().press(1f) { hap(TICK); creating = !creating }.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
     T(if (list.isEmpty()) "新建身份（邮箱、手机号、微信或 QQ）" else "新建身份", 16f, FontWeight.Medium, pal.accent)
@@ -226,14 +232,16 @@ fun FormScroll(content: @Composable ColumnScope.() -> Unit) {
 // MARK: - identity form
 
 @Composable
-fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
+fun IdentityForm(existing: Identity?, type0: String, defaultColor: String, presetVia: String? = null) {
   var type by remember { mutableStateOf(existing?.type ?: type0) }
   var value by remember { mutableStateOf(existing?.value ?: "") }
   var label by remember { mutableStateOf(existing?.label ?: "") }
   // 2.4: 微信 and QQ are the only login cards; an Apple ID is a flag on its email / phone
   var provider by remember { mutableStateOf(if (existing?.provider == "qq") "qq" else "wechat") }
-  var via by remember { mutableStateOf(existing?.via?.takeIf { v -> Store.identity(v)?.let { !it.isLogin } == true }) }
-  var viaNew by remember { mutableStateOf("") }   // via == "+": a number / address not in the list yet
+  // 2.5: a 微信 / QQ can be bound to several (a phone and the QQ mailbox); from a phone's 「添加绑定的 QQ / 微信」 it starts bound to it
+  var binds by remember { mutableStateOf(existing?.bindIds?.filter { v -> Store.identity(v)?.let { !it.isLogin } == true } ?: listOfNotNull(presetVia)) }
+  var addNew by remember { mutableStateOf(false) }   // a number / address not in the list yet
+  var viaNew by remember { mutableStateOf("") }
   // a new login card starts in its brand colour, until the user picks one
   var colorTouched by remember { mutableStateOf(existing != null) }
   var color by remember { mutableStateOf(existing?.color ?: if (type0 == "login") providerColor("wechat") else defaultColor) }
@@ -245,16 +253,16 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
   val esimOut: Boolean? = if (type == "phone" && esim) true else null
   val appleOut: Boolean? = if (!login && apple) true else null
   val providerOut = if (login) provider else null
-  val viaOut = if (login && via != "+") via else null
+  val bindsOut = if (login) binds else emptyList()
   val sample = when {
     login && provider == "qq" -> "10001"
     login -> "wxid_atlas"
     type == "email" -> "name@example.com"
     else -> "+86 138 0000 0000"
   }
-  val preview = Identity(existing?.id ?: "_new", type, value.ifEmpty { sample }, label, color, notes, order = existing?.order, esim = esimOut, provider = providerOut, via = viaOut, apple = appleOut)
+  val preview = Identity(existing?.id ?: "_new", type, value.ifEmpty { sample }, label, color, notes, order = existing?.order, esim = esimOut, provider = providerOut, apple = appleOut).withBinds(bindsOut)
   val dup = Store.existing(type, providerOut, value, existing?.id)
-  val viaNewErr = if (login && via == "+" && viaNew.isNotBlank()) idValueError(if (viaNew.contains('@')) "email" else "phone", viaNew) else null
+  val viaNewErr = if (login && addNew && viaNew.isNotBlank()) idValueError(if (viaNew.contains('@')) "email" else "phone", viaNew) else null
   val err = if (value.isBlank()) null else idValueError(if (login) provider else type, value)
   val valid = value.isNotBlank() && err == null && dup == null && viaNewErr == null
   fun autoColor() {
@@ -264,20 +272,22 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
 
   fun save() {
     val v = value.trim()
-    var bound = viaOut
-    if (login && via == "+" && viaNew.isNotBlank()) bound = Store.ensureIdentity(if (viaNew.contains('@')) "email" else "phone", viaNew).first
+    val bound = bindsOut.toMutableList()
+    if (login && addNew && viaNew.isNotBlank()) Store.ensureIdentity(if (viaNew.contains('@')) "email" else "phone", viaNew).first.let { if (it !in bound) bound += it }
     // a QQ whose QQ is an email you already have: bind it to that email instead of typing it twice
-    if (login && provider == "qq" && bound == null && v.contains('@'))
-      bound = Store.data.identities.firstOrNull { it.type == "email" && normEmail(it.value) == normEmail(v) }?.id
+    if (login && provider == "qq" && v.contains('@'))
+      Store.data.identities.firstOrNull { it.type == "email" && normEmail(it.value) == normEmail(v) }?.id?.let { if (it !in bound) bound += it }
     if (existing != null) {
       Store.mutate("已保存") { s -> s.copy(identities = s.identities.map {
-        if (it.id == existing.id) it.copy(type = type, value = v, label = label.trim(), color = color, notes = notes.trim(), esim = esimOut, apple = appleOut, provider = providerOut, via = if (login) bound else it.via)
+        // edited by the user: a sample card becomes theirs
+        if (it.id == existing.id) it.copy(type = type, value = v, label = label.trim(), color = color, notes = notes.trim(), esim = esimOut, apple = appleOut, provider = providerOut, demo = null)
+          .let { x -> if (login) x.withBinds(bound) else x }
         // a card that stops being an email / phone can no longer be what a login is bound to
-        else if (type == "login" && it.via == existing.id) it.copy(via = null) else it
+        else if (type == "login" && existing.id in it.bindIds) it.withBinds(it.bindIds - existing.id) else it
       }) }
       Store.setKind(type, existing.id)
     } else {
-      val i = Identity(newID(), type, v, label.trim(), color, notes.trim(), esim = esimOut, provider = providerOut, via = if (login) bound else null, apple = appleOut)
+      val i = Identity(newID(), type, v, label.trim(), color, notes.trim(), esim = esimOut, provider = providerOut, apple = appleOut).withBinds(if (login) bound else emptyList())
       Store.mutate("已添加") { s -> s.copy(identities = s.identities + i) }
       Store.setKind(type, i.id)
     }
@@ -297,7 +307,7 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
       SheetBar("取消", if (existing == null) "新身份" else "编辑", if (existing == null) "添加" else "保存", valid, onRight = ::save)
       FormScroll {
         Box(Modifier.padding(horizontal = 26.dp).padding(top = 10.dp)) {
-          AnimatedContent(type, transitionSpec = { fadeIn(calm()) togetherWith fadeOut(calm()) }, label = "pv") { WalletCard(preview.copy(type = it)) }
+          AnimatedContent(type, transitionSpec = { fadeIn(calm()) togetherWith fadeOut(calm()) }, label = "pv") { WalletCard(preview.copy(type = it), reveal = true) }
         }
         Box(Modifier.padding(horizontal = 16.dp).padding(top = 18.dp)) {
           Segmented(listOf("email" to "邮箱", "phone" to "手机号", "login" to "微信 / QQ"), type) { type = it; autoColor() }
@@ -329,10 +339,13 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
         if (!login) FormGroup(null, "Apple ID 就是某个邮箱或手机号，打开这个开关就行，不用单独建卡。") { switchRow("也是 Apple ID", apple) { apple = it } }
         if (login) {
           val choices = Store.data.identities.filter { !it.isLogin && it.id != existing?.id }
-          FormGroup("绑定的手机号/邮箱", viaNewErr ?: "从已有的卡里选，不用再填一遍。换手机号时，能看出哪些 App 跟着受影响。") {
+          FormGroup("绑定的手机号/邮箱（可多选）", viaNewErr ?: "从已有的卡里选，不用再填一遍。比如 QQ 同时绑了手机号和 QQ 邮箱，两个都选上。") {
             @Composable fun opt(i: Identity?, key: String?, title: String) {
-              val on = via == key
-              Row(Modifier.fillMaxWidth().press(1f) { hap(TICK); via = key }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+              val on = when (key) { null -> binds.isEmpty() && !addNew; "+" -> addNew; else -> key in binds }
+              Row(Modifier.fillMaxWidth().press(1f) {
+                hap(TICK)
+                when (key) { null -> { binds = emptyList(); addNew = false }; "+" -> addNew = !addNew; else -> binds = if (key in binds) binds - key else binds + key }
+              }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (i != null) { SmallCard(i, kindIcon(i), 36.dp, 24.dp); Spacer(Modifier.width(12.dp)) }
                 Column(Modifier.weight(1f)) {
                   Row(verticalAlignment = Alignment.CenterVertically) {
@@ -348,7 +361,7 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
             opt(null, null, "不绑定")
             choices.forEach { Divider(); opt(it, it.id, Store.title(it)) }
             Divider(); opt(null, "+", "新的手机号或邮箱")
-            if (via == "+") { Divider(); Field(viaNew, { viaNew = it }, "手机号或邮箱", KeyboardType.Email) }
+            if (addNew) { Divider(); Field(viaNew, { viaNew = it }, "手机号或邮箱", KeyboardType.Email) }
           }
         }
         if (type == "phone") FormGroup(null, "eSIM 没有实体卡，换手机时记得转移。") { switchRow("eSIM", esim) { esim = it } }
@@ -542,7 +555,8 @@ fun PickerSheet(presetIdentity: String?) {
   var cat by remember { mutableStateOf("常用") }
   val picked = remember { mutableStateListOf<Preset>() }
   val handles = remember { mutableStateMapOf<String, String>() }
-  var ids by remember { mutableStateOf(listOfNotNull(presetIdentity)) }
+  // during the 操作演示 the identity is picked by hand, as a step of its own
+  var ids by remember { mutableStateOf(listOfNotNull(presetIdentity?.takeIf { !Tour.on })) }
   var step2 by remember { mutableStateOf(false) }
   var manual by remember { mutableStateOf(false) }
   val hap = haptics()
@@ -571,6 +585,10 @@ fun PickerSheet(presetIdentity: String?) {
     delay(350)
     hits = AppStore.search(q)
   }
+  LaunchedEffect(Unit) { Tour.advance("add", "pick") }
+  LaunchedEffect(picked.size) { if (picked.isNotEmpty()) Tour.advance("pick", "next") else Tour.advance("next", "pick") }
+  LaunchedEffect(step2) { if (step2) Tour.advance("next", "who") else if (Tour.step == "who" || Tour.step == "save") Tour.step = "next" }
+  LaunchedEffect(ids) { if (ids.isNotEmpty()) Tour.advance("who", "save") else Tour.advance("save", "who") }
   // 我添加的 emptied: the tab goes away, back to 常用
   LaunchedEffect(custom.isEmpty()) { if (custom.isEmpty() && cat == "我添加的") cat = "常用" }
   val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -607,6 +625,7 @@ fun PickerSheet(presetIdentity: String?) {
       }
     }
     Store.pop()
+    Tour.saved()
   }
 
   AnimatedContent(step2, transitionSpec = {
@@ -626,7 +645,7 @@ fun PickerSheet(presetIdentity: String?) {
       }
       Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-          SheetBar("取消", "添加网站或 App", if (picked.isEmpty()) "下一步" else "下一步 (${picked.size})", picked.isNotEmpty()) { step2 = true }
+          SheetBar("取消", "添加网站或 App", if (picked.isEmpty()) "下一步" else "下一步 (${picked.size})", picked.isNotEmpty(), rightAnchor = "next") { step2 = true }
           SearchField(query, "搜索 App 或网站", Modifier.padding(horizontal = 16.dp).padding(bottom = 10.dp)) { query = it }
           Chips(cats.map { it to null }, if (q.isEmpty()) cat else null) { cat = it; query = "" }
           LazyVerticalGrid(GridCells.Fixed(4), Modifier.weight(1f).imePadding(), contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp, 14.dp, 12.dp, 110.dp),
@@ -638,7 +657,7 @@ fun PickerSheet(presetIdentity: String?) {
               // no icon of its own and none bundled (王者荣耀 …): borrow the App Store artwork of the same name
               val match = if (q.isEmpty() || ownIcon(p) != null || IconCache.preset(p.name, p.domain) != null) null else hits.firstOrNull { it.name.lowercase() == k }
               val sc by animateFloatAsState(if (on) 0.92f else 1f, calm(), label = "pk")
-              Box(Modifier.animateItem(fadeInSpec = calm(), placementSpec = calm(), fadeOutSpec = calm()), contentAlignment = Alignment.TopCenter) {
+              Box(Modifier.animateItem(fadeInSpec = calm(), placementSpec = calm(), fadeOutSpec = calm()).then(if (p == list.firstOrNull()) Modifier.tourAnchor("tile") else Modifier), contentAlignment = Alignment.TopCenter) {
                 Column(Modifier.fillMaxWidth().press(1f, onLongClick = if (mine) ({ hap(TICK); menuFor = k }) else null) {
                   hap(TICK)
                   if (on) { picked.removeAll { key(it) == k }; icons.remove(k); hitOf.remove(k) }
@@ -723,7 +742,7 @@ fun PickerSheet(presetIdentity: String?) {
       }
     } else {
       Column {
-        SheetBar("返回", "选择身份", "保存", onLeft = { step2 = false }, leftIcon = true) { save() }
+        SheetBar("返回", "选择身份", "保存", onLeft = { step2 = false }, leftIcon = true, rightAnchor = "save") { save() }
         FormScroll {
           FormGroup("${picked.size} 个网站与 App", "同一个网站有几个账号，可以分别记一条，用账号名区分。点图标可以更换。") {
             picked.forEachIndexed { n, p ->

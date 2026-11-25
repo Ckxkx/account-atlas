@@ -4,6 +4,16 @@ import SwiftUI
 struct AtlasApp: App {
   @State private var store = Store()
   @StateObject private var sync = Sync()
+
+  init() {
+    // 2.5 (item 9): the iOS 26 floating tab bar sizes itself to its items; a little more room between them
+    // makes it about 10% wider. UITabBar's public item spacing is the only knob iOS offers for its width.
+    if #available(iOS 26.0, *) {
+      let bar = UITabBar.appearance()
+      bar.itemPositioning = .centered
+      bar.itemSpacing = 14
+    }
+  }
   @Environment(\.scenePhase) private var phase
 
   var body: some Scene {
@@ -18,7 +28,11 @@ struct AtlasApp: App {
           store.onSaved = { [weak s] in s?.schedule() }
           Task { await sync.run() }
         }
-        .onChange(of: phase) { _, p in if p == .active { Task { await sync.run() } } }
+        .onChange(of: phase) { _, p in
+          if p == .active { Task { await sync.run() } }
+          // 2.5: values shown with the eye are masked again whenever the app leaves the screen
+          if p != .active { store.remask() }
+        }
     }
   }
 }
@@ -27,7 +41,6 @@ struct RootView: View {
   @Environment(Store.self) var store
   @State private var tab = 0
   @State private var dir: CGFloat = 1
-  @State private var tour = false
 
   var body: some View {
     TabView(selection: Binding(get: { tab }, set: { t in dir = t >= tab ? 1 : -1; tab = t })) {
@@ -40,10 +53,19 @@ struct RootView: View {
     .modifier(TabBarGlass())
     .onChange(of: store.theme) { _, t in ThemeFX.apply(t) }
     .sheet(item: Binding(get: { store.route }, set: { r in store.route = r })) { r in sheet(r) }
+    .overlay { TourLayer(inPicker: false).animation(Motion.smooth, value: store.tourStep) }
     .overlay(alignment: .top) { ToastView() }
-    .fullScreenCover(isPresented: $tour) { OnboardingView(offerDemo: true).environment(store) }
+    // the 操作演示 starts on the wallet, ends its last step on the map, and goes back to the wallet when done
+    .onChange(of: store.tourStep) { _, s in
+      let t = s == "map" ? 2 : (s == nil || s == "add") ? 0 : tab
+      if t != tab { dir = t >= tab ? 1 : -1; tab = t }
+    }
+    // the picker was closed half way through the 操作演示: start again from the + button
+    .onChange(of: store.route) { _, r in
+      if r == nil, let s = store.tourStep, Store.pickerTourSteps.contains(s) { store.tourStep = "add" }
+    }
     // 2.4: duplicates (incl. a former Apple login card and its email) are merged only after a yes, asked once
-    .alert("合并重复的身份", isPresented: Binding(get: { store.mergeAsk > 0 && !tour && store.route == nil }, set: { if !$0 && store.mergeAsk > 0 { store.declineMerge() } })) {
+    .alert("合并重复的身份", isPresented: Binding(get: { store.mergeAsk > 0 && store.tourStep == nil && store.route == nil }, set: { if !$0 && store.mergeAsk > 0 { store.declineMerge() } })) {
       Button("合并") { store.mergeDuplicates() }
       Button("暂不", role: .cancel) { store.declineMerge() }
     } message: { Text("发现 \(store.mergeAsk) 个重复的身份，合并后关系图更清晰，数据不会丢。") }
@@ -62,7 +84,7 @@ struct RootView: View {
       // a fresh install starts empty and gets the tour (skippable); an update never shows it
       if store.firstRun && !d.bool(forKey: "atlas.tourDone") && !d.bool(forKey: "atlas.demoAsked") {
         d.set(true, forKey: "atlas.demoAsked")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { tour = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { withAnimation(Motion.smooth) { store.startTour(firstRun: true) } }
       }
       if store.recovered {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { store.show("数据文件读取出错，已恢复到上次能打开的版本") }
@@ -127,6 +149,8 @@ struct SheetHost: View {
     case .editAccount(let id): AccountFormHost(id: id)
     case .picker(let pre): PickerSheet(presetIdentity: pre)
     case .settings: SettingsSheet()
+    case .newBound(let id): IdentityForm(existing: nil, type: "login", defaultColor: COLORS[0], presetVia: id)
+    case .share: ShareSheet()
     }
   }
 }

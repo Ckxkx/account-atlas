@@ -127,7 +127,8 @@ object Sync {
       val prov = c.provider ?: "github"
       val text = withContext(Dispatchers.IO) { readGist(gid, c.token, prov) }
       val remote = withContext(Dispatchers.Default) { text?.let { AtlasCrypto.openData(it, k) } ?: AtlasData() }
-      val local = Store.data
+      // during the 操作演示 the screen shows sandbox data: sync only ever sees (and updates) the real data
+      val local = Store.realData()
       val merged = Merge.merge(local, remote)
       if (Merge.sig(merged) != Merge.sig(local)) Store.adopt(merged)
       if (text == null || Merge.sig(merged) != Merge.sig(remote)) {
@@ -169,7 +170,8 @@ object Sync {
       salt = AtlasCrypto.b64(b)
       k = withContext(Dispatchers.Default) { AtlasCrypto.derive(pass, b) }
     }
-    if (Store.data.demo == true) Store.adopt(AtlasData())
+    // sample data stays on this device: it is taken out (without tombstones) before the first merge
+    Store.realData().let { if (Demo.has(it)) Store.adopt(Demo.clear(it)) }
     if (gid == null) {
       val content = AtlasCrypto.sealData(Store.data, k, salt)
       val made = withContext(Dispatchers.IO) { api("/gists", "POST", filesBody(content, public = false), token, prov) } as? JsonObject

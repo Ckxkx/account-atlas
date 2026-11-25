@@ -112,7 +112,9 @@ class MainActivity : ComponentActivity() {
     enableEdgeToEdge(SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
     setContent { AtlasRoot(startTab) }
   }
-  override fun onResume() { super.onResume(); Sync.runNow() }
+  override fun onResume() { super.onResume(); Sync.runNow(); Store.checkClipboard(applicationContext) }
+  // 2.5: values shown with the eye are masked again whenever the app leaves the screen
+  override fun onStop() { super.onStop(); Store.remask() }
 }
 
 object ThemeFX { var origin = Offset.Zero; var request: ((String) -> Unit)? = null }
@@ -154,7 +156,7 @@ fun AtlasRoot(startTab: Int) {
         }
         FirstRunTour()
         // 2.4: duplicates (incl. a former Apple login card and its email) are merged only after a yes, asked once
-        if (Store.mergeAsk > 0 && !Store.tour && Store.routes.isEmpty()) {
+        if (Store.mergeAsk > 0 && !Tour.on && Store.routes.isEmpty()) {
           androidx.compose.material3.AlertDialog(onDismissRequest = { Store.declineMerge() },
             title = { Text("合并重复的身份") },
             text = { Text("发现 ${Store.mergeAsk} 个重复的身份，合并后关系图更清晰，数据不会丢。") },
@@ -181,6 +183,7 @@ fun Shell(startTab: Int) {
   val hap = haptics()
   val sheetUp = Store.routes.isNotEmpty()
   val backScale by animateFloatAsState(if (sheetUp) 0.94f else 1f, calm(), label = "back")
+  LaunchedEffect(Unit) { Tour.requestTab = { t -> if (t != tab) { dir = if (t >= tab) 1 else -1; tab = t } } }
   BackHandler(enabled = sheetUp) { Store.pop() }
 
   Box(Modifier.fillMaxSize()) {
@@ -307,11 +310,12 @@ fun SheetHost(r: Route) {
   when (r) {
     is Route.IdentityR -> IdentityDetail(r.id)
     is Route.AccountR -> AccountDetail(r.id)
-    is Route.NewIdentity -> IdentityForm(null, r.type, COLORS[Store.data.identities.size % COLORS.size])
+    is Route.NewIdentity -> IdentityForm(null, r.type, COLORS[Store.data.identities.size % COLORS.size], r.via)
     is Route.EditIdentity -> IdentityForm(Store.identity(r.id), "email", COLORS[0])
     is Route.EditAccount -> Store.account(r.id)?.let { AccountForm(it) }
     is Route.Picker -> PickerSheet(r.preset)
     Route.Settings -> SettingsSheet()
+    Route.Share -> ShareSheet()
   }
 }
 

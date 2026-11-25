@@ -91,7 +91,7 @@ fun TopButtons() {
     Spacer(Modifier.width(8.dp))
     Box {
       // App first: a tap adds an app (its identity is picked, or made, in the next step); the menu has the rest
-      RoundButton(onClick = { Store.push(Route.Picker(Store.active?.id)) }, onLongClick = { menu = true }) { Icon(Icons.Filled.Add, "添加", Modifier.size(22.dp), tint = pal.accent) }
+      RoundButton(Modifier.tourAnchor("add"), onClick = { Store.push(Route.Picker(Store.active?.id)) }, onLongClick = { menu = true }) { Icon(Icons.Filled.Add, "添加", Modifier.size(22.dp), tint = pal.accent) }
       DropdownMenu(menu, { menu = false }) {
         DropdownMenuItem({ androidx.compose.material3.Text("添加网站或 App") }, { menu = false; Store.push(Route.Picker(Store.active?.id)) }, leadingIcon = { Icon(Icons.Outlined.Apps, null) })
         DropdownMenuItem({ androidx.compose.material3.Text("添加邮箱") }, { menu = false; Store.push(Route.NewIdentity("email")) }, leadingIcon = { Icon(Icons.Outlined.Email, null) })

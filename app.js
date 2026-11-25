@@ -113,7 +113,9 @@
 
   // ---------- state ----------
   let state = (() => { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } })();
-  const ui = { tab: 'home', cat: '全部', privacy: localStorage.getItem('atlas.privacy') === '1', active: 0, kind: KINDS.includes(localStorage.getItem('atlas.kind')) ? localStorage.getItem('atlas.kind') : 'email' };
+  // 2.5 two-level hiding: account values are masked unless 默认隐藏账号 is off (or a card's eye is open);
+  // labels and usernames are shown unless 隐藏用户名 is on
+  const ui = { tab: 'home', cat: '全部', mask: localStorage.getItem('atlas.mask') !== '0', hideNames: localStorage.getItem('atlas.hideNames') === '1', revealed: new Set(), active: 0, kind: KINDS.includes(localStorage.getItem('atlas.kind')) ? localStorage.getItem('atlas.kind') : 'email' };
   // every item carries updatedAt; removed ids become tombstones, so two devices can merge
   const strip = o => { const { updatedAt, ...r } = o; return JSON.stringify(r); };
   let seen = new Map();
@@ -127,65 +129,62 @@
       delete state.deleted[x.id];
     }
     for (const id of seen.keys()) if (!live.has(id)) state.deleted[id] = now;
-    // "pure demo" only while nothing but the sample cards is on the device
-    if (state.demo) { const d = new Set(readList(DEMO_KEY)); if ([...live].some(id => !d.has(id))) delete state.demo; }
     remember();
+    if (tourOn()) return;   // 操作演示: the sandbox is never written or synced
     localStorage.setItem(KEY, JSON.stringify(state));
     Sync.schedule();
   };
 
-  // sample data is opt-in: its ids are kept on this device so 「清除示例数据」 removes only them
+  // 2.5 sample data: every sample item carries demo: true. It is only ever added next to what is there
+  // (and only while there is nothing of the user's own), and 「清除示例数据」 removes exactly the marked items.
+  // Older versions kept a device list of sample ids (and a whole-file flag): converted once at boot, and
+  // only the listed items get the marker, never anything else.
   const DEMO_KEY = 'atlas.demoIds';
-  const demoIdSet = () => state.demo ? new Set([...state.identities, ...state.accounts].map(x => x.id)) : new Set(readList(DEMO_KEY));
-  const hasDemo = () => { const d = demoIdSet(); return [...state.identities, ...state.accounts].some(x => d.has(x.id)); };
+  const isDemo = x => x.demo === true;
+  const demoIdSet = () => new Set([...state.identities, ...state.accounts].filter(isDemo).map(x => x.id));
+  const hasDemo = () => [...state.identities, ...state.accounts].some(isDemo);
+  const hasReal = (d = state) => [...d.identities, ...d.accounts].some(x => !isDemo(x));
+  function adoptLegacyDemo() {
+    const list = new Set(readList(DEMO_KEY)); let changed = 'demo' in state;
+    for (const x of [...state.identities, ...state.accounts]) if (list.has(x.id) && !isDemo(x)) { x.demo = true; changed = true; }
+    delete state.demo; if (list.size) localStorage.removeItem(DEMO_KEY);
+    return changed;
+  }
+  // restore point: written before anything that replaces data (sample, import, wipe, restore)
+  const RESTORE = 'atlas.v1.restore';
+  const RESTORE_TITLE = { demo: '恢复导入示例前的数据', import: '恢复导入备份前的数据', wipe: '恢复清空前的数据', restore: '撤回刚才的恢复' };
+  const readRestore = () => { try { const r = JSON.parse(localStorage.getItem(RESTORE)); return r && r.data && Array.isArray(r.data.identities) ? r : null; } catch { return null; } };
+  function saveRestorePoint(why) {
+    if (tourOn() || (!state.identities.length && !state.accounts.length)) return true;
+    try { localStorage.setItem(RESTORE, JSON.stringify({ why, at: Date.now(), data: { identities: state.identities, accounts: state.accounts } })); return true; }
+    catch { return false; }   // storage full: the undo toast is still there
+  }
+  function restoreData() {
+    const r = readRestore(); if (!r) return;
+    const keep = { identities: state.identities, accounts: state.accounts };
+    snap(); state.identities = r.data.identities; state.accounts = r.data.accounts;
+    try { localStorage.setItem(RESTORE, JSON.stringify({ why: 'restore', at: Date.now(), data: keep })); } catch {}
+    save(); setKind(ui.kind); render(); undoToast(`已恢复 ${state.identities.length} 个身份和 ${state.accounts.length} 个网站`);
+  }
   function loadDemo() {
-    snap();
-    const d = demo(), fresh = !state.identities.length && !state.accounts.length;
-    localStorage.setItem(DEMO_KEY, JSON.stringify([...d.identities, ...d.accounts].map(x => x.id)));
-    state.identities.push(...d.identities); state.accounts.push(...d.accounts);
-    if (fresh) state.demo = true;
+    if (hasReal()) return toast('已有自己的数据，不能载入示例');
+    if (Sync.on) return toast('开着同步时不能载入示例');
+    saveRestorePoint('demo'); snap();
+    const d = demo(), have = new Set([...state.identities, ...state.accounts].map(x => x.id));
+    state.identities.push(...d.identities.filter(x => !have.has(x.id)).map(x => ({ ...x, demo: true })));
+    state.accounts.push(...d.accounts.filter(x => !have.has(x.id)).map(x => ({ ...x, demo: true })));
     save(); setKind('email'); render(); undoToast('已载入示例，可在右上角「更多」里清除');
+  }
+  function askDemo() {
+    if (hasReal()) return toast('已经有自己的数据了，不能载入示例，免得和真实数据混在一起');
+    if (Sync.on) return toast('开着同步时不能载入示例');
+    confirmSheet('载入示例数据？', '会加入几个虚构的邮箱、手机号和 App，都带示例标记，「清除示例数据」只会删掉它们。', '载入', loadDemo, false);
   }
   function clearDemo() {
     const d = demoIdSet(); snap();
-    state.identities = state.identities.filter(i => !d.has(i.id)).map(i => i.via && d.has(i.via) ? (({ via, ...r }) => r)(i) : i);
+    state.identities = state.identities.filter(i => !d.has(i.id)).map(i => bindIds(i).some(x => d.has(x)) ? setBinds({ ...i }, bindIds(i).filter(x => !d.has(x))) : i);
     state.accounts = state.accounts.filter(a => !d.has(a.id)).map(a => a.identityIds.some(x => d.has(x)) ? { ...a, identityIds: a.identityIds.filter(x => !d.has(x)) } : a);
-    delete state.demo;
     save(); setKind(ui.kind); render(); undoToast('已清除示例数据');
-  }
-  // 新手教程: shown once on a fresh install (and from 更多 › 使用教程). Skippable on every page.
-  // Sample data is never loaded behind the user's back: the last page offers it as a labelled choice.
-  const TOUR = [
-    ['🗂️', '欢迎使用账号星图', '记下每个网站和 App 是用哪个邮箱、哪个手机号注册的。换号、注销、找回密码时，一眼就知道要改哪些。', '不保存任何密码，数据只在你的设备上。'],
-    ['🧩', '第一步：添加 App', '点右上角「+」，选你用的网站和 App（可以多选），再选它怎么登录：哪个邮箱、手机号，还是微信、QQ。列表里没有的，当场新建就行。搜不到的 App 会从 App Store 找。', '同一个 App 有几个账号，可以分别记，用账号名区分。'],
-    ['✉️', '卡包：每个身份一张卡', '每个邮箱、手机号、微信、QQ 都是一张卡。点开一张，就能看到它关联的全部 App，包括通过绑定它的微信 / QQ 登录的。Apple ID 是邮箱或手机号上的一个标记，不用单独建卡。', '上方可以在 邮箱 / 手机号 / 微信/QQ 之间切换。'],
-    ['🕸️', '关系图', '所有邮箱、手机号和 App 会自动连成一张图。点一个节点，就能看到它牵连着哪些账号。', '准备换手机号？先在这里看看要改多少个。'],
-    ['🛡️', '隐私与备份', '右上角「更多」里可以隐藏号码，截图也安心；还能导出备份，或开启端到端加密同步。', '以后更新数据不会丢，也可以随时在「更多」里重看教程。'],
-  ];
-  function showTour(offerDemo) {
-    localStorage.setItem('atlas.demoAsked', '1'); localStorage.setItem('atlas.tourDone', '1');
-    let k = 0;
-    const paint = () => {
-      const [emoji, title, body, tip] = TOUR[k], last = k === TOUR.length - 1;
-      const dots = TOUR.map((_, j) => `<span style="width:${j === k ? 18 : 6}px;height:6px;border-radius:3px;background:${j === k ? 'var(--tint)' : 'var(--secondary)'};opacity:${j === k ? 1 : .35};transition:all .3s"></span>`).join('');
-      const actions = last
-        ? (offerDemo && !hasDemo()
-            ? `<button id="tDemo" style="font-weight:600">载入示例数据看看</button><button data-close>直接开始</button>`
-            : `<button data-close style="font-weight:600">开始使用</button>`)
-        : `<button id="tNext" style="font-weight:600">下一步</button>`;
-      openSheet(`<div class="sheet-bar"><button id="tBack" ${k ? '' : 'style="visibility:hidden"'}>上一步</button><span class="t">${k + 1} / ${TOUR.length}</span><button data-close>${last ? '完成' : '跳过'}</button></div>
-        <div class="sheet-body"><div class="alert" style="padding-top:18px"><div style="font-size:56px;line-height:1.1">${emoji}</div><h3 style="margin-top:14px;font-size:21px">${title}</h3><p style="font-size:15px;margin-top:10px">${body}</p>
-        <p style="font-size:13px;margin-top:14px;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12)">${tip}</p></div>
-        <div style="display:flex;gap:6px;justify-content:center;margin-top:16px">${dots}</div>
-        <div class="alert-actions">${actions}</div></div>`, { kind: 'tour' });
-      setTimeout(() => {
-        const n = $('#tNext'), b = $('#tBack'), d = $('#tDemo');
-        if (n) n.onclick = () => { k++; paint(); };
-        if (b) b.onclick = () => { if (k) { k--; paint(); } };
-        if (d) d.onclick = () => { closeSheet(); loadDemo(); };
-      }, 0);
-    };
-    paint();
   }
 
   function demo() {
@@ -202,7 +201,6 @@
     const now = Date.now();
     const mk = (name, domain, category, identityIds, ago, notes = '') => ({ id: uid(), name, domain, category, identityIds, notes, createdAt: now - ago * DAY - Math.random() * 3e6 });
     return {
-      demo: true,
       identities: ids,
       accounts: [
         mk('GitHub', 'github.com', '开发', [o, p1], 0, '已开两步验证'), mk('Claude', 'claude.ai', 'AI', [g], 0),
@@ -241,9 +239,19 @@
   const idById = id => state.identities.find(i => i.id === id);
   const accById = id => state.accounts.find(a => a.id === id);
   const accountsOf = id => state.accounts.filter(a => a.identityIds.includes(id)).sort((a, b) => zh(a.name, b.name));
-  // the email / phone a login card is bound to; a dangling or odd reference counts as none
-  const viaOf = i => { if (i.type !== 'login' || !i.via) return null; const v = idById(i.via); return v && (v.type === 'email' || v.type === 'phone') ? v : null; };
-  const boundTo = id => state.identities.filter(i => i.type === 'login' && i.via === id && viaOf(i));
+  // 2.5: a 微信 / QQ can be bound to several emails / phones: via (the first, what older clients read) and vias
+  // (all of them, written only when there are two or more). Read as the union of both.
+  const bindIds = i => { const out = []; if (i.via) out.push(i.via); for (const x of Array.isArray(i.vias) ? i.vias : []) if (x && !out.includes(x)) out.push(x); return out; };
+  function setBinds(i, ids) {
+    const u = [...new Set(ids.filter(x => x && x !== i.id))];
+    if (u.length) i.via = u[0]; else delete i.via;
+    if (u.length > 1) i.vias = u; else delete i.vias;
+    return i;
+  }
+  // every email / phone a login card is bound to; dangling or odd references count as none
+  const bindsOf = i => i.type !== 'login' ? [] : bindIds(i).map(idById).filter(v => v && (v.type === 'email' || v.type === 'phone') && v.id !== i.id);
+  const viaOf = i => bindsOf(i)[0] || null;
+  const boundTo = id => state.identities.filter(i => i.type === 'login' && bindsOf(i).some(v => v.id === id));
   // <migrate24> 2.4: one identity per email / phone, Apple ID is a flag on it (pure functions, mirrored in Model.swift / Model.kt)
   const normEmail = v => String(v || '').trim().toLowerCase();
   const normPhone = v => { let d = String(v || '').replace(/\D/g, ''); if (d.startsWith('0086')) d = d.slice(4); else if (d.startsWith('86') && d.length === 13) d = d.slice(2); return d; };
@@ -269,7 +277,7 @@
       }
     }
     for (const i of d.identities) {
-      if (i.type === 'login' && i.provider === 'qq' && !i.via && String(i.value || '').includes('@')) {
+      if (i.type === 'login' && i.provider === 'qq' && !i.via && !(i.vias || []).length && String(i.value || '').includes('@')) {
         const m = d.identities.find(x => x.type === 'email' && normEmail(x.value) === normEmail(i.value));
         if (m) { i.via = m.id; changed = true; }
       }
@@ -293,12 +301,13 @@
       if (o.notes && !(keep.notes || '').includes(o.notes)) keep.notes = keep.notes ? keep.notes + '\n' + o.notes : o.notes;
       if (o.apple === true) keep.apple = true;
       if (o.esim === true && keep.type === 'phone') keep.esim = true;
-      if (!keep.via && o.via && o.via !== keep.id) keep.via = o.via;
-      for (const [k, v] of Object.entries(o)) if (!(k in keep)) keep[k] = v;
+      { const kb = bindIds(keep), ob = bindIds(o).filter(x => x !== keep.id && !kb.includes(x)); if (ob.length) setBinds(keep, [...kb, ...ob]); }
+      if (keep.demo === true && o.demo !== true) delete keep.demo;   // merged with a real one: real
+      for (const [k, v] of Object.entries(o)) if (!(k in keep) && k !== 'demo') keep[k] = v;
     }
     if (!to.size) return 0;
     d.identities = d.identities.filter(i => !to.has(i.id));
-    for (const i of d.identities) if (i.via && to.has(i.via)) { i.via = to.get(i.via); if (i.via === i.id) delete i.via; }
+    for (const i of d.identities) { const b = bindIds(i); if (b.some(x => to.has(x))) setBinds(i, b.map(x => to.get(x) || x)); }
     for (const a of d.accounts) { const out = []; for (const x of a.identityIds || []) { const y = to.get(x) || x; if (!out.includes(y)) out.push(y); } a.identityIds = out; }
     return to.size;
   }
@@ -321,22 +330,27 @@
     state.identities.push(n); return n;
   }
   const appleTag = i => i.apple === true && i.type !== 'login' ? `<span class="apple-tag">${ICON.apple}Apple ID</span>` : '';
-  // a 微信 / QQ card's binding, shown without the full number: 尾号 1234, or ab•••@qq.com
+  // a 微信 / QQ card's binding, shown without the full number: 尾号 1234, or ab•••@qq.com; "+1" for each more
+  const tagOf = v => { if (v.type === 'phone') { const d = v.value.replace(/\D/g, ''); return d.length >= 4 ? '尾号 ' + d.slice(-4) : ''; } const [u, dm = ''] = v.value.split('@'); return u.slice(0, 2) + '•••' + (dm ? '@' + dm : ''); };
   function bindTag(i) {
-    const v = viaOf(i); if (!v) return '';
-    if (v.type === 'phone') { const d = v.value.replace(/\D/g, ''); return d.length >= 4 ? '尾号 ' + d.slice(-4) : ''; }
-    const [u, dm = ''] = v.value.split('@'); return u.slice(0, 2) + '•••' + (dm ? '@' + dm : '');
+    const b = bindsOf(i); if (!b.length) return '';
+    const t = tagOf(b[0]); return t && b.length > 1 ? `${t} +${b.length - 1}` : t;
   }
 
-  function display(i) {
-    const v = i.value;
-    if (!ui.privacy) return v;
+  // the value with most of it hidden: ab•••@gmail.com, ••• •••• 1234, wx•••, •••45 (mirrors Model.kt maskValue)
+  function maskValue(i) {
+    const v = String(i.value || '');
     if (i.type === 'email' || (i.type === 'login' && v.includes('@'))) { const [u, d = ''] = v.split('@'); return u.slice(0, 2) + '•••' + (d ? '@' + d : ''); }
     if (i.type === 'login' && provOf(i) === 'wechat') return [...v].slice(0, 2).join('') + '•••';
     if (i.type !== 'phone' && i.type !== 'login') return v.slice(0, 2) + '•••';
     const digits = v.replace(/\D/g, '');
-    return digits.length > 7 ? '••• •••• ' + digits.slice(-4) : '••••';
+    return digits.length > 7 ? '••• •••• ' + digits.slice(-4) : digits.length >= 4 ? '•••' + digits.slice(-2) : '••••';
   }
+  const isShown = i => !ui.mask || ui.revealed.has(i.id);
+  const display = i => isShown(i) ? i.value : maskValue(i);
+  const maskName = s => s ? [...s].slice(0, 1).join('') + '•••' : s;
+  const lbl = s => ui.hideNames ? maskName(s) : s;
+  const ttl = i => i.label ? lbl(i.label) : display(i);
   const cleanDomain = d => (d || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0];
   // the account's own icon (uploaded, or from the App Store): a small square data: URL, synced with the data
   const customIcon = a => typeof a?.icon === 'string' && a.icon.length < 400000 && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/.test(a.icon) ? a.icon : null;
@@ -375,6 +389,8 @@
     trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
     open: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>',
     x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+    eye: '<svg viewBox="0 0 24 24"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>',
+    eyeOff: '<svg viewBox="0 0 24 24"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/><path d="M4 4l16 16"/></svg>',
     check: '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
     login: '<svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M21 12v2"/></svg>',
     wechat: '<svg viewBox="0 0 24 24"><path d="M9.5 4C5.4 4 2.5 6.6 2.5 9.8c0 1.8 1 3.4 2.5 4.5l-.6 2.2 2.6-1.4c.8.2 1.6.3 2.5.3h.4"/><path d="M15.3 9.3c-3.4 0-6.1 2.3-6.1 5.1s2.7 5.1 6.1 5.1c.7 0 1.4-.1 2-.3l2.2 1.2-.5-1.9c1.5-.9 2.4-2.4 2.4-4.1 0-2.8-2.7-5.1-6.1-5.1Z"/><circle class="f" cx="7" cy="8.6" r=".9"/><circle class="f" cx="11.4" cy="8.6" r=".9"/><circle class="f" cx="13.4" cy="13.8" r=".8"/><circle class="f" cx="17.2" cy="13.8" r=".8"/></svg>',
@@ -412,11 +428,10 @@
     }
     return `<div class="${cls}" aria-hidden="true">${tiles.join('')}</div>`;
   }
-  const maskHandle = h => [...h].slice(0, 1).join('') + '•••';
-  // 隐藏号码 also hides usernames everywhere they're shown (not in the edit form)
-  const hd = h => ui.privacy ? maskHandle(h) : h;
+  // 隐藏用户名 hides labels and usernames everywhere they're shown (not in the edit form)
+  const hd = h => lbl(h);
   const handle = a => a.handle ? `<em class="hd">${esc(hd(a.handle))}</em>` : '';
-  const caps = ids => ids.map(idById).filter(Boolean).map(i => `<span class="cap" style="--c:${i.color}"><i></i>${esc(i.label || (i.type === 'login' ? LOGIN[provOf(i)].short || LOGIN[provOf(i)].name : display(i)))}</span>`).join('');
+  const caps = ids => ids.map(idById).filter(Boolean).map(i => `<span class="cap" style="--c:${i.color}"><i></i>${esc(i.label ? lbl(i.label) : (i.type === 'login' ? LOGIN[provOf(i)].short || LOGIN[provOf(i)].name : display(i)))}</span>`).join('');
 
   // ---------- toast (notification banner) ----------
   let toastTimer;
@@ -437,16 +452,17 @@
     const stack = accs.slice(0, 4).map(a => favIcon(a)).join('');
     const sim = i.type === 'phone', car = sim ? carrier(i.value) : '';
     const lg = i.type === 'login', via = lg ? viaOf(i) : null;
-    const kind = lg ? `${idGlyph(i)}${esc(LOGIN[provOf(i)].name)}${i.label ? `<small class="wc-lbl">${esc(i.label)}</small>` : ''}`
-      : `${sim ? (isESim(i) ? ESIM : CHIP) : ICON.email}${esc(i.label || (sim ? '手机号' : '邮箱'))}${i.apple === true ? `<span class="wc-apple" aria-label="Apple ID">${ICON.apple}</span>` : ''}`;
-    const note = lg ? (via ? `绑定 ${via.label || display(via)}` : i.notes || LOGIN[provOf(i)].name)
+    const kind = lg ? `${idGlyph(i)}${esc(LOGIN[provOf(i)].name)}${i.label ? `<small class="wc-lbl">${esc(lbl(i.label))}</small>` : ''}`
+      : `${sim ? (isESim(i) ? ESIM : CHIP) : ICON.email}${esc(i.label ? lbl(i.label) : (sim ? '手机号' : '邮箱'))}${i.apple === true ? `<span class="wc-apple" aria-label="Apple ID">${ICON.apple}</span>` : ''}`;
+    const nb = lg ? bindsOf(i).length : 0;
+    const note = lg ? (via ? `绑定 ${ttl(via)}${nb > 1 ? ` 等 ${nb} 个` : ''}` : i.notes || LOGIN[provOf(i)].name)
       : [i.apple === true ? 'Apple ID' : '', sim ? [car && !(i.notes || '').includes(car.slice(2)) ? car : '', i.notes].filter(Boolean).join(' · ') || (i.apple === true ? '' : '手机号') : i.notes || (i.apple === true ? '' : '邮箱')].filter(Boolean).join(' · ');
     return `<button class="wcard ${sim ? 'sim' : ''}${lg ? ' login lg-' + provOf(i) : ''}" ${extra} data-identity="${i.id}" style="--c:${i.color};--g:${skin(i.color)}">
       ${poster(accs.slice().sort((a, b) => b.createdAt - a.createdAt), 9)}
       <span class="sheen"></span>
       <span class="wc-top"><span class="wc-kind">${kind}</span>
         <span class="wc-count"><b>${n}</b><small>个网站与 App</small></span></span>
-      <span class="wc-value">${esc(display(i))}</span>
+      <span class="wc-value"><span class="wc-v">${esc(extra.includes('data-reveal') ? i.value : display(i))}</span>${ui.mask && !extra.includes('data-reveal') ? `<span class="wc-eye" role="button" tabindex="0" data-eye="${i.id}" aria-label="${ui.revealed.has(i.id) ? '隐藏' : '显示'}">${ui.revealed.has(i.id) ? ICON.eyeOff : ICON.eye}</span>` : ''}</span>
       <span class="wc-foot"><span class="wc-note">${esc(note)}</span>
         <span class="stack">${n > 4 ? `<span class="more">+${n - 4}</span>` : ''}${stack}</span></span>
     </button>`;
@@ -461,7 +477,10 @@
     $('#sitesSummary').textContent = a ? `共 ${a} 个` : '';
     document.body.classList.toggle('is-empty', !state.identities.length && !a);
     const demoOn = hasDemo();
-    const demoBtn = $('#menu [data-act="demo"]'); if (demoBtn) demoBtn.hidden = Sync.on || demoOn;
+    // 载入示例 only while there is nothing of the user's own (and no sync): sample data never mixes with real data
+    const demoBtn = $('#menu [data-act="demo"]'); if (demoBtn) demoBtn.hidden = Sync.on || demoOn || hasReal() || tourOn();
+    const r = readRestore(), rb = $('#menu [data-act="restore"]');
+    if (rb) { rb.hidden = !r || tourOn(); if (r) { rb.querySelector('span').firstChild.textContent = RESTORE_TITLE[r.why] || '恢复数据'; rb.querySelector('small').textContent = new Date(r.at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } }
     const clearBtn = $('#menu [data-act="demoClear"]'); if (clearBtn) clearBtn.hidden = !demoOn;
   }
 
@@ -582,7 +601,7 @@
   function renderGrid() {
     const i = cur();
     const g = $('#grid');
-    $('#gridTitle').textContent = i ? `${i.label || display(i)}` : '全部网站与 App';
+    $('#gridTitle').textContent = i ? `${ttl(i)}` : '全部网站与 App';
     $('#gridSub').textContent = i ? `${i.type === 'login' ? '用它登录的' : '用它注册或绑定的'} ${accountsOf(i.id).length} 个网站与 App` : '';
     const list = i ? accountsOf(i.id) : state.accounts.slice().sort((a, b) => zh(a.name, b.name));
     // FLIP: remember where each icon was
@@ -651,7 +670,8 @@
   function render() {
     dataVer++;
     renderSummary(); renderWallet(); renderGrid(); renderTimeline(); renderSites();
-    $('#menu [data-act="privacy"] span').textContent = ui.privacy ? '显示完整号码' : '隐藏号码';
+    $('#menu [data-act="mask"] small').textContent = ui.mask ? '开' : '关';
+    $('#menu [data-act="hideNames"] small').textContent = ui.hideNames ? '开' : '关';
     if (ui.tab === 'graph') Graph.rebuild(); else Graph.prebuild();
   }
 
@@ -785,11 +805,11 @@
 
   function showIdentity(id) {
     const i = idById(id); if (!i) return;
-    const accs = accountsOf(id), lg = i.type === 'login', via = viaOf(i), bound = lg ? [] : boundTo(id);
+    const accs = accountsOf(id), lg = i.type === 'login', binds = bindsOf(i), bound = lg ? [] : boundTo(id);
     // sites that sign in with a 微信 / QQ card bound to this number or address
     const direct = new Set(accs.map(a => a.id));
     const indirect = bound.map(b => [b, accountsOf(b.id).filter(a => !direct.has(a.id))]).filter(([, l]) => l.length);
-    const idCell = (x, title) => `<button class="cell" data-identity="${x.id}">${idIcon(x)}<span class="cell-main"><span class="cell-title">${esc(title)}</span><span class="cell-sub">${esc(x.label ? x.label + ' · ' + display(x) : display(x))}</span></span>${ICON.chev}</button>`;
+    const idCell = (x, title) => `<button class="cell" data-identity="${x.id}">${idIcon(x)}<span class="cell-main"><span class="cell-title">${esc(title)}</span><span class="cell-sub">${esc(x.label ? lbl(x.label) + ' · ' + display(x) : display(x))}</span></span>${ICON.chev}</button>`;
     openSheet(`${closeX}
       <div class="sheet-body">
         <div class="cine idcine" style="--c:${i.color};--g:${skin(i.color)}">
@@ -797,13 +817,14 @@
           ${walletCard(i, 'tabindex="-1" data-static')}
         </div>
         <div class="actions">
-          <button class="action" data-copy="${esc(i.value)}">${ICON.copy}复制</button>
+          <button class="action" data-copy-id="${i.id}">${ICON.copy}复制</button>
           <button class="action" data-edit-identity="${i.id}">${ICON.edit}编辑</button>
           <button class="action destructive" data-del-identity="${i.id}">${ICON.trash}删除</button>
         </div>
         ${i.notes ? `<div class="sec-title">备注</div><div class="notes">${esc(i.notes)}</div>` : ''}
-        ${via ? `<div class="sec-title">绑定</div><div class="group">${idCell(via, `${typeName(via)} ${via.label || display(via)}`)}</div>` : ''}
-        ${bound.length ? `<div class="sec-title">绑定了这个号的微信 / QQ</div><div class="group">${bound.map(b => idCell(b, `${LOGIN[provOf(b)].name} 绑定了这个号`)).join('')}</div>` : ''}
+        ${lg && binds.length ? `<div class="sec-title">${binds.length > 1 ? `绑定的 ${binds.length} 个手机号 / 邮箱` : '绑定'}</div><div class="group">${binds.map(v => idCell(v, `${typeName(v)} ${ttl(v)}`)).join('')}</div>` : ''}
+        ${!lg ? `<div class="sec-title">绑定了这个号的微信 / QQ</div><div class="group">${bound.map(b => idCell(b, `${LOGIN[provOf(b)].name} ${display(b)}`)).join('')}
+          <button class="cell" data-new-bound="${i.id}"><span class="icon" style="background:rgba(127,127,127,.14);color:var(--tint)">${ICON.plus}</span><span class="cell-main"><span class="cell-title tint">添加绑定的 QQ / 微信</span><span class="cell-sub">自动绑定到这个${i.type === 'phone' ? '手机号' : '邮箱'}，不用再填一遍</span></span></button></div>` : ''}
         <div class="sec-title">${lg ? `用它登录的 ${accs.length} 个网站与 App` : `用它注册或绑定的 ${accs.length} 个网站与 App`}</div>
         <div class="cat-list" style="padding:0">${accs.map(a => reel(a)).join('')}
           <button class="reel" data-new="account" data-preset="${i.id}" style="color:var(--tint)"><span class="icon" style="background:rgba(255,255,255,.08);color:var(--tint)">${ICON.plus}</span><span class="reel-main"><span class="reel-title" style="font-weight:500">添加网站或 App</span></span></button>
@@ -822,26 +843,28 @@
           ${poster([a, a, a, a], 4, 'backdrop')}
           ${favIcon(a, 'lg')}
           <h2>${esc(a.name)}</h2>${a.handle ? `<p class="acc-handle">${esc(hd(a.handle))}</p>` : ''}
-          <div class="caps"><span class="cap dim">${esc(a.category)}</span>${d ? `<span class="cap dim">${esc(d)}</span>` : ''}</div>
+          <div class="caps"><span class="cap dim">${esc(a.category)}</span>${d ? `<a class="cap dim cap-link" href="https://${esc(d)}" target="_blank" rel="noopener" aria-label="打开网站 ${esc(d)}">${esc(d)}${ICON.open}</a>` : ''}</div>
         </div>
         <div class="actions">
-          ${d ? `<a class="action" href="https://${esc(d)}" target="_blank" rel="noopener">${ICON.open}打开网站</a>` : `<button class="action" disabled style="opacity:.35">${ICON.open}打开网站</button>`}
+          ${ids.length ? `<button class="action" data-copy-acc="${a.id}">${ICON.copy}复制账号</button>` : `<button class="action" disabled style="opacity:.4">${ICON.copy}复制账号<small class="action-sub">未关联身份</small></button>`}
           <button class="action" data-edit-account="${a.id}">${ICON.edit}编辑</button>
           <button class="action destructive" data-del-account="${a.id}">${ICON.trash}删除</button>
         </div>
         <div class="sec-title">怎么登录 / 用的身份</div>
-        <div class="group">${ids.map(i => `<button class="cell" data-identity="${i.id}">${idIcon(i)}<span class="cell-main"><span class="cell-title">${esc(display(i))}</span>${i.label ? `<span class="cell-sub">${esc(i.label)}</span>` : ''}</span>${ICON.chev}</button>`).join('') || '<div class="cell" style="color:var(--secondary)">还没有选择身份，点编辑选一个</div>'}</div>
+        <div class="group">${ids.map(i => `<button class="cell" data-identity="${i.id}">${idIcon(i)}<span class="cell-main"><span class="cell-title">${esc(display(i))}</span>${i.label ? `<span class="cell-sub">${esc(lbl(i.label))}</span>` : ''}</span>${ICON.chev}</button>`).join('') || '<div class="cell" style="color:var(--secondary)">还没有选择身份，点编辑选一个</div>'}</div>
         ${a.notes ? `<div class="sec-title">备注</div><div class="notes">${esc(a.notes)}</div>` : ''}
         <p class="hint" style="margin-top:16px">添加于 ${new Date(a.createdAt || Date.now()).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
       </div>`, { kind: 'account', id });
   }
 
   // ---------- forms ----------
-  function identityForm(existing, presetType) {
+  function identityForm(existing, presetType, presetVia = '') {
     const startType = KINDS.includes(presetType) ? presetType : 'email';
     const i = existing || { type: startType, value: '', label: '', color: startType === 'login' ? LOGIN.wechat.color : COLORS[state.identities.length % COLORS.length], notes: '' };
     // 2.4: 微信 and QQ are the only login cards; an Apple ID is a flag on its email / phone
-    let type = KINDS.includes(i.type) ? i.type : 'email', color = i.color, esim = i.esim === true, apple = i.apple === true, provider = provOf(i) === 'qq' ? 'qq' : 'wechat', via = viaOf(i)?.id || '';
+    let type = KINDS.includes(i.type) ? i.type : 'email', color = i.color, esim = i.esim === true, apple = i.apple === true, provider = provOf(i) === 'qq' ? 'qq' : 'wechat';
+    // 2.5: several bindings (a phone and the QQ mailbox); from a phone's 「添加绑定的 QQ / 微信」 it starts bound to it
+    let binds = existing ? bindsOf(i).map(v => v.id) : presetVia && idById(presetVia) ? [presetVia] : [], addNew = false;
     // a colour the user picked stays; otherwise a login card wears its provider's colour
     let touched = !!existing && !(i.type === 'login' && i.color === LOGIN[provider].color);
     const PH = { email: ['地址', 'name@example.com', 'email'], phone: ['号码', '+86 138 0000 0000', 'tel'] };
@@ -849,9 +872,9 @@
     const palette = () => { const p = type === 'login' ? [LOGIN.wechat.color, LOGIN.qq.color, ...COLORS] : [...COLORS]; if (!p.includes(color)) p.unshift(color); return p; };
     const colorsHtml = () => palette().map(c => `<button class="color ${c === color ? 'active' : ''}" style="--c:${c};--g:${skin(c)}" data-c="${c}" aria-label="${SKINS[c] ? SKINS[c][0] : c}"><span>${SKINS[c] ? SKINS[c][0] : ''}</span></button>`).join('');
     const viaHtml = () => { const opts = state.identities.filter(x => (x.type === 'email' || x.type === 'phone') && x.id !== existing?.id);
-      return `<button class="check-cell ${via ? '' : 'on'}" data-via=""><i style="background:var(--tertiary)"></i><span class="cell-main"><span class="cell-title">不绑定</span></span>${ICON.tick}</button>` +
-        opts.map(x => `<button class="check-cell ${via === x.id ? 'on' : ''}" data-via="${x.id}" style="--c:${x.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(x.label || display(x))}${appleTag(x)}</span><span class="cell-sub">${esc(typeName(x))}${x.label ? ' · ' + esc(display(x)) : ''}</span></span>${ICON.tick}</button>`).join('') +
-        `<button class="check-cell ${via === '+' ? 'on' : ''}" data-via="+"><i style="background:var(--tint)"></i><span class="cell-main"><span class="cell-title">新的手机号或邮箱</span><span class="cell-sub">上面没有时再填</span></span>${ICON.tick}</button>`; };
+      return `<button class="check-cell ${binds.length || addNew ? '' : 'on'}" data-via=""><i style="background:var(--tertiary)"></i><span class="cell-main"><span class="cell-title">不绑定</span></span>${ICON.tick}</button>` +
+        opts.map(x => `<button class="check-cell ${binds.includes(x.id) ? 'on' : ''}" data-via="${x.id}" style="--c:${x.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(ttl(x))}${appleTag(x)}</span><span class="cell-sub">${esc(typeName(x))}${x.label ? ' · ' + esc(display(x)) : ''}</span></span>${ICON.tick}</button>`).join('') +
+        `<button class="check-cell ${addNew ? 'on' : ''}" data-via="+"><i style="background:var(--tint)"></i><span class="cell-main"><span class="cell-title">新的手机号或邮箱</span><span class="cell-sub">上面没有时再填</span></span>${ICON.tick}</button>`; };
     const [l0, p0, m0] = ph();
     openSheet(`${bar('取消', existing ? '编辑' : '新身份', existing ? '保存' : '添加', 'id="saveIdentity"')}
       <div class="sheet-body form">
@@ -871,10 +894,10 @@
           <p class="hint">eSIM 没有实体卡，换手机时记得转移。</p>
         </div>
         <div id="viaBox" ${type === 'login' ? '' : 'hidden'}>
-          <div class="sec-title">绑定的手机号/邮箱</div>
+          <div class="sec-title">绑定的手机号/邮箱（可多选）</div>
           <div class="group" id="viaPicks">${viaHtml()}</div>
-          <div class="group" id="viaNewBox" style="margin-top:8px" ${via === '+' ? '' : 'hidden'}><div class="field"><label>号码</label><input id="fViaNew" placeholder="手机号或邮箱" autocapitalize="off" autocorrect="off" spellcheck="false"></div></div>
-          <p class="hint">从已有的卡里选，不用再填一遍。换手机号时，能看出哪些 App 跟着受影响。</p>
+          <div class="group" id="viaNewBox" style="margin-top:8px" ${addNew ? '' : 'hidden'}><div class="field"><label>号码</label><input id="fViaNew" placeholder="手机号或邮箱" autocapitalize="off" autocorrect="off" spellcheck="false"></div></div>
+          <p class="hint">从已有的卡里选，不用再填一遍。QQ 同时绑了手机号和 QQ 邮箱，就两个都选上。</p>
         </div>
         <div class="sec-title">卡面</div>
         <div class="group"><div class="colors" id="colors">${colorsHtml()}</div></div>
@@ -884,8 +907,8 @@
       </div>`, { kind: 'form' });
     setTimeout(() => {
       const preview = () => {
-        const tmp = { id: existing?.id || '_new', type, value: $('#fValue').value.trim() || ph()[1].split(' 或')[0], label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim(), ...(type === 'phone' && esim ? { esim: true } : {}), ...(type !== 'login' && apple ? { apple: true } : {}), ...(type === 'login' ? { provider, ...(via && via !== '+' ? { via } : {}) } : {}) };
-        const html = walletCard(tmp, 'tabindex="-1" data-static');
+        const tmp = { id: existing?.id || '_new', type, value: $('#fValue').value.trim() || ph()[1].split(' 或')[0], label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim(), ...(type === 'phone' && esim ? { esim: true } : {}), ...(type !== 'login' && apple ? { apple: true } : {}), ...(type === 'login' ? setBinds({ id: existing?.id || '_new', provider }, binds) : {}) };
+        const html = walletCard(tmp, 'tabindex="-1" data-static data-reveal');
         const box = $('#preview'); box.innerHTML = html; fixStack(box);
       };
       const wireColors = () => $$('#colors .color').forEach(b => b.onclick = () => { color = b.dataset.c; touched = true; $$('#colors .color').forEach(x => x.classList.toggle('active', x === b)); preview(); });
@@ -902,7 +925,11 @@
       ['#fValue', '#fLabel', '#fNotes'].forEach(s => $(s).addEventListener('input', preview));
       $$('#typeSeg button').forEach(b => b.onclick = () => { type = b.dataset.v; repaint(); });
       $$('#provPills button').forEach(b => b.onclick = () => { provider = b.dataset.p; repaint(); });
-      $('#viaPicks').onclick = e => { const b = e.target.closest('[data-via]'); if (!b) return; via = b.dataset.via; $$('#viaPicks .check-cell').forEach(x => x.classList.toggle('on', x === b)); $('#viaNewBox').hidden = via !== '+'; if (via === '+') $('#fViaNew').focus(); preview(); };
+      $('#viaPicks').onclick = e => {
+        const b = e.target.closest('[data-via]'); if (!b) return; const v = b.dataset.via;
+        if (!v) { binds = []; addNew = false; } else if (v === '+') addNew = !addNew; else binds = binds.includes(v) ? binds.filter(x => x !== v) : [...binds, v];
+        $('#viaPicks').innerHTML = viaHtml(); $('#viaNewBox').hidden = !addNew; if (addNew && v === '+') $('#fViaNew').focus(); preview();
+      };
       $('#fEsim').onchange = e => { esim = e.target.checked; preview(); };
       $('#fApple').onchange = e => { apple = e.target.checked; preview(); };
       $('#saveIdentity').onclick = () => {
@@ -916,26 +943,29 @@
         const key = idKey(type === 'login' ? { type, provider, value } : { type, value });
         const dup = key && state.identities.find(x => x.id !== existing?.id && idKey(x) === key);
         if (dup) { if (existing) { toast('这个身份已经有了'); return; } setKind(dup.type, dup.id); render(); showIdentity(dup.id); toast('已经有这个身份了，直接打开它'); return; }
-        let bind = via === '+' ? '' : via;
-        if (type === 'login' && via === '+') {
+        const bind = binds.filter(idById);
+        if (type === 'login' && addNew) {
           const nv = $('#fViaNew').value.trim();
           if (nv) {
             const t = nv.includes('@') ? 'email' : 'phone', e2 = idValueError(t, nv);
             if (e2) { toast(e2); $('#fViaNew').focus(); return; }
-            bind = ensureIdentity({ type: t, value: nv }).id;
+            const n = ensureIdentity({ type: t, value: nv }).id; if (!bind.includes(n)) bind.push(n);
           }
         }
-        if (type === 'login' && provider === 'qq' && !bind && value.includes('@')) bind = state.identities.find(x => x.type === 'email' && normEmail(x.value) === normEmail(value))?.id || '';
+        // a QQ whose QQ is an email you already have is bound to that email too, without typing it twice
+        if (type === 'login' && provider === 'qq' && value.includes('@')) { const m = state.identities.find(x => x.type === 'email' && normEmail(x.value) === normEmail(value)); if (m && !bind.includes(m.id)) bind.push(m.id); }
         const data = { type, value, label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim() };
         if (type === 'phone' && esim) data.esim = true;
         if (type !== 'login' && apple) data.apple = true;
-        if (type === 'login') { data.provider = provider; if (bind && idById(bind)) data.via = bind; }
+        if (type === 'login') data.provider = provider;
         let id;
         if (existing) {
           Object.assign(existing, data);
-          if (!data.esim) delete existing.esim; if (!data.apple) delete existing.apple; if (!data.provider) delete existing.provider; if (type === 'login' && !data.via) delete existing.via;
+          if (!data.esim) delete existing.esim; if (!data.apple) delete existing.apple; if (!data.provider) delete existing.provider;
+          if (type === 'login') setBinds(existing, bind);
+          delete existing.demo;   // edited by the user: a sample card becomes theirs
           id = existing.id;
-        } else { id = uid(); state.identities.push({ id, ...data }); }
+        } else { id = uid(); state.identities.push(type === 'login' ? setBinds({ id, ...data }, bind) : { id, ...data }); }
         setKind(type, id); save(); render(); showIdentity(id); toast(existing ? '已保存' : '已添加');
       };
       if (!existing) $('#fValue').focus();
@@ -976,10 +1006,19 @@
     '社交': '社交', '社交网络': '社交', '购物': '购物', '财务': '支付金融', '财经': '支付金融', '开发工具': '开发', '游戏': '游戏', '娱乐': '娱乐', '音乐': '娱乐', '摄影与录像': '娱乐', '旅游': '出行', '旅行': '出行', '导航': '出行' };
   const storeCat = r => { for (const g of [r.primaryGenreName, ...(r.genres || [])]) if (GENRE[g]) return GENRE[g]; return '工具'; };
   const storeArt = r => r.artworkUrl512 || (r.artworkUrl100 || '').replace(/100x100/, '256x256');
+  // 2.5: adult apps never show up in search. An 18+ rating, a frequent / intense (or graphic) sexual-content
+  // or nudity advisory, or an adult word in the name or genre. Mild advisories (common on social apps and
+  // games) are fine. Mirrors Model.kt / AppStore.swift.
+  const ADULT_WORDS = /\b(sex|sexy|porn|porno|nsfw|hentai|adult|xxx|nude|nudes|onlyfans|camgirl|hookup)\b|18\s*\+|18禁|性爱|色情|约炮|裸聊|福利姬|情色|黄片|一夜情|成年人|av女优|成人(?!教育|高考|自考|学历|英语|本科|大学|学习)/i;
+  function isAdultApp(r) {
+    if ([r.contentAdvisoryRating, r.trackContentRating].some(x => String(x || '').trim().startsWith('18'))) return true;
+    if ((r.advisories || []).some(a => /sexual|nudity|性内容|性相关|裸露|色情/i.test(a) && /\b(frequent|intense|graphic)\b|频繁|强烈|极端|大量/i.test(a))) return true;
+    return [r.trackName, r.primaryGenreName, ...(r.genres || [])].some(x => ADULT_WORDS.test(String(x || '')));
+  }
   async function storeSearch(q) {
-    const r = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&country=cn&entity=software&limit=8`);
+    const r = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&country=cn&entity=software&limit=10&explicit=No`);
     if (!r.ok) throw 0;
-    return ((await r.json()).results || []).filter(x => x.trackName && (x.artworkUrl100 || x.artworkUrl512));
+    return ((await r.json()).results || []).filter(x => x.trackName && (x.artworkUrl100 || x.artworkUrl512) && !isAdultApp(x));
   }
   // no online domain lookup: the app stays offline apart from the App Store search
   async function siteLookup() { return []; }
@@ -992,9 +1031,13 @@
   // 怎么登录 / 用哪个身份: every email, phone, 微信 and QQ in one list (Apple IDs badged), and 新建 only when none fits
   const pickRank = i => i.type === 'email' ? 0 : i.type === 'phone' ? 1 : provOf(i) === 'qq' ? 3 : 2;
   function idPicksHtml(sel) {
+    // 2.5: a 微信 / QQ sits right under the (first) phone or email it is bound to: "QQ •••45 · 绑定 尾号 7553"
     const cell = i => { const lg = i.type === 'login', bt = lg ? bindTag(i) : '';
-      return `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}">${lg ? `<span class="lg-glyph lg-${provOf(i)}" style="--g:${skin(i.color)}">${idGlyph(i)}</span>` : '<i></i>'}<span class="cell-main"><span class="cell-title">${esc(lg ? (i.label ? `${LOGIN[provOf(i)].name} · ${i.label}` : LOGIN[provOf(i)].name) : i.label || display(i))}${appleTag(i)}</span>${lg || i.label ? `<span class="cell-sub">${esc(display(i))}${bt ? ' · 绑定' + esc(bt) : ''}</span>` : ''}</span>${ICON.tick}</button>`; };
-    const list = state.identities.map((i, k) => [i, k]).filter(([i]) => KINDS.includes(i.type)).sort((x, y) => pickRank(x[0]) - pickRank(y[0]) || x[1] - y[1]).map(x => x[0]);
+      return `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}${lg && bt ? ' nested' : ''}" data-id="${i.id}" style="--c:${i.color}">${lg ? `<span class="lg-glyph lg-${provOf(i)}" style="--g:${skin(i.color)}">${idGlyph(i)}</span>` : '<i></i>'}<span class="cell-main"><span class="cell-title">${esc(lg ? `${LOGIN[provOf(i)].name} ${display(i)}${bt ? ' · 绑定 ' + bt : ''}` : ttl(i))}${appleTag(i)}</span>${lg ? (i.label ? `<span class="cell-sub">${esc(lbl(i.label))}</span>` : '') : i.label ? `<span class="cell-sub">${esc(display(i))}</span>` : ''}</span>${ICON.tick}</button>`; };
+    const sorted = state.identities.map((i, k) => [i, k]).filter(([i]) => KINDS.includes(i.type)).sort((x, y) => pickRank(x[0]) - pickRank(y[0]) || x[1] - y[1]).map(x => x[0]);
+    const under = new Map(), loose = [];
+    for (const i of sorted.filter(x => x.type === 'login')) { const b = viaOf(i); if (b) { if (!under.has(b.id)) under.set(b.id, []); under.get(b.id).push(i); } else loose.push(i); }
+    const list = sorted.filter(i => i.type !== 'login').flatMap(i => [i, ...(under.get(i.id) || [])]).concat(loose);
     return `<div class="sec-title">怎么登录 / 用哪个身份</div><div class="group id-picks" id="idPicks">${list.map(cell).join('')}
         <button class="check-cell" id="newIdBtn"><i style="background:var(--tint)"></i><span class="cell-main"><span class="cell-title" style="color:var(--tint)">新建身份</span><span class="cell-sub">${list.length ? '上面都不是，再新建一个邮箱、手机号、微信或 QQ' : '先建一个邮箱、手机号、微信或 QQ'}</span></span></button></div>
       <div id="newIdBox" hidden>
@@ -1016,7 +1059,7 @@
       if (!lg) return;
       const opts = state.identities.filter(x => x.type === 'email' || x.type === 'phone');
       $('#nVia').innerHTML = `<button class="check-cell ${nvia ? '' : 'on'}" data-v=""><i style="background:var(--tertiary)"></i><span class="cell-main"><span class="cell-title">不绑定</span></span>${ICON.tick}</button>` +
-        opts.map(x => `<button class="check-cell ${nvia === x.id ? 'on' : ''}" data-v="${x.id}" style="--c:${x.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(x.label || display(x))}${appleTag(x)}</span><span class="cell-sub">${esc(typeName(x))}${x.label ? ' · ' + esc(display(x)) : ''}</span></span>${ICON.tick}</button>`).join('');
+        opts.map(x => `<button class="check-cell ${nvia === x.id ? 'on' : ''}" data-v="${x.id}" style="--c:${x.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(ttl(x))}${appleTag(x)}</span><span class="cell-sub">${esc(typeName(x))}${x.label ? ' · ' + esc(display(x)) : ''}</span></span>${ICON.tick}</button>`).join('');
       $$('#nVia .check-cell').forEach(b => b.onclick = () => { nvia = b.dataset.v; $$('#nVia .check-cell').forEach(x => x.classList.toggle('on', x === b)); });
     };
     btn.onclick = () => { const box = $('#newIdBox'); box.hidden = !box.hidden; if (!box.hidden) { paint(); $('#nValue').focus(); } };
@@ -1028,9 +1071,9 @@
       const k = idKey(t), had = k && state.identities.find(x => idKey(x) === k);
       const made = had || ensureIdentity(t);
       if (!had && t.type === 'login') {
-        let v = nvia;
-        if (!v && nt === 'qq' && value.includes('@')) v = state.identities.find(x => x.type === 'email' && normEmail(x.value) === normEmail(value))?.id || '';
-        if (v) made.via = v;
+        const v = nvia ? [nvia] : [];
+        if (nt === 'qq' && value.includes('@')) { const m = state.identities.find(x => x.type === 'email' && normEmail(x.value) === normEmail(value)); if (m && !v.includes(m.id)) v.push(m.id); }
+        setBinds(made, v);
       }
       sel.add(made.id);
       if (!had) { save(); render(); }
@@ -1144,7 +1187,7 @@
         const data = { name, handle: $('#aHandle').value.trim(), domain: cleanDomain($('#aDomain').value), category: cat, identityIds: [...sel], notes: $('#aNotes').value.trim() };
         if (icon) data.icon = icon;   // no key at all when there's no custom icon, for older clients
         let id; rememberApp(data.name, data.domain, data.category, data.icon, !existing || existing.name.toLowerCase() !== name.toLowerCase());
-        if (existing) { Object.assign(existing, data); if (!icon) delete existing.icon; id = existing.id; } else { id = uid(); state.accounts.push({ id, createdAt: Date.now(), ...data }); }
+        if (existing) { Object.assign(existing, data); if (!icon) delete existing.icon; delete existing.demo; id = existing.id; } else { id = uid(); state.accounts.push({ id, createdAt: Date.now(), ...data }); }
         save(); render(); showAccount(id); toast(existing ? '已保存' : `已添加 ${name}`);
       };
       if (!existing && !presetName && matchMedia('(hover:hover)').matches) $('#aName').focus({ preventScroll: true });
@@ -1332,7 +1375,8 @@
   }
 
   function pickIdentities(picks, presetId, q, hds = []) {
-    const sel = new Set(presetId && idById(presetId) ? [presetId] : cur() ? [cur().id] : []);
+    // during the 操作演示 the identity is picked by hand, as a step of its own
+    const sel = new Set(tourOn() ? [] : presetId && idById(presetId) ? [presetId] : cur() ? [cur().id] : []);
     const fakes = picks.map(p => ({ name: p[0], domain: p[1], icon: p[4] }));
     openSheet(`<div class="sheet-bar"><button id="pkBack">返回</button><span class="t">怎么登录</span><button id="pkSave">添加</button></div>
       <div class="sheet-body form">
@@ -1356,9 +1400,9 @@
     }, 0);
   }
 
-  function confirmSheet(title, text, label, fn) {
+  function confirmSheet(title, text, label, fn, destructive = true) {
     openSheet(`<div class="sheet-body"><div class="alert"><h3>${esc(title)}</h3><p>${text}</p></div>
-      <div class="alert-actions"><button class="destructive" id="cOk">${esc(label)}</button><button data-close>取消</button></div></div>`, { kind: 'confirm' });
+      <div class="alert-actions"><button class="${destructive ? 'destructive' : ''}" id="cOk" style="font-weight:600">${esc(label)}</button><button data-close>取消</button></div></div>`, { kind: 'confirm' });
     setTimeout(() => { $('#cOk').onclick = () => { closeSheet(); fn(); }; }, 0);
   }
 
@@ -1369,7 +1413,7 @@
     kinds.sort((a, b) => (b[0] === ui.kind) - (a[0] === ui.kind));
     const row = i => `<div class="ord" data-oid="${i.id}">
         <span class="ord-sw ${i.type === 'phone' ? 'sim' : ''}" style="--c:${i.color};--g:${skin(i.color)}">${isESim(i) ? '<b class="esim-t">eSIM</b>' : idGlyph(i)}</span>
-        <span class="ord-t"><b>${esc(i.label || display(i))}</b>${i.label ? `<small>${esc(display(i))}</small>` : ''}</span>
+        <span class="ord-t"><b>${esc(ttl(i))}</b>${i.label ? `<small>${esc(display(i))}</small>` : ''}</span>
         <button class="ord-h" aria-label="拖动排序，可用上下方向键"><svg viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/></svg></button>
       </div>`;
     openSheet(`${bar('取消', '卡片顺序', '完成', 'id="saveOrder"')}
@@ -1475,7 +1519,7 @@
     if (!spotItems.length) { box.innerHTML = `<div class="spot-empty">没有找到“${esc(q)}”<br><button class="btn-filled" data-quick="${esc(q)}">添加“${esc(q)}”</button></div>`; return; }
     box.innerHTML =
       (accs.length ? `<div class="sec-title">网站与 App</div>${accs.map(a => reel(a).replace(`<span class="reel-title">${esc(a.name)}`, `<span class="reel-title">${hl(a.name, q)}`)).join('')}` : '') +
-      (ids.length ? `<div class="sec-title">邮箱、手机号、微信与 QQ</div><div class="group">${ids.map(i => `<button class="cell" data-identity="${i.id}">${idIcon(i)}<span class="cell-main"><span class="cell-title">${ui.privacy ? esc(display(i)) : hl(i.value, q)}</span><span class="cell-sub">${esc(i.label || '')}${i.label ? '，' : ''}${accountsOf(i.id).length} 个网站与 App</span></span>${ICON.chev}</button>`).join('')}</div>` : '');
+      (ids.length ? `<div class="sec-title">邮箱、手机号、微信与 QQ</div><div class="group">${ids.map(i => `<button class="cell" data-identity="${i.id}">${idIcon(i)}<span class="cell-main"><span class="cell-title">${isShown(i) ? hl(i.value, q) : esc(display(i))}</span><span class="cell-sub">${esc(lbl(i.label || ''))}${i.label ? '，' : ''}${accountsOf(i.id).length} 个网站与 App</span></span>${ICON.chev}</button>`).join('')}</div>` : '');
     markSpot();
     $$('#spotResults .reel, #spotResults .cell').forEach((el, k) => el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 300, delay: k * 20, easing: 'ease-out', fill: 'backwards' }));
   }
@@ -1494,15 +1538,53 @@
       try {
         const d = JSON.parse(r.result);
         if (!Array.isArray(d.identities) || !Array.isArray(d.accounts)) throw 0;
-        snap(); state = { identities: d.identities, accounts: d.accounts }; save(); render();
-        undoToast(`已导入 ${d.identities.length} 个身份和 ${d.accounts.length} 个网站`);
+        const go = () => {
+          saveRestorePoint('import');   // what it replaces can always be brought back from 更多
+          snap(); state.identities = d.identities; state.accounts = d.accounts; save(); setKind(ui.kind); render();
+          undoToast(`已导入 ${d.identities.length} 个身份和 ${d.accounts.length} 个网站`);
+        };
+        if (state.identities.length || state.accounts.length) confirmSheet('导入备份？', `导入会替换现在的 ${state.identities.length} 个身份和 ${state.accounts.length} 个网站与 App。替换前的数据会先存一份，可以在「更多」里恢复。`, '导入', go, false);
+        else go();
       } catch { toast('这不是 Atlas 的备份文件'); }
     };
     r.readAsText(file);
   }
 
+  // ---------- 2.5: eye, copying an account value ----------
+  function toggleReveal(id) {
+    ui.revealed.has(id) ? ui.revealed.delete(id) : ui.revealed.add(id);
+    const i = idById(id), on = ui.revealed.has(id);
+    $$(`[data-eye="${id}"]`).forEach(el => { el.innerHTML = on ? ICON.eyeOff : ICON.eye; el.setAttribute('aria-label', on ? '隐藏' : '显示'); const v = el.parentElement.querySelector('.wc-v'); if (v && i) v.textContent = display(i); });
+  }
+  // leaving the page masks every value again
+  document.addEventListener('visibilitychange', () => { if (document.hidden && ui.revealed.size) { ui.revealed.clear(); render(); refreshSheet(); } });
+  let clipTimer = 0;
+  async function copySecret(i) {
+    try { await navigator.clipboard.writeText(i.value); } catch { return toast('复制失败'); }
+    toast(`已复制 ${maskValue(i)} · 60 秒后自动清除`);
+    clearTimeout(clipTimer); const v = i.value;
+    // best effort: browsers only let a page read the clipboard with permission, so it is cleared only when
+    // it can be checked that it still holds this value
+    clipTimer = setTimeout(async () => {
+      try {
+        const p = await navigator.permissions?.query({ name: 'clipboard-read' });
+        if (p && p.state === 'granted' && await navigator.clipboard.readText() === v) await navigator.clipboard.writeText('');
+      } catch {}
+    }, 60000);
+  }
+  function copyAccount(a) {
+    const ids = a.identityIds.map(idById).filter(Boolean);
+    if (!ids.length) return;
+    if (ids.length === 1) return copySecret(ids[0]);
+    openSheet(`<div class="sheet-body"><div class="alert"><h3>复制哪个账号？</h3><p>${esc(a.name)} 关联了 ${ids.length} 个身份</p></div>
+      <div class="group">${ids.map(i => `<button class="cell" data-copy-pick="${i.id}" data-acc="${a.id}">${idIcon(i)}<span class="cell-main"><span class="cell-title">${esc(maskValue(i))}</span><span class="cell-sub">${esc(typeName(i))}${i.label ? ' · ' + esc(lbl(i.label)) : ''}</span></span>${ICON.copy}</button>`).join('')}</div>
+      <div class="alert-actions"><button data-acc-back="${a.id}">取消</button></div></div>`, { kind: 'confirm' });
+  }
+
   // ---------- events ----------
   document.addEventListener('click', e => {
+    const eye = e.target.closest('[data-eye]');
+    if (eye) { e.preventDefault(); e.stopPropagation(); return toggleReveal(eye.dataset.eye); }
     const menu = $('#menu');
     if (!e.target.closest('#menu,#menuBtn')) menu.classList.remove('open');
     const t = e.target.closest('button,a,[data-account],[data-identity]'); if (!t) return;
@@ -1516,17 +1598,20 @@
     if (t.id === 'spotCancel') return closeSpot();
     if (d.act) {
       menu.classList.remove('open');
-      if (d.act === 'privacy') { ui.privacy = !ui.privacy; localStorage.setItem('atlas.privacy', ui.privacy ? '1' : '0'); render(); refreshSheet(); toast(ui.privacy ? '号码已隐藏' : '号码已显示'); }
+      if (d.act === 'mask') { ui.mask = !ui.mask; ui.revealed.clear(); localStorage.setItem('atlas.mask', ui.mask ? '1' : '0'); render(); refreshSheet(); toast(ui.mask ? '账号已默认隐藏，点卡片上的眼睛可临时显示' : '账号已显示'); }
+      if (d.act === 'hideNames') { ui.hideNames = !ui.hideNames; localStorage.setItem('atlas.hideNames', ui.hideNames ? '1' : '0'); render(); refreshSheet(); toast(ui.hideNames ? '用户名已隐藏' : '用户名已显示'); }
       if (d.act === 'theme') setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', t);
       if (d.act === 'sync') syncSheet();
       if (d.act === 'order') orderSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
       if (d.act === 'download') window.open('https://wwbsj.lanzoup.com/b01i61dn1a', '_blank', 'noopener');
-      if (d.act === 'demo') loadDemo();
-      if (d.act === 'tour') showTour(!state.identities.length && !state.accounts.length);
+      if (d.act === 'demo') askDemo();
+      if (d.act === 'tour') Tour.start(false);
+      if (d.act === 'share') shareSheet();
+      if (d.act === 'restore') { const r = readRestore(); if (r) confirmSheet(RESTORE_TITLE[r.why] || '恢复数据', '会把数据换回那时的样子。现在的数据也会先存一份，可以再换回来。', '恢复', restoreData, false); }
       if (d.act === 'demoClear') clearDemo();
-      if (d.act === 'wipe') confirmSheet('清空全部数据？', Sync.on ? '所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。' : '所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。', '清空全部数据', () => { snap(); state = { identities: [], accounts: [] }; save(); render(); undoToast('已清空'); });
+      if (d.act === 'wipe') confirmSheet('清空全部数据？', Sync.on ? '所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。' : '所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。', '清空全部数据', () => { saveRestorePoint('wipe'); snap(); state.identities = []; state.accounts = []; save(); render(); undoToast('已清空，可在「更多」里恢复'); });
       return;
     }
     if (t.closest('#tabbar')) return setTab(d.tab);
@@ -1538,13 +1623,17 @@
     if (d.new === 'identity') return identityForm(null, d.type);
     if (d.new === 'account') return pickApps(d.preset);
     if (d.quick !== undefined) { closeSpot(); return pickApps(null, d.quick); }
-    if (d.copy) { navigator.clipboard?.writeText(d.copy).then(() => toast('已复制'), () => toast('复制失败')); return; }
+    if (d.copyId) { const i = idById(d.copyId); if (i) copySecret(i); return; }
+    if (d.copyAcc) { const a = accById(d.copyAcc); if (a) copyAccount(a); return; }
+    if (d.copyPick) { const i = idById(d.copyPick); if (i) copySecret(i); return showAccount(d.acc); }
+    if (d.accBack) return showAccount(d.accBack);
+    if (d.newBound) return identityForm(null, 'login', d.newBound);
     if (d.editIdentity) return identityForm(idById(d.editIdentity));
     if (d.editAccount) return accountForm(accById(d.editAccount));
     if (d.delIdentity) {
       const i = idById(d.delIdentity), n = accountsOf(i.id).length;
       return confirmSheet(`删除 ${display(i)}？`, n ? `它会从 ${n} 个网站与 App 的记录里移除，这些网站本身会保留。` : '删除后几秒内可以撤销。', '删除', () => {
-        snap(); state.identities = state.identities.filter(x => x.id !== i.id); state.accounts.forEach(a => a.identityIds = a.identityIds.filter(x => x !== i.id)); state.identities.forEach(x => { if (x.via === i.id) delete x.via; }); save(); render(); undoToast('已删除');
+        snap(); state.identities = state.identities.filter(x => x.id !== i.id); state.accounts.forEach(a => a.identityIds = a.identityIds.filter(x => x !== i.id)); state.identities.forEach(x => { if (bindIds(x).includes(i.id)) setBinds(x, bindIds(x).filter(y => y !== i.id)); }); save(); render(); undoToast('已删除');
       });
     }
     if (d.delAccount) {
@@ -1647,7 +1736,7 @@
         ${pos.map((p, k) => (k === 0 || brk.has(k)) ? `<span class="mgroup" style="top:${p.y - 31 - 24}px;width:${L}px">${p.i.type === 'phone' ? ICON.phone + '手机号' : p.i.type === 'login' ? ICON.wechat + '微信 / QQ' : ICON.email + '邮箱'}</span>` : '').join('')}
         ${pos.map(p => { const c = nodeAccs(p.ids).length, ap = p.ids.some(x => idById(x)?.apple === true), bt = p.i.type === 'login' ? bindTag(p.i) : '';
           // bindings (微信 → 手机号) are not threads: a small tag on the node says which number, the detail says the rest
-          return `<button class="mcard" data-map-identity="${p.i.id}" style="top:${p.y - 31}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${idGlyph(p.i)}${ap ? `<em class="mtag apple" aria-label="Apple ID">${ICON.apple}</em>` : ''}${bt ? `<em class="mtag">${esc(bt)}</em>` : ''}<b>${c}</b></span><span class="mv">${esc(p.i.label || display(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
+          return `<button class="mcard" data-map-identity="${p.i.id}" style="top:${p.y - 31}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${idGlyph(p.i)}${ap ? `<em class="mtag apple" aria-label="Apple ID">${ICON.apple}</em>` : ''}${bt ? `<em class="mtag">${esc(bt)}</em>` : ''}<b>${c}</b></span><span class="mv">${esc(ttl(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
         ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}${handle(a)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
       built = dataVer + ':' + W;
       apply(); if (running) draw();
@@ -1766,7 +1855,7 @@
     const same = (a, b) => JSON.stringify([a.identities, a.accounts]) === JSON.stringify([b.identities, b.accounts]);
 
     async function run() {
-      if (!conf || !key) return;
+      if (!conf || !key || tourOn()) return;   // during the 操作演示 the screen shows sandbox data
       if (busy) { again = true; return; }
       busy = true; status.state = 'syncing'; emit();
       try {
@@ -1817,14 +1906,18 @@
           key = await derive(pass, unb64(salt));
         }
         conf = { provider: prov, token, salt, key: b64(await crypto.subtle.exportKey('raw', key)), gistId: g ? g.id : null, at: 0 };
-        if (remote && state.demo) { state = { identities: [], accounts: [], deleted: {} }; remember(); }
+        // sample data stays on this device: only the marked items are taken out (no tombstones) before the first merge
+        if (hasDemo()) {
+          const d = demoIdSet();
+          state.identities = state.identities.filter(i => !d.has(i.id)).map(i => bindIds(i).some(x => d.has(x)) ? setBinds({ ...i }, bindIds(i).filter(x => !d.has(x))) : i);
+          state.accounts = state.accounts.filter(a => !d.has(a.id)).map(a => a.identityIds.some(x => d.has(x)) ? { ...a, identityIds: a.identityIds.filter(x => !d.has(x)) } : a);
+          remember(); localStorage.setItem(KEY, JSON.stringify(state));
+        }
         if (!g) {
-          const local = state.demo ? { identities: [], accounts: [], deleted: {} } : state;
-          if (state.demo) { state = local; remember(); }
+          const local = state;
           const made = await gh('/gists', { method: 'POST', body: JSON.stringify({ description: DESC, public: false, files: { [FILE]: { content: await seal(local) } } }) }, token, prov);
           conf.gistId = made.id;
         }
-        delete state.demo;
         localStorage.setItem(CONF, JSON.stringify(conf));
         status.state = 'idle'; emit();
         document.addEventListener('visibilitychange', () => { if (!document.hidden) run(); });
@@ -1904,12 +1997,174 @@
     const f = $('#footnote'); if (f) f.textContent = Sync.on ? '已开启端到端加密同步。不记录任何密码。' : '数据只保存在这台设备的浏览器里，不记录任何密码。想在多台设备上用，可以开启加密同步。';
   });
 
+  // ---------- 2.5 操作演示: a hands-on tour on the real screens ----------
+  // A spotlight sits on the control to use and says what to tap; the step moves on when the user does it.
+  // It runs on sandbox data (one 示例邮箱): save() and sync skip it, and the real data is back when it ends.
+  let realState = null;
+  function tourOn() { return realState !== null; }
+  const Tour = (() => {
+    const STEPS = [
+      { sel: '#addBtn', t: '点右上角的 +', b: '先添加一个 App 试试。这是演示，不会保存。', done: () => !!$('#pkGrid') },
+      { sel: '#pkGrid .pk[data-pk]', t: '点一个 App 选上它', b: '也可以在上面搜索，搜不到的会从 App Store 找。', done: () => $('#pkNext') && !$('#pkNext').disabled },
+      { sel: '#pkNext', t: '点「下一步」', b: '接下来选它怎么登录。', done: () => !!$('#pkSave') },
+      { sel: '#idPicks .check-cell[data-id]', t: '点「示例邮箱」', b: '选这个 App 用哪个邮箱、手机号、微信或 QQ 登录，可以多选。', done: () => !!$('#idPicks .check-cell.on') },
+      { sel: '#pkSave', t: '点「添加」保存', b: '就记下来了。', done: () => state.accounts.length > 0 },
+      { sel: null, t: '它已经连到关系图上了', b: '以后换手机号、注销邮箱前，来这里看一眼牵连了哪些 App。演示数据会在结束时清掉。' },
+    ];
+    let k = 0, timer = 0, first = false, layer = null;
+    function paint() {
+      const st = STEPS[k], el = st.sel && $(st.sel), hole = $('.tour-hole', layer), tip = $('.tour-tip', layer);
+      const r = el && el.getBoundingClientRect(), ok = r && r.width > 0;
+      layer.classList.toggle('dim', !ok);
+      if (ok) Object.assign(hole.style, { display: '', left: r.left - 8 + 'px', top: r.top - 8 + 'px', width: r.width + 16 + 'px', height: r.height + 16 + 'px' });
+      else hole.style.display = 'none';
+      tip.classList.toggle('top', !ok || r.top + r.height / 2 > innerHeight / 2);
+      const key = k + ':' + first;
+      if (tip.dataset.k === key) return; tip.dataset.k = key;
+      const last = k === STEPS.length - 1, offer = last && first && !hasReal(realState) && !Sync.on;
+      tip.innerHTML = `<div class="tour-h"><b>${esc(st.t)}</b><small>${k + 1} / ${STEPS.length}</small></div><p>${esc(st.b)}</p>
+        <div class="tour-a">${last ? `${offer ? '<button data-tour="demo">载入示例看看</button>' : ''}<button class="tour-go" data-tour="done">完成</button>` : '<button data-tour="skip">跳过演示</button>'}</div>`;
+      if (!calm()) tip.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.32,.72,0,1)' });
+    }
+    function tick() {
+      if (!tourOn()) return;
+      while (k < 5 && STEPS[k].done()) {
+        k++;
+        if (k === 5) { closeSheet(); setTab('graph'); }
+      }
+      const inPicker = $('#pkGrid'), inWho = $('#pkSave');
+      // the picker was closed or stepped back half way: follow the user, never get stuck
+      if (k > 0 && k < 5 && !inPicker && !inWho) k = 0;
+      if (k >= 3 && k < 5 && inPicker) k = 1;
+      if (k === 2 && $('#pkNext')?.disabled) k = 1;
+      if (k === 4 && !$('#idPicks .check-cell.on')) k = 3;
+      paint();
+    }
+    function start(firstRun) {
+      if (tourOn()) return;
+      first = !!firstRun;
+      closeSheet(); $('#menu').classList.remove('open'); closeSpot();
+      realState = state;
+      state = { identities: [{ id: uid(), type: 'email', value: 'me@example.com', label: '示例邮箱', color: COLORS[0], notes: '', demo: true }], accounts: [], deleted: {} };
+      remember(); setTab('home'); setKind('email'); render();
+      layer = document.createElement('div'); layer.id = 'tourLayer';
+      layer.innerHTML = '<div class="tour-hole"></div><div class="tour-tip"></div>';
+      document.body.appendChild(layer);
+      layer.addEventListener('click', e => { const b = e.target.closest('[data-tour]'); if (b) finish(b.dataset.tour === 'demo'); });
+      k = 0; tick(); timer = setInterval(tick, 150);
+    }
+    function finish(demoAfter = false) {
+      if (!tourOn()) return;
+      clearInterval(timer); layer?.remove(); layer = null;
+      closeSheet();
+      state = realState; realState = null; remember();
+      localStorage.setItem('atlas.tourDone', '1');
+      setTab('home'); setKind(ui.kind); render(); Sync.schedule();
+      if (demoAfter) loadDemo();
+    }
+    return { start, finish };
+  })();
+
+  // ---------- 2.5 分享我的星图: a card image, values hidden by default ----------
+  const FONT = '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif';
+  const loadImg = src => new Promise(ok => { if (!src) return ok(null); const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = src; });
+  function rr(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+  function fitText(g, t, max) { if (g.measureText(t).width <= max) return t; let s = [...t]; while (s.length && g.measureText(s.join('') + '…').width > max) s.pop(); return s.join('') + '…'; }
+  function skinStops(c) { const m = SKINS[c] ? [...SKINS[c][1].matchAll(/(#[0-9a-f]{6}) (\d+)%/gi)].map(x => [x[1], +x[2] / 100]) : []; return m.length ? m : [[c, 0], [c, 1]]; }
+  async function drawShare(ids, hide) {
+    const light = document.documentElement.dataset.theme === 'light', W = 360, S = 3;
+    const fg = light ? '#1c1c1e' : '#ffffff', sub = light ? 'rgba(60,60,67,.7)' : 'rgba(255,255,255,.62)';
+    const accs = state.accounts.filter(a => a.identityIds.some(x => ids.some(i => i.id === x)));
+    const cats = Object.entries(accs.reduce((m, a) => (m[a.category] = (m[a.category] || 0) + 1, m), {})).sort((a, b) => b[1] - a[1]);
+    const lists = ids.map(i => accountsOf(i.id)), rows = l => Math.max(1, Math.ceil(Math.min(l.length, 14) / 7));
+    const H = 22 + 44 + 14 + 58 + 14 + (cats.length ? 26 : 0) + lists.reduce((h, l) => h + 14 + 22 + rows(l) * 42 + 10 + 12, 0) + 30 + 22;
+    const c = document.createElement('canvas'); c.width = W * S; c.height = H * S;
+    const g = c.getContext('2d'); g.scale(S, S);
+    const bg = g.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, light ? '#ffffff' : '#15151b'); bg.addColorStop(1, light ? '#eef0f6' : '#07070a');
+    rr(g, 0, 0, W, H, 28); g.fillStyle = bg; g.fill(); g.save(); rr(g, 0, 0, W, H, 28); g.clip();
+    const acc = ids[0]?.color || '#0a84ff', gl = g.createRadialGradient(54, 0, 0, 54, 0, 330);
+    gl.addColorStop(0, acc + (light ? '40' : '73')); gl.addColorStop(1, acc + '00'); g.fillStyle = gl; g.fillRect(0, 0, W, H);
+    const logo = await loadImg('icon.png?v=4');
+    let y = 22;
+    if (logo) { g.save(); rr(g, 22, y, 40, 40, 10); g.clip(); g.drawImage(logo, 22, y, 40, 40); g.restore(); }
+    g.fillStyle = fg; g.font = `700 22px ${FONT}`; g.textBaseline = 'alphabetic'; g.fillText('我的账号星图', 74, y + 22);
+    const d = new Date(); g.fillStyle = sub; g.font = `400 12px ${FONT}`; g.fillText(`${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`, 74, y + 39);
+    y += 44 + 14;
+    [[ids.length, '个身份'], [accs.length, '个 App'], [cats.length, '个分类']].forEach(([n, l], k) => {
+      const w = (W - 44 - 16) / 3, x = 22 + k * (w + 8);
+      rr(g, x, y, w, 58, 16); g.fillStyle = light ? 'rgba(0,0,0,.05)' : 'rgba(255,255,255,.07)'; g.fill();
+      g.textAlign = 'center'; g.fillStyle = fg; g.font = `700 22px ${FONT}`; g.fillText(String(n), x + w / 2, y + 30);
+      g.fillStyle = sub; g.font = `400 11px ${FONT}`; g.fillText(l, x + w / 2, y + 47); g.textAlign = 'left';
+    });
+    y += 58 + 14;
+    if (cats.length) { g.fillStyle = sub; g.font = `500 12px ${FONT}`; g.fillText(fitText(g, cats.map(([k, n]) => `${k} ${n}`).join('  ·  '), W - 44), 22, y + 12); y += 26; }
+    for (const [n, i] of ids.entries()) {
+      const list = lists[n], h = 14 + 22 + rows(list) * 42 + 10;
+      const lg = g.createLinearGradient(22 + (W - 44) * .21, y, 22 + (W - 44) * .79, y + h);
+      for (const [col, at] of skinStops(i.color)) lg.addColorStop(at, col);
+      rr(g, 22, y, W - 44, h, 20); g.fillStyle = lg; g.fill(); g.strokeStyle = 'rgba(255,255,255,.22)'; g.lineWidth = .6; g.stroke();
+      const head = typeName(i) + (hide ? (i.label && !ui.hideNames ? ' · ' + i.label : '') : ' ' + maskValue(i));
+      g.fillStyle = '#fff'; g.font = `600 13px ${FONT}`; const cnt = `→ ${list.length} 个 App`, cw = g.measureText(cnt).width;
+      g.fillText(cnt, W - 36 - cw, y + 27);
+      g.font = `600 15px ${FONT}`; g.fillText(fitText(g, head, W - 72 - cw - 10), 36, y + 28);
+      const shown = list.slice(0, 14), more = list.length > 14;
+      for (const [j, a] of shown.entries()) {
+        const x = 36 + (j % 7) * 42, iy = y + 14 + 22 + 6 + Math.floor(j / 7) * 42;
+        g.save(); rr(g, x, iy, 34, 34, 8); g.clip();
+        if (more && j === 13) { g.fillStyle = 'rgba(255,255,255,.25)'; g.fillRect(x, iy, 34, 34); g.fillStyle = '#fff'; g.font = `700 12px ${FONT}`; g.textAlign = 'center'; g.fillText('+' + (list.length - 13), x + 17, iy + 21); g.textAlign = 'left'; }
+        else {
+          // only same-origin / data: images, so the canvas can still be exported
+          const im = await loadImg(customIcon(a) || localIcon(a));
+          if (im) g.drawImage(im, x, iy, 34, 34);
+          else { g.fillStyle = brand(a); g.fillRect(x, iy, 34, 34); g.fillStyle = '#fff'; g.font = `600 15px ${FONT}`; g.textAlign = 'center'; g.fillText([...(a.name || '?').trim()][0]?.toUpperCase() || '?', x + 17, iy + 22); g.textAlign = 'left'; }
+        }
+        g.restore();
+      }
+      y += h + 12;
+    }
+    y += 8; g.fillStyle = fg; g.font = `600 13px ${FONT}`; g.fillText('账号星图', 22, y + 12);
+    g.fillStyle = sub; g.font = `400 12px ${FONT}`; const u = 'huichen.dev/account-atlas'; g.fillText(u, W - 22 - g.measureText(u).width, y + 12);
+    g.restore();
+    return c;
+  }
+  function shareSheet() {
+    const withApps = state.identities.filter(i => state.accounts.some(a => a.identityIds.includes(i.id)));
+    if (!withApps.length) return toast('还没有关联了 App 的身份');
+    let hide = true; const chosen = new Set(withApps.map(i => i.id)); let seq = 0, canvas = null;
+    openSheet(`${bar('取消', '分享我的星图', '分享', 'id="shareGo"')}<div class="sheet-body form">
+      <div class="share-prev"><img id="sharePrev" alt="星图卡片预览"></div>
+      <div class="group" style="margin-top:16px"><label class="field switch-row"><span>隐藏所有账号</span><input type="checkbox" class="switch" id="shHide" checked></label></div>
+      <p class="hint">打开时卡片上只有身份的种类和数量，不出现任何邮箱、手机号、QQ 号或微信号。</p>
+      <div class="sec-title">包含哪些身份</div>
+      <div class="group" id="shIds">${withApps.map(i => `<button class="check-cell on" data-sh="${i.id}" style="--c:${i.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(ttl(i))}</span><span class="cell-sub">${esc(typeName(i))} · ${accountsOf(i.id).length} 个 App</span></span>${ICON.tick}</button>`).join('')}</div>
+    </div>`, { kind: 'share' });
+    const redraw = async () => {
+      const n = ++seq, c = await drawShare(withApps.filter(i => chosen.has(i.id)), hide);
+      if (n !== seq || !$('#sharePrev')) return; canvas = c; $('#sharePrev').src = c.toDataURL('image/png');
+    };
+    setTimeout(() => {
+      redraw();
+      $('#shHide').onchange = e => { hide = e.target.checked; redraw(); };
+      $('#shIds').onclick = e => { const b = e.target.closest('[data-sh]'); if (!b) return; const id = b.dataset.sh; chosen.has(id) ? chosen.delete(id) : chosen.add(id); b.classList.toggle('on', chosen.has(id)); redraw(); };
+      $('#shareGo').onclick = () => {
+        if (!canvas || !chosen.size) return toast('选几个身份放进卡片里');
+        canvas.toBlob(async blob => {
+          if (!blob) return toast('图片没生成成功');
+          const name = `账号星图-${new Date().toISOString().slice(0, 10)}.png`, file = new File([blob], name, { type: 'image/png' });
+          try { if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: '我的账号星图' }); return; } } catch (err) { if (err?.name === 'AbortError') return; }
+          const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1500); toast('图片已保存');
+        }, 'image/png');
+      };
+    }, 0);
+  }
+
   // ---------- boot ----------
   if (state) remember();
   if (!state) {
     state = { identities: [], accounts: [] }; save();
-    if (!localStorage.getItem('atlas.demoAsked') && !localStorage.getItem('atlas.tourDone')) setTimeout(() => showTour(true), 900);
+    if (!localStorage.getItem('atlas.demoAsked') && !localStorage.getItem('atlas.tourDone')) { localStorage.setItem('atlas.demoAsked', '1'); setTimeout(() => Tour.start(true), 900); }
   }
+  if (adoptLegacyDemo()) save();
   // 2.4: Apple login cards become the email / phone they are (ids kept, silent, lossless). A copy of the
   // data from before is kept once in atlas.v1.pre24, the way the apps keep atlas.prev.json.
   if (state.identities.some(i => i.type === 'login' && i.provider === 'apple') || dupCount24(state)) {
@@ -1919,7 +2174,7 @@
   // duplicates are merged only after a yes, asked once per version
   function askMerge24() {
     const n = dupCount24(state);
-    if (!n || state.demo || localStorage.getItem('atlas.merge24') === 'no' || sheet.classList.contains('open')) return;
+    if (!n || !hasReal() || tourOn() || localStorage.getItem('atlas.merge24') === 'no' || sheet.classList.contains('open')) return;
     openSheet(`<div class="sheet-body"><div class="alert"><h3>合并重复的身份</h3><p>发现 ${n} 个重复的身份，合并后关系图更清晰，数据不会丢。</p></div>
       <div class="alert-actions"><button id="mOk" style="font-weight:600">合并</button><button id="mNo">暂不</button></div></div>`, { kind: 'confirm' });
     setTimeout(() => {
@@ -1933,8 +2188,8 @@
   // 小提示: at most once a week, the card that hasn't had a new site in two weeks or more
   function nudge() {
     const now = Date.now(), last = +localStorage.getItem('atlas.nudgeAt') || 0;
-    if (now - last < 7 * DAY || state.demo || !localStorage.getItem('atlas.tourDone') && !localStorage.getItem('atlas.demoAsked')) return;
-    const demoIds = new Set(readList(DEMO_KEY));
+    if (now - last < 7 * DAY || !hasReal() || tourOn() || !localStorage.getItem('atlas.tourDone') && !localStorage.getItem('atlas.demoAsked')) return;
+    const demoIds = demoIdSet();
     let pick = null, oldest = Infinity;
     for (const i of state.identities) {
       if (demoIds.has(i.id)) continue;

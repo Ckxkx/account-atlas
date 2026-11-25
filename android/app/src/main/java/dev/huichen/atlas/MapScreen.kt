@@ -149,7 +149,7 @@ fun MapScreen() {
 fun MiniCard(i: Identity, w: Dp, h: Dp, group: List<String> = listOf(i.id)) {
   val n = Store.data.accounts.count { a -> a.identityIds.any { it in group } }
   val apple = group.any { Store.identity(it)?.isAppleID == true }
-  val tag = Store.viaOf(i)?.let { bindTag(it) }.orEmpty()
+  val tag = bindTags(Store.bindsOf(i))
   val c = hex(i.color)
   Column(Modifier.size(w, h).shadow(10.dp, CardShape(i.isPhone), ambientColor = c, spotColor = c).skin(i.color, CardShape(i.isPhone)).padding(horizontal = 11.dp),
     verticalArrangement = Arrangement.Center) {

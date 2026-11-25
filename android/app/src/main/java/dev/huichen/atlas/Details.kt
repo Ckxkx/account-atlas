@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Email
@@ -75,11 +76,12 @@ fun SectionLabel(s: String) {
 }
 
 @Composable
-fun ActionTile(t: String, icon: ImageVector, modifier: Modifier, destructive: Boolean = false, disabled: Boolean = false, fn: () -> Unit) {
+fun ActionTile(t: String, icon: ImageVector, modifier: Modifier, destructive: Boolean = false, disabled: Boolean = false, sub: String? = null, fn: () -> Unit) {
   val c = if (destructive) pal.red else pal.primary
-  Column(modifier.height(66.dp).graphicsLayer { alpha = if (disabled) 0.35f else 1f }.press(enabled = !disabled, onClick = fn).glass(RoundedCornerShape(18.dp)),
+  Column(modifier.height(66.dp).graphicsLayer { alpha = if (disabled) 0.4f else 1f }.press(enabled = !disabled, onClick = fn).glass(RoundedCornerShape(18.dp)),
     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-    Icon(icon, null, Modifier.size(22.dp), tint = c); Spacer(Modifier.height(6.dp)); T(t, 13f, FontWeight.Medium, c)
+    Icon(icon, null, Modifier.size(22.dp), tint = c); Spacer(Modifier.height(if (sub != null) 3.dp else 6.dp)); T(t, 13f, FontWeight.Medium, c)
+    if (sub != null) T(sub, 10f, color = pal.secondary, lines = 1)
   }
 }
 
@@ -103,8 +105,7 @@ fun IdentityDetail(id: String) {
     WalletCard(i, Modifier.padding(horizontal = 28.dp).padding(top = 8.dp))
     Row(Modifier.padding(horizontal = 20.dp).padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
       ActionTile("复制", Icons.Outlined.ContentCopy, Modifier.weight(1f)) {
-        (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("账号", i.value))
-        hap(CONFIRM); Store.show("已复制")
+        Store.copySecret(ctx, i.value, maskValue(i)); hap(CONFIRM)
       }
       ActionTile("编辑", Icons.Outlined.Edit, Modifier.weight(1f)) { Store.push(Route.EditIdentity(i.id)) }
       ActionTile("删除", Icons.Outlined.Delete, Modifier.weight(1f), destructive = true) { askDelete = true }
@@ -114,17 +115,23 @@ fun IdentityDetail(id: String) {
       T(i.notes, 16f, modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().glass(RoundedCornerShape(16.dp)).padding(14.dp))
     }
     if (i.isLogin) {
-      // the email / phone this 微信 / Apple 账户 is bound to
-      Store.viaOf(i)?.let { v ->
-        SectionLabel("绑定")
-        LinkRow(v, Store.title(v), if (v.label.isNotEmpty()) Store.display(v) else if (v.isPhone) "手机号" else "邮箱")
+      // every email / phone this 微信 / QQ is bound to (2.5: can be several, e.g. a phone and the QQ mailbox)
+      val binds = Store.bindsOf(i)
+      if (binds.isNotEmpty()) {
+        SectionLabel(if (binds.size > 1) "绑定的 ${binds.size} 个手机号 / 邮箱" else "绑定")
+        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          binds.forEach { v -> LinkRow(v, Store.title(v), if (v.label.isNotEmpty()) Store.display(v) else kindName(v), padded = false) }
+        }
       }
     } else {
       val logins = Store.loginsVia(i.id)
-      if (logins.isNotEmpty()) {
-        SectionLabel("绑定了这个号的微信 / QQ")
-        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          logins.forEach { l -> LinkRow(l, "${providerName(l.provider)} 绑定了这个号", Store.display(l), padded = false) }
+      SectionLabel("绑定了这个号的微信 / QQ")
+      Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        logins.forEach { l -> LinkRow(l, "${providerName(l.provider)} ${Store.display(l)}", if (l.label.isNotEmpty()) Store.labelText(l.label) else "绑定了这个号", padded = false) }
+        // 2.5: a QQ / 微信 made from here is already bound to this number or address: nothing to type twice
+        Row(Modifier.fillMaxWidth().height(48.dp).press(0.98f) { Store.push(Route.NewIdentity("login", i.id)) }.glass(RoundedCornerShape(18.dp)),
+          horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Filled.Add, null, tint = pal.accent); Spacer(Modifier.width(6.dp)); T("添加绑定的 QQ / 微信", 15f, FontWeight.SemiBold, pal.accent)
         }
       }
     }
@@ -145,7 +152,7 @@ fun IdentityDetail(id: String) {
     }
   }
   if (askDelete) Confirm("删除 ${Store.title(i)}？", if (accs.isEmpty()) "删除后可以撤销。" else "它会从 ${accs.size} 个网站与 App 的记录里移除，这些网站本身会保留。", "删除", { askDelete = false }) {
-    Store.mutate("已删除") { s -> s.copy(identities = s.identities.filter { it.id != i.id }.map { if (it.via == i.id) it.copy(via = null) else it }, accounts = s.accounts.map { a -> a.copy(identityIds = a.identityIds.filter { it != i.id }) }) }
+    Store.mutate("已删除") { s -> s.copy(identities = s.identities.filter { it.id != i.id }.map { if (i.id in it.bindIds) it.withBinds(it.bindIds - i.id) else it }, accounts = s.accounts.map { a -> a.copy(identityIds = a.identityIds.filter { it != i.id }) }) }
     Store.setKind(Store.kind)
     Store.pop()
   }
@@ -157,6 +164,9 @@ fun AccountDetail(id: String) {
   val d = cleanDomain(a.domain); val b = brandColor(a.name, a.domain)
   val ctx = LocalContext.current
   var askDelete by remember { mutableStateOf(false) }
+  var chooser by remember { mutableStateOf(false) }
+  val linked = a.identityIds.mapNotNull { Store.identity(it) }
+  val hap = haptics()
   SheetScroll(aura = {
     Box(Modifier.fillMaxWidth().height(360.dp).fadeDown().blur(90.dp).graphicsLayer { alpha = 0.45f }.background(Brush.verticalGradient(listOf(b, b.copy(alpha = 0.3f), Color.Transparent))))
   }) {
@@ -164,11 +174,19 @@ fun AccountDetail(id: String) {
     T(a.name, 26f, FontWeight.Bold, modifier = Modifier.padding(top = 14.dp))
     a.handle?.let { T(Store.handleText(it), 15f, color = pal.secondary, modifier = Modifier.padding(top = 2.dp)) }
     Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-      Tag(a.category); if (d.isNotEmpty()) Tag(d)
+      Tag(a.category)
+      // the website opens from its domain chip
+      if (d.isNotEmpty()) Row(Modifier.press(0.94f) { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://$d"))) } }
+        .clip(CircleShape).background(pal.glass).padding(horizontal = 9.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        T(d, 12f, FontWeight.Medium, pal.accent)
+        Spacer(Modifier.width(3.dp))
+        Icon(Icons.AutoMirrored.Filled.OpenInNew, "打开网站", Modifier.size(12.dp), tint = pal.accent)
+      }
     }
     Row(Modifier.padding(horizontal = 20.dp).padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-      ActionTile("打开网站", Icons.Outlined.Explore, Modifier.weight(1f), disabled = d.isEmpty()) {
-        runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://$d"))) }
+      // 2.5: copies the value of the identity this app logs in with (a chooser when there are several)
+      ActionTile("复制账号", Icons.Outlined.ContentCopy, Modifier.weight(1f), disabled = linked.isEmpty(), sub = if (linked.isEmpty()) "未关联身份" else null) {
+        if (linked.size == 1) { Store.copySecret(ctx, linked[0].value, maskValue(linked[0])); hap(CONFIRM) } else chooser = true
       }
       ActionTile("编辑", Icons.Outlined.Edit, Modifier.weight(1f)) { Store.push(Route.EditAccount(a.id)) }
       ActionTile("删除", Icons.Outlined.Delete, Modifier.weight(1f), destructive = true) { askDelete = true }
@@ -195,6 +213,23 @@ fun AccountDetail(id: String) {
     }
     T("添加于 " + dayOf(a.createdAt).format(DateTimeFormatter.ofPattern("yyyy年M月d日", Locale.CHINA)), 12f, color = pal.tertiary, modifier = Modifier.padding(top = 24.dp))
   }
+  if (chooser) AlertDialog(onDismissRequest = { chooser = false }, title = { Text("复制哪个账号？") },
+    text = {
+      Column {
+        linked.forEach { i ->
+          Row(Modifier.fillMaxWidth().press(0.98f) { chooser = false; Store.copySecret(ctx, i.value, maskValue(i)); hap(CONFIRM) }.padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            SmallCard(i, kindIcon(i), 36.dp, 24.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+              T(maskValue(i), 16f, FontWeight.Medium, lines = 1)
+              T(kindName(i) + (if (i.label.isNotEmpty()) " · " + Store.labelText(i.label) else ""), 12f, color = pal.secondary, lines = 1)
+            }
+          }
+        }
+      }
+    },
+    confirmButton = {}, dismissButton = { TextButton({ chooser = false }) { Text("取消") } })
   if (askDelete) Confirm("删除 ${a.name}？", "只删除这条记录，不影响你在那个网站上的账号。", "删除", { askDelete = false }) {
     Store.mutate("已删除") { s -> s.copy(accounts = s.accounts.filter { it.id != a.id }) }
     Store.pop()

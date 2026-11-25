@@ -155,7 +155,8 @@ final class Sync: ObservableObject {
       let prov = c.provider ?? "github"
       let text = try await readGist(gid, token: c.token, prov: prov)
       let remote = try text.map { try Sync.open($0, key: k) } ?? AtlasData()
-      let local = store.data
+      // during the 操作演示 the screen shows sandbox data: sync only ever sees (and updates) the real data
+      let local = store.realData
       let merged = Sync.merge(local, remote)
       if Sync.sig(merged) != Sync.sig(local) { store.adopt(merged) }
       if text == nil || Sync.sig(merged) != Sync.sig(remote) {
@@ -193,9 +194,12 @@ final class Sync: ObservableObject {
       let sd = Data(b)
       k = await Task.detached { Sync.derive(pass, salt: sd) }.value
     }
-    if store.data.demo == true { store.adopt(AtlasData()) }
+    // sample data stays on this device: only the marked items are taken out (no tombstones) before the first merge
+    var real = store.realData
+    let demo = Set(real.identities.filter(\.isDemo).map(\.id) + real.accounts.filter { $0.demo == true }.map(\.id))
+    if !demo.isEmpty { Store.strip(&real, demo); store.adopt(real) }
     if gid == nil {
-      let content = try seal(store.data, key: k, salt: salt)
+      let content = try seal(store.realData, key: k, salt: salt)
       let made = try await api("/gists", method: "POST", body: ["description": Sync.DESC, "public": false, "files": [Sync.FILE: ["content": content]]], token: token, prov: prov) as? [String: Any]
       gid = (made?["id"] as? String) ?? (made?["id"] as? Int).map({ String($0) })
     }

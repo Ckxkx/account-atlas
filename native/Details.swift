@@ -16,7 +16,7 @@ struct IdentityDetail: View {
           VStack(spacing: 0) {
             WalletCard(identity: i).padding(.horizontal, 28).padding(.top, 8)
             HStack(spacing: 10) {
-              action("复制", "doc.on.doc") { UIPasteboard.general.string = i.value; copied += 1; store.show("已复制") }
+              action("复制", "doc.on.doc") { store.copySecret(i); copied += 1 }
               action("编辑", "pencil") { store.route = .editIdentity(i.id) }
               action("删除", "trash", role: .destructive) { askDelete = true }
             }
@@ -53,7 +53,7 @@ struct IdentityDetail: View {
               s.identities.removeAll { $0.id == i.id }
               for k in s.accounts.indices { s.accounts[k].identityIds.removeAll { $0 == i.id } }
               // login cards bound to it just lose the binding
-              for k in s.identities.indices where s.identities[k].via == i.id { s.identities[k].via = nil }
+              for k in s.identities.indices where s.identities[k].bindIDs.contains(i.id) { s.identities[k].setBinds(s.identities[k].bindIDs.filter { $0 != i.id }) }
             }
             store.setKind(store.kind)
             dismiss()
@@ -66,22 +66,32 @@ struct IdentityDetail: View {
   /// login card: the email / phone it is bound to. Email / phone: the login cards bound to it.
   @ViewBuilder func links(_ i: Identity) -> some View {
     if i.isLogin {
-      if let v = store.via(i) {
-        section("绑定")
-        Button { store.route = .identity(v.id) } label: { identityRow(v, sub: v.kindName + (v.label.isEmpty ? "" : " · " + store.display(v))) }
-          .buttonStyle(PressStyle(scale: 0.98)).padding(.horizontal, 20)
-      }
-    } else {
-      let bound = store.boundLogins(i.id)
-      if !bound.isEmpty {
-        section("绑定了这个号的微信 / QQ")
+      // 2.5: can be bound to several (a phone and the QQ mailbox)
+      let binds = store.binds(i)
+      if !binds.isEmpty {
+        section(binds.count > 1 ? "绑定的 \(binds.count) 个手机号 / 邮箱" : "绑定")
         VStack(spacing: 8) {
-          ForEach(bound) { l in
-            Button { store.route = .identity(l.id) } label: { identityRow(l, sub: l.kindName + " 绑定了这个号") }
+          ForEach(binds) { v in
+            Button { store.route = .identity(v.id) } label: { identityRow(v, sub: v.kindName + (v.label.isEmpty ? "" : " · " + store.display(v))) }
               .buttonStyle(PressStyle(scale: 0.98))
           }
         }.padding(.horizontal, 20)
       }
+    } else {
+      let bound = store.boundLogins(i.id)
+      section("绑定了这个号的微信 / QQ")
+      VStack(spacing: 8) {
+        ForEach(bound) { l in
+          Button { store.route = .identity(l.id) } label: { identityRow(l, sub: l.kindName + " " + store.display(l)) }
+            .buttonStyle(PressStyle(scale: 0.98))
+        }
+        // 2.5: made from here, the QQ / 微信 is already bound to this number or address: nothing typed twice
+        Button { store.route = .newBound(i.id) } label: {
+          Label("添加绑定的 QQ / 微信", systemImage: "plus").font(.system(size: 15, weight: .semibold))
+            .frame(maxWidth: .infinity).frame(height: 48)
+            .liquidPanel(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }.buttonStyle(PressStyle(scale: 0.98))
+      }.padding(.horizontal, 20)
     }
   }
   /// sites that log in with a 微信 / QQ / Apple card bound to this email / phone (affected when it changes)
@@ -139,6 +149,8 @@ struct AccountDetail: View {
   @Environment(\.openURL) var openURL
   let id: String
   @State private var askDelete = false
+  @State private var chooser = false
+  @State private var copied = 0
 
   var body: some View {
     if let a = store.account(id) {
@@ -150,12 +162,23 @@ struct AccountDetail: View {
               .bakedShadow(RoundedRectangle(cornerRadius: 96 * 0.235, style: .continuous), key: "icon96" + a.name + a.domain, color: b.opacity(0.5), radius: 24, y: 10).padding(.top, 10)
             Text(a.name).font(.system(size: 26, weight: .bold)).padding(.top, 14)
             if let h = a.handle { Text(store.handleText(h)).font(.system(size: 15)).foregroundStyle(.secondary).padding(.top, 2) }
+            let linked = a.identityIds.compactMap { store.identity($0) }
             HStack(spacing: 6) {
               tag(a.category)
-              if !d.isEmpty { tag(d) }
+              // the website opens from its domain chip
+              if !d.isEmpty {
+                Button { if let u = URL(string: "https://" + d) { openURL(u) } } label: {
+                  HStack(spacing: 3) { Text(d); Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .bold)) }
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 9).padding(.vertical, 4).liquidPanel(Capsule())
+                }.buttonStyle(PressStyle(scale: 0.94)).accessibilityLabel("打开网站 " + d)
+              }
             }.padding(.top, 10)
             HStack(spacing: 10) {
-              act("打开网站", "safari", disabled: d.isEmpty) { if let u = URL(string: "https://" + d) { openURL(u) } }
+              // 2.5: copies the value of the identity this app logs in with (a chooser when there are several)
+              act("复制账号", "doc.on.doc", disabled: linked.isEmpty, sub: linked.isEmpty ? "未关联身份" : nil) {
+                if linked.count == 1 { store.copySecret(linked[0]); copied += 1 } else { chooser = true }
+              }
               act("编辑", "pencil") { store.route = .editAccount(a.id) }
               act("删除", "trash", destructive: true) { askDelete = true }
             }.padding(.horizontal, 20).padding(.top, 24)
@@ -192,6 +215,13 @@ struct AccountDetail: View {
         }
         .background(alignment: .top) { b.frame(height: 360).blur(radius: 90).opacity(0.45).ignoresSafeArea() }
         .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { dismiss() } label: { Image(systemName: "xmark") } } }
+        .sensoryFeedback(.success, trigger: copied)
+        .confirmationDialog("复制哪个账号？", isPresented: $chooser, titleVisibility: .visible) {
+          ForEach(a.identityIds.compactMap { store.identity($0) }) { i in
+            Button(i.kindName + " " + maskValue(i) + (i.label.isEmpty ? "" : " · " + store.labelText(i.label))) { store.copySecret(i); copied += 1 }
+          }
+          Button("取消", role: .cancel) {}
+        } message: { Text("只显示打码后的账号，复制的是完整内容，60 秒后自动清除。") }
         .confirmationDialog("删除 \(a.name)？", isPresented: $askDelete, titleVisibility: .visible) {
           Button("删除", role: .destructive) { store.mutate("已删除") { s in s.accounts.removeAll { $0.id == a.id } }; dismiss() }
         } message: { Text("只删除这条记录，不影响你在那个网站上的账号。") }
@@ -201,11 +231,12 @@ struct AccountDetail: View {
   func tag(_ s: String) -> some View {
     Text(s).font(.system(size: 12, weight: .medium)).padding(.horizontal, 9).padding(.vertical, 4).liquidPanel(Capsule())
   }
-  func act(_ t: String, _ icon: String, disabled: Bool = false, destructive: Bool = false, _ fn: @escaping () -> Void) -> some View {
+  func act(_ t: String, _ icon: String, disabled: Bool = false, destructive: Bool = false, sub: String? = nil, _ fn: @escaping () -> Void) -> some View {
     Button(action: fn) {
-      VStack(spacing: 6) {
+      VStack(spacing: sub == nil ? 6 : 3) {
         Image(systemName: icon).font(.system(size: 19, weight: .medium))
         Text(t).font(.system(size: 13, weight: .medium))
+        if let sub { Text(sub).font(.system(size: 10)).foregroundStyle(.secondary) }
       }
       .foregroundStyle(destructive ? Color.red : Color.primary)
       .frame(maxWidth: .infinity).frame(height: 66)

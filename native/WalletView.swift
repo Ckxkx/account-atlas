@@ -113,7 +113,7 @@ struct TopButtons: ToolbarContent {
         Button { store.route = .newIdentity("email") } label: { Label("添加邮箱", systemImage: "envelope") }
         Button { store.route = .newIdentity("phone") } label: { Label("添加手机号", systemImage: "simcard") }
         Button { store.route = .newIdentity("login") } label: { Label("添加微信或 QQ", systemImage: "bubble.left.and.bubble.right") }
-      } label: { Image(systemName: "plus") } primaryAction: { store.route = .picker(store.active?.id) }
+      } label: { Image(systemName: "plus").background(TourAnchor(id: "add")) } primaryAction: { store.route = .picker(store.active?.id) }
       Button { store.route = .settings } label: { Image(systemName: "ellipsis") }
     }
   }

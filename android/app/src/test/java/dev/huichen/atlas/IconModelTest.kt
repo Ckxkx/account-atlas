@@ -41,7 +41,7 @@ class IconModelTest {
     assertEquals("weixin.qq.com", hits[0].domain)
     assertEquals("社交", hits[0].category)
     assertEquals("https://a/256x256bb.jpg", hits[0].artwork)
-    assertTrue(appStoreURL("微 信").startsWith("https://itunes.apple.com/search?term=%E5%BE%AE+%E4%BF%A1&country=cn&entity=software&limit=8"))
+    assertTrue(appStoreURL("微 信").startsWith("https://itunes.apple.com/search?term=%E5%BE%AE+%E4%BF%A1&country=cn&entity=software&limit=10&explicit=No"))
     assertEquals(emptyList<AppHit>(), parseAppStore("not json"))
   }
 }

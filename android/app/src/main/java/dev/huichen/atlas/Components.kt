@@ -33,6 +33,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.SimCard
@@ -302,8 +304,8 @@ fun ESimBadge() {
 
 fun footNote(i: Identity): String {
   if (i.isLogin) {
-    val v = Store.viaOf(i)
-    if (v != null) return "绑定 " + Store.title(v)
+    val b = Store.bindsOf(i)
+    if (b.isNotEmpty()) return "绑定 " + Store.title(b[0]) + (if (b.size > 1) " 等 ${b.size} 个" else "")
     return i.notes.ifEmpty { if (i.isApple) "Apple ID" else if (i.isQQ) "QQ 号" else "微信号" }
   }
   val ap = if (i.isAppleID) "Apple ID" else ""
@@ -317,7 +319,7 @@ fun footNote(i: Identity): String {
 }
 
 @Composable
-fun WalletCard(i: Identity, modifier: Modifier = Modifier, shadow: Boolean = true) {
+fun WalletCard(i: Identity, modifier: Modifier = Modifier, shadow: Boolean = true, reveal: Boolean = false) {
   val accs = Store.accountsOf(i.id)
   val shape = CardShape(i.isPhone)
   val glow = hex(i.color)
@@ -349,9 +351,9 @@ fun WalletCard(i: Identity, modifier: Modifier = Modifier, shadow: Boolean = tru
             if (i.isESim) ESimBadge() else if (i.isPhone) Chip() else if (i.isLogin) LoginGlyph(i, 22.dp) else Icon(Icons.Outlined.Email, null, Modifier.size(20.dp), tint = Color.White)
             if (i.isLogin) {
               T(providerName(i.provider), 16f, FontWeight.SemiBold, Color.White, lines = 1)
-              if (i.label.isNotEmpty()) T(i.label, 13f, FontWeight.Medium, Color.White.copy(alpha = 0.75f), lines = 1)
+              if (i.label.isNotEmpty()) T(Store.labelText(i.label), 13f, FontWeight.Medium, Color.White.copy(alpha = 0.75f), lines = 1)
             } else {
-              T(i.label.ifEmpty { if (i.isPhone) "手机号" else "邮箱" }, 16f, FontWeight.SemiBold, Color.White, lines = 1)
+              T(if (i.label.isNotEmpty()) Store.labelText(i.label) else if (i.isPhone) "手机号" else "邮箱", 16f, FontWeight.SemiBold, Color.White, lines = 1)
               if (i.isAppleID) AppleGlyph(15.dp, Color.White)
             }
           }
@@ -362,7 +364,17 @@ fun WalletCard(i: Identity, modifier: Modifier = Modifier, shadow: Boolean = tru
           }
         }
         Spacer(Modifier.weight(1f))
-        AutoSizeText(Store.display(i), 21f, FontWeight.SemiBold, Color.White)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          AutoSizeText(if (reveal) i.value else Store.display(i), 21f, FontWeight.SemiBold, Color.White, Modifier.weight(1f))
+          // 2.5: the eye shows or hides this card's value for now (masked again when the app goes away)
+          if (!reveal && Store.maskValues) {
+            val shown = i.id in Store.revealed
+            Box(Modifier.padding(start = 6.dp).size(30.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f))
+              .clickable { Store.toggleReveal(i.id) }, contentAlignment = Alignment.Center) {
+              Icon(if (shown) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (shown) "隐藏" else "显示", Modifier.size(17.dp), tint = Color.White)
+            }
+          }
+        }
         Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.Bottom) {
           T(footNote(i), 12.5f, FontWeight.Medium, Color.White.copy(alpha = 0.75f), Modifier.weight(1f), lines = 1)
           IconStack(accs)
@@ -373,8 +385,8 @@ fun WalletCard(i: Identity, modifier: Modifier = Modifier, shadow: Boolean = tru
 }
 
 @Composable
-fun AutoSizeText(text: String, max: Float, weight: FontWeight, color: Color) {
-  BoxWithConstraints(Modifier.fillMaxWidth()) {
+fun AutoSizeText(text: String, max: Float, weight: FontWeight, color: Color, modifier: Modifier = Modifier) {
+  BoxWithConstraints(modifier.fillMaxWidth()) {
     // shrink long addresses down to 60% like minimumScaleFactor
     val approx = text.sumOf { if (it.code > 0x2e80) 2.0 else 1.12 } * 0.5
     val fit = (maxWidth.value / approx).toFloat()

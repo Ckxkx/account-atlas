@@ -14,11 +14,13 @@ struct IdentityForm: View {
   @State private var esim: Bool
   @State private var apple: Bool
   @State private var provider: String
-  @State private var via: String
-  @State private var viaNew = ""                 // via == "+": a number / address not in the list yet
+  /// 2.5: every email / phone it is bound to (a phone and the QQ mailbox, say)
+  @State private var binds: [String]
+  @State private var addNew = false               // a number / address not in the list yet
+  @State private var viaNew = ""
   @State private var colorTouched = false   // the user picked a skin here: stop following the type / provider
 
-  init(existing: Identity?, type: String, defaultColor: String) {
+  init(existing: Identity?, type: String, defaultColor: String, presetVia: String? = nil) {
     self.existing = existing
     let t = existing?.type ?? type
     // 2.4: 微信 and QQ are the only login cards; an Apple ID is a flag on its email / phone
@@ -32,7 +34,7 @@ struct IdentityForm: View {
     _esim = State(initialValue: existing?.esim == true)
     _apple = State(initialValue: existing?.apple == true)
     _provider = State(initialValue: p)
-    _via = State(initialValue: existing?.via ?? "")
+    _binds = State(initialValue: existing?.bindIDs ?? (presetVia.map { [$0] } ?? []))
   }
 
   var isLogin: Bool { type == "login" }
@@ -56,7 +58,7 @@ struct IdentityForm: View {
   var kindKey: String { isLogin ? provider : type }
   var dup: Identity? { store.existing(type: type, provider: isLogin ? provider : nil, value: trimmed, except: existing?.id) }
   var viaNewError: String? {
-    guard isLogin, via == "+" else { return nil }
+    guard isLogin, addNew else { return nil }
     let v = viaNew.trimmingCharacters(in: .whitespaces)
     return v.isEmpty ? nil : idValueError(v.contains("@") ? "email" : "phone", v)
   }
@@ -68,7 +70,8 @@ struct IdentityForm: View {
 
   var preview: Identity {
     var i = Identity(id: existing?.id ?? "_new", type: type, value: value.isEmpty ? sample : value, label: label, color: color, notes: notes,
-                     esim: type == "phone" && esim, provider: isLogin ? provider : nil, via: isLogin && via != "+" ? via : nil, apple: !isLogin && apple)
+                     esim: type == "phone" && esim, provider: isLogin ? provider : nil, apple: !isLogin && apple)
+    if isLogin { i.setBinds(binds) }
     i.order = existing?.order
     return i
   }
@@ -77,7 +80,7 @@ struct IdentityForm: View {
     NavigationStack {
       Form {
         Section {
-          WalletCard(identity: preview)
+          WalletCard(identity: preview, reveal: true)
             .padding(.horizontal, 10).padding(.vertical, 6)
             .animation(Motion.smooth, value: color)
             .animation(Motion.smooth, value: type)
@@ -118,16 +121,34 @@ struct IdentityForm: View {
         }
         if isLogin {
           Section {
-            Picker("绑定的手机号/邮箱", selection: $via) {
-              Text("无").tag("")
-              ForEach(bindable) { i in Text(i.kindName + " · " + store.title(i) + (i.isAppleID ? " · Apple ID" : "")).tag(i.id) }
-              Text("新的手机号或邮箱…").tag("+")
+            ForEach(bindable) { i in
+              let on = binds.contains(i.id)
+              Button {
+                withAnimation(Motion.snappy) { if on { binds.removeAll { $0 == i.id } } else { binds.append(i.id) } }
+              } label: {
+                HStack(spacing: 12) {
+                  IdentityGlyph(identity: i, size: 12).foregroundStyle(.white).frame(width: 36, height: 24)
+                    .background(skinGradient(i.color), in: CardShape(sim: i.isPhone))
+                  VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 5) {
+                      Text(store.title(i)).foregroundStyle(.primary).lineLimit(1)
+                      if i.isAppleID { AppleBadge() }
+                    }
+                    Text(i.kindName + (i.label.isEmpty ? "" : " · " + store.display(i))).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                  }
+                  Spacer()
+                  Image(systemName: on ? "checkmark.circle.fill" : "circle").font(.system(size: 22))
+                    .foregroundStyle(on ? Color(hex: i.color) : Color.secondary.opacity(0.5))
+                }
+              }
+              .sensoryFeedback(.selection, trigger: on)
             }
-            if via == "+" {
+            Toggle("新的手机号或邮箱", isOn: $addNew.animation(Motion.snappy))
+            if addNew {
               TextField("手机号或邮箱", text: $viaNew).textInputAutocapitalization(.never).autocorrectionDisabled()
             }
-          } footer: {
-            if let e = viaNewError { Text(e) } else { Text("从已有的卡里选，不用再填一遍。换手机号时，能看出哪些 App 跟着受影响。") }
+          } header: { Text("绑定的手机号/邮箱（可多选）") } footer: {
+            if let e = viaNewError { Text(e) } else { Text("从已有的卡里选，不用再填一遍。QQ 同时绑了手机号和 QQ 邮箱，就两个都选上。") }
           }
         }
         Section("卡面") {
@@ -155,7 +176,7 @@ struct IdentityForm: View {
         ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
         ToolbarItem(placement: .confirmationAction) { Button(existing == nil ? "添加" : "保存") { save() }.bold().disabled(!valid) }
       }
-      .onAppear { if !via.isEmpty && !bindable.contains(where: { $0.id == via }) { via = "" } }
+      .onAppear { binds = binds.filter { b in bindable.contains { $0.id == b } } }
       .onChange(of: type) { old, new in
         if colorTouched { return }
         withAnimation(Motion.snappy) {
@@ -198,15 +219,14 @@ struct IdentityForm: View {
     let v = trimmed
     let isL = isLogin
     let prov: String? = isL ? provider : nil
-    var bound: String? = isL && !via.isEmpty && via != "+" ? via : nil
-    if isL && via == "+" {
+    var bound: [String] = isL ? binds : []
+    if isL && addNew {
       let n = viaNew.trimmingCharacters(in: .whitespaces)
-      if !n.isEmpty { bound = store.ensureIdentity(type: n.contains("@") ? "email" : "phone", value: n).0 }
+      if !n.isEmpty { let id = store.ensureIdentity(type: n.contains("@") ? "email" : "phone", value: n).0; if !bound.contains(id) { bound.append(id) } }
     }
-    // a QQ whose QQ is an email you already have: bind it to that email instead of typing it twice
-    if isL && provider == "qq" && bound == nil && v.contains("@") {
-      bound = store.data.identities.first { $0.type == "email" && normEmail($0.value) == normEmail(v) }?.id
-    }
+    // a QQ whose QQ is an email you already have: bind it to that email too, instead of typing it twice
+    if isL && provider == "qq" && v.contains("@"),
+       let m = store.data.identities.first(where: { $0.type == "email" && normEmail($0.value) == normEmail(v) }), !bound.contains(m.id) { bound.append(m.id) }
     let ap = !isL && apple
     if let e = existing {
       store.mutate("已保存") { s in
@@ -216,13 +236,15 @@ struct IdentityForm: View {
           s.identities[k].esim = (type == "phone" && esim) ? true : nil
           s.identities[k].apple = ap ? true : nil
           s.identities[k].provider = prov
-          if isL { s.identities[k].via = bound }
+          s.identities[k].demo = nil   // edited by the user: a sample card becomes theirs
+          if isL { s.identities[k].setBinds(bound) }
         }
       }
       store.setKind(type, focus: e.id)
     } else {
-      let i = Identity(type: type, value: v, label: label.trimmingCharacters(in: .whitespaces), color: color, notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
-                       esim: type == "phone" && esim, provider: prov, via: bound, apple: ap)
+      var i = Identity(type: type, value: v, label: label.trimmingCharacters(in: .whitespaces), color: color, notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+                       esim: type == "phone" && esim, provider: prov, apple: ap)
+      if isL { i.setBinds(bound) }
       store.mutate("已添加") { s in
         s.identities.append(i)
       }
@@ -344,6 +366,7 @@ struct AccountForm: View {
                 let h = handle.trimmingCharacters(in: .whitespaces); s.accounts[k].handle = h.isEmpty ? nil : h
                 s.accounts[k].identityIds = ids
                 s.accounts[k].icon = icon
+                s.accounts[k].demo = nil   // edited by the user: a sample app becomes theirs
               }
             }
             IconStore.shared.prefetch(store.data.accounts.filter { $0.id == existing.id })
@@ -397,13 +420,18 @@ struct IdentityPicks: View {
   @Environment(Store.self) var store
   @Binding var selected: [String]
   @State private var creating = false
+  /// 2.5: a 微信 / QQ sits right under the (first) phone or email it is bound to; unbound ones come last
   var list: [Identity] {
     let x = store.index
-    return x.emails + x.phones + x.logins.filter { !$0.isQQ } + x.logins.filter(\.isQQ)
+    let logins = x.logins.filter { !$0.isQQ } + x.logins.filter(\.isQQ)
+    var under: [String: [Identity]] = [:], loose: [Identity] = []
+    for l in logins { if let v = store.via(l) { under[v.id, default: []].append(l) } else { loose.append(l) } }
+    return (x.emails + x.phones).flatMap { [$0] + (under[$0.id] ?? []) } + loose
   }
   var body: some View {
     ForEach(list) { i in
       let on = selected.contains(i.id)
+      let nested = i.isLogin && store.via(i) != nil
       Button {
         withAnimation(Motion.snappy) { if on { selected.removeAll { $0 == i.id } } else { selected.append(i.id) } }
       } label: {
@@ -412,7 +440,7 @@ struct IdentityPicks: View {
             .background(skinGradient(i.color), in: CardShape(sim: i.isPhone))
           VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 5) {
-              Text(i.isLogin ? (i.label.isEmpty ? i.kindName : i.kindName + " · " + i.label) : store.title(i)).foregroundStyle(.primary).lineLimit(1)
+              Text(i.isLogin ? i.kindName + " " + store.display(i) + (bindTags(store.binds(i)).isEmpty ? "" : " · 绑定 " + bindTags(store.binds(i))) : store.title(i)).foregroundStyle(.primary).lineLimit(1)
               if i.isAppleID { AppleBadge() }
             }
             if let s = sub(i) { Text(s).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1) }
@@ -422,6 +450,8 @@ struct IdentityPicks: View {
             .foregroundStyle(on ? Color(hex: i.color) : Color.secondary.opacity(0.5))
             .symbolEffect(.bounce, value: on)
         }
+        .padding(.leading, nested ? 18 : 0)
+        .background { if i.id == list.first?.id { TourAnchor(id: "who") } }
       }
       .sensoryFeedback(.selection, trigger: on)
     }
@@ -434,11 +464,7 @@ struct IdentityPicks: View {
     }
   }
   func sub(_ i: Identity) -> String? {
-    if i.isLogin {
-      var s = store.display(i)
-      if let v = store.via(i) { let t = bindTag(v); if !t.isEmpty { s += " · 绑定" + t } }
-      return s
-    }
+    if i.isLogin { return i.label.isEmpty ? nil : store.labelText(i.label) }
     return i.label.isEmpty ? nil : store.display(i)
   }
 }
@@ -600,7 +626,14 @@ struct PickerSheet: View {
       Group { if step2 { chooseIdentities } else { grid } }
         .animation(Motion.smooth, value: step2)
     }
-    .onAppear { if let p = presetIdentity { ids = [p] } }
+    // during the 操作演示 the identity is picked by hand, as a step of its own
+    .onAppear { if let p = presetIdentity, store.tourStep == nil { ids = [p] }; store.tourAdvance("add", "pick") }
+    .onChange(of: picked.count) { _, n in if n > 0 { store.tourAdvance("pick", "next") } else { store.tourAdvance("next", "pick") } }
+    .onChange(of: step2) { _, on in
+      if on { store.tourAdvance("next", "who") } else if store.tourStep == "who" || store.tourStep == "save" { store.tourStep = "next" }
+    }
+    .onChange(of: ids) { _, v in if v.isEmpty { store.tourAdvance("save", "who") } else { store.tourAdvance("who", "save") } }
+    .overlay { TourLayer(inPicker: true).animation(Motion.smooth, value: store.tourStep) }
   }
 
   var grid: some View {
@@ -708,6 +741,7 @@ struct PickerSheet: View {
         Text(p.name).font(.system(size: 12)).lineLimit(1).foregroundStyle(.primary)
         if has { Text("已记录").font(.system(size: 9.5, weight: .medium)).foregroundStyle(.secondary).padding(.top, -4) }
       }
+      .background { if key(p) == list.first.map(key) { TourAnchor(id: "tile") } }
     }.buttonStyle(.plain)
   }
 
@@ -754,6 +788,7 @@ struct PickerSheet: View {
       Button { step2 = true } label: {
         Text("下一步 (\(picked.count))").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
           .padding(.horizontal, 16).frame(height: 38).background(Color.accentColor, in: Capsule())
+          .background(TourAnchor(id: "next"))
       }
       .buttonStyle(PressStyle(scale: 0.94)).padding(.trailing, 16)
     }
@@ -798,7 +833,7 @@ struct PickerSheet: View {
     .navigationTitle("怎么登录").navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .cancellationAction) { Button { step2 = false } label: { Label("返回", systemImage: "chevron.left") } }
-      ToolbarItem(placement: .confirmationAction) { Button("保存") { save() }.bold() }
+      ToolbarItem(placement: .confirmationAction) { Button { save() } label: { Text("保存").bold().background(TourAnchor(id: "save")) } }
     }
   }
 
@@ -815,6 +850,7 @@ struct PickerSheet: View {
       s.accounts.append(contentsOf: made)
     }
     IconStore.shared.prefetch(made)
+    store.tourSaved()
     // App Store icons still downloading when 保存 was tapped: attach them to the new accounts when they land
     let late = made.compactMap { m in m.icon == nil ? storeFor[m.name.lowercased()].map { (m.id, $0) } : nil }
     if !late.isEmpty {
