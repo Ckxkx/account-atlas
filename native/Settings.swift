@@ -27,112 +27,131 @@ struct SettingsSheet: View {
   private var lock: AppLock { AppLock.shared }
 
   var body: some View {
-    NavigationStack {
-      Form {
-        Section {
-          NavigationLink { SyncView() } label: {
-            HStack {
-              Label("加密同步", systemImage: "icloud")
-              Spacer()
-              Text(syncStatus).foregroundStyle(.secondary).font(.system(size: 14))
-            }
-          }
-        }
-        Section {
-          // 2.6: with the 应用锁 on, showing every value (turning this off) asks for Face ID / passcode first
-          Toggle(isOn: Binding(get: { store.maskValues }, set: { v in
-            if v { withAnimation(Motion.smooth) { store.maskValues = true } } else { lock.reveal { withAnimation(Motion.smooth) { store.maskValues = false } } }
-          })) { Label("默认隐藏账号", systemImage: "eye.slash") }
-          Toggle(isOn: Binding(get: { store.hideNames }, set: { v in store.hideNames = v }).animation(Motion.smooth)) { Label("隐藏用户名", systemImage: "person.crop.circle.badge.xmark") }
-          Picker(selection: Binding(get: { store.theme }, set: { ThemeFX.set($0, store: store) })) {
-            Text("深色").tag("dark")
-            Text("浅色").tag("light")
-            Text("跟随系统").tag("system")
-          } label: { Label("外观", systemImage: "circle.lefthalf.filled") }
-          NavigationLink { OrderView() } label: { Label("调整卡片顺序", systemImage: "arrow.up.arrow.down") }
-          Button { store.startTour(firstRun: false) } label: { Label("操作演示", systemImage: "hand.tap") }
-        } footer: { Text("账号默认打码，卡片上的眼睛可以临时显示，App 退到后台会重新打码。") }
-        lockSection
-        Section {
-          Button { store.route = .share } label: { Label("分享我的星图", systemImage: "square.and.arrow.up.on.square") }
-        } footer: { Text("生成一张卡片图片：有哪些 App、各用哪个身份。默认不显示任何邮箱和号码。") }
-        Section {
-          // 2.6: exporting always asks for Face ID / passcode first, then offers a password for the file
-          Button { Task { if await lock.require("导出备份") { exportForm = true } } } label: { Label("导出备份", systemImage: "square.and.arrow.up") }
-          Button { importing = true } label: { Label("导入备份", systemImage: "square.and.arrow.down") }
-          if store.hasDemo {
-            Button(role: .destructive) { store.clearDemo() } label: { Label("清除示例数据", systemImage: "xmark.bin") }
-          } else {
-            Button { askDemo = true } label: { Label("载入示例", systemImage: "text.badge.plus") }.disabled(!store.canLoadDemo)
-          }
-          if let t = store.restoreTitle {
-            Button { askRestore = true } label: {
-              HStack {
-                Label(t, systemImage: "arrow.counterclockwise")
-                Spacer()
-                Text(Date(timeIntervalSince1970: store.restoreAt / 1000).formatted(date: .abbreviated, time: .shortened)).font(.system(size: 13)).foregroundStyle(.secondary)
-              }
-            }
-          }
-        } footer: {
-          Text("备份是 JSON 文件，和网页版通用。" + (store.hasDemo ? "" : sync.on ? "开着同步时不能载入示例。" : store.hasReal ? "已经有自己的数据时不能载入示例，免得和真实数据混在一起。" : ""))
-        }
-        Section {
-          Link(destination: URL(string: "https://wwbsj.lanzoup.com/b01i61dn1a")!) {
-            HStack {
-              Label("下载新版本", systemImage: "arrow.up.forward.app")
-              Spacer()
-              Text((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { "当前 " + $0 } ?? "").foregroundStyle(.secondary)
-            }
-          }
-        } footer: { Text("在蓝奏云下载，密码 0874。直接覆盖安装，数据不会丢失。") }
-        Section {
-          Button(role: .destructive) { askWipe = true } label: { Label("清空全部数据", systemImage: "trash") }
-        }
-        Section {
-          VStack(spacing: 6) {
-            Text("账号星图").font(.system(size: 15, weight: .semibold))
-            Text("不保存任何密码 · 数据只在本机和你自己的私有 Gist").font(.system(size: 12)).foregroundStyle(.secondary)
-          }.frame(maxWidth: .infinity)
-        }.listRowBackground(Color.clear)
-      }
-      .tint(.accentColor)
-      .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
-      .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.bold() } }
-      .navigationDestination(isPresented: $exportForm) { ExportView() }
-      .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { r in
-        guard case .success(let url) = r else { return }
-        let ok = url.startAccessingSecurityScopedResource(); defer { if ok { url.stopAccessingSecurityScopedResource() } }
-        guard let d = try? Data(contentsOf: url) else { store.show("这不是账号星图的备份文件"); return }
-        // 2.6: a password-protected backup is opened first, then goes down the same path
-        if BackupCrypto.isEnvelope(d) { encImport = d; encPass = ""; encError = ""; askPass = true; return }
-        importPlain(d)
-      }
-      .alert("加密的备份", isPresented: $askPass) {
-        SecureField("备份密码", text: $encPass)
-        Button("解锁") { openEncrypted() }
-        Button("取消", role: .cancel) { encImport = nil; encPass = "" }
-      } message: { Text(encError.isEmpty ? "这份备份设置了密码，输入导出时设的密码。" : encError) }
-      .confirmationDialog("清空全部数据？", isPresented: $askWipe, titleVisibility: .visible) {
-        Button("清空全部数据", role: .destructive) {
-          store.saveRestorePoint("wipe")
-          store.mutate("已清空") { s in s.identities = []; s.accounts = [] }
-          store.setKind(store.kind); dismiss()
-        }
-      } message: { Text(sync.on ? "所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。" : "所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。") }
-      .alert("导入备份？", isPresented: Binding(get: { pendingImport != nil }, set: { if !$0 { pendingImport = nil } })) {
-        Button("导入") { if let d = pendingImport, store.importBackup(d) { dismiss() }; pendingImport = nil }
-        Button("取消", role: .cancel) { pendingImport = nil }
-      } message: { Text("导入会替换现在的 \(store.data.identities.count) 个身份和 \(store.data.accounts.count) 个网站与 App。替换前的数据会先存一份，可以在设置里恢复。") }
-      .alert("载入示例数据？", isPresented: $askDemo) {
-        Button("载入") { store.loadDemo(); dismiss() }
-        Button("取消", role: .cancel) {}
-      } message: { Text("会加入几个虚构的邮箱、手机号和 App，都带示例标记，「清除示例数据」只会删掉它们。") }
-      .alert(store.restoreTitle ?? "恢复数据", isPresented: $askRestore) {
-        Button("恢复") { store.restore(); dismiss() }
-        Button("取消", role: .cancel) {}
-      } message: { Text("会把数据换回那时的样子。现在的数据也会先存一份，可以再换回来。") }
+    // split into parts: one long chain was too much for the type checker
+    NavigationStack { dataDialogs(importFlow(settingsForm)) }
+  }
+  private var settingsForm: some View {
+    Form {
+      topSections
+      lockSection
+      midSections
+      endSections
     }
+    .tint(.accentColor)
+    .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
+    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.bold() } }
+    .navigationDestination(isPresented: $exportForm) { ExportView() }
+  }
+
+  @ViewBuilder private var topSections: some View {
+    Section {
+      NavigationLink { SyncView() } label: {
+        HStack {
+          Label("加密同步", systemImage: "icloud")
+          Spacer()
+          Text(syncStatus).foregroundStyle(.secondary).font(.system(size: 14))
+        }
+      }
+    }
+    Section {
+      // 2.6: with the 应用锁 on, showing every value (turning this off) asks for Face ID / passcode first
+      Toggle(isOn: Binding(get: { store.maskValues }, set: { v in
+        if v { withAnimation(Motion.smooth) { store.maskValues = true } } else { lock.reveal { withAnimation(Motion.smooth) { store.maskValues = false } } }
+      })) { Label("默认隐藏账号", systemImage: "eye.slash") }
+      Toggle(isOn: Binding(get: { store.hideNames }, set: { v in store.hideNames = v }).animation(Motion.smooth)) { Label("隐藏用户名", systemImage: "person.crop.circle.badge.xmark") }
+      Picker(selection: Binding(get: { store.theme }, set: { ThemeFX.set($0, store: store) })) {
+        Text("深色").tag("dark")
+        Text("浅色").tag("light")
+        Text("跟随系统").tag("system")
+      } label: { Label("外观", systemImage: "circle.lefthalf.filled") }
+      NavigationLink { OrderView() } label: { Label("调整卡片顺序", systemImage: "arrow.up.arrow.down") }
+      Button { store.startTour(firstRun: false) } label: { Label("操作演示", systemImage: "hand.tap") }
+    } footer: { Text("账号默认打码，卡片上的眼睛可以临时显示，App 退到后台会重新打码。") }
+  }
+  @ViewBuilder private var midSections: some View {
+    Section {
+      Button { store.route = .share } label: { Label("分享我的星图", systemImage: "square.and.arrow.up.on.square") }
+    } footer: { Text("生成一张卡片图片：有哪些 App、各用哪个身份。默认不显示任何邮箱和号码。") }
+    Section {
+      // 2.6: exporting always asks for Face ID / passcode first, then offers a password for the file
+      Button { Task { if await lock.require("导出备份") { exportForm = true } } } label: { Label("导出备份", systemImage: "square.and.arrow.up") }
+      Button { importing = true } label: { Label("导入备份", systemImage: "square.and.arrow.down") }
+      if store.hasDemo {
+        Button(role: .destructive) { store.clearDemo() } label: { Label("清除示例数据", systemImage: "xmark.bin") }
+      } else {
+        Button { askDemo = true } label: { Label("载入示例", systemImage: "text.badge.plus") }.disabled(!store.canLoadDemo)
+      }
+      if let t = store.restoreTitle {
+        Button { askRestore = true } label: {
+          HStack {
+            Label(t, systemImage: "arrow.counterclockwise")
+            Spacer()
+            Text(Date(timeIntervalSince1970: store.restoreAt / 1000).formatted(date: .abbreviated, time: .shortened)).font(.system(size: 13)).foregroundStyle(.secondary)
+          }
+        }
+      }
+    } footer: {
+      Text("备份是 JSON 文件，和网页版通用。" + (store.hasDemo ? "" : sync.on ? "开着同步时不能载入示例。" : store.hasReal ? "已经有自己的数据时不能载入示例，免得和真实数据混在一起。" : ""))
+    }
+  }
+  @ViewBuilder private var endSections: some View {
+    Section {
+      Link(destination: URL(string: "https://wwbsj.lanzoup.com/b01i61dn1a")!) {
+        HStack {
+          Label("下载新版本", systemImage: "arrow.up.forward.app")
+          Spacer()
+          Text((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { "当前 " + $0 } ?? "").foregroundStyle(.secondary)
+        }
+      }
+    } footer: { Text("在蓝奏云下载，密码 0874。直接覆盖安装，数据不会丢失。") }
+    Section {
+      Button(role: .destructive) { askWipe = true } label: { Label("清空全部数据", systemImage: "trash") }
+    }
+    Section {
+      VStack(spacing: 6) {
+        Text("账号星图").font(.system(size: 15, weight: .semibold))
+        Text("不保存任何密码 · 数据只在本机和你自己的私有 Gist").font(.system(size: 12)).foregroundStyle(.secondary)
+      }.frame(maxWidth: .infinity)
+    }.listRowBackground(Color.clear)
+  }
+
+  private func importFlow<V: View>(_ v: V) -> some View {
+    v
+    .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { r in
+      guard case .success(let url) = r else { return }
+      let ok = url.startAccessingSecurityScopedResource(); defer { if ok { url.stopAccessingSecurityScopedResource() } }
+      guard let d = try? Data(contentsOf: url) else { store.show("这不是账号星图的备份文件"); return }
+      // 2.6: a password-protected backup is opened first, then goes down the same path
+      if BackupCrypto.isEnvelope(d) { encImport = d; encPass = ""; encError = ""; askPass = true; return }
+      importPlain(d)
+    }
+    .alert("加密的备份", isPresented: $askPass) {
+      SecureField("备份密码", text: $encPass)
+      Button("解锁") { openEncrypted() }
+      Button("取消", role: .cancel) { encImport = nil; encPass = "" }
+    } message: { Text(encError.isEmpty ? "这份备份设置了密码，输入导出时设的密码。" : encError) }
+  }
+  private func dataDialogs<V: View>(_ v: V) -> some View {
+    v
+    .confirmationDialog("清空全部数据？", isPresented: $askWipe, titleVisibility: .visible) {
+      Button("清空全部数据", role: .destructive) {
+        store.saveRestorePoint("wipe")
+        store.mutate("已清空") { s in s.identities = []; s.accounts = [] }
+        store.setKind(store.kind); dismiss()
+      }
+    } message: { Text(sync.on ? "所有邮箱、手机号和网站记录都会删除，开了同步的其他设备也会一起清空。建议先导出备份。" : "所有邮箱、手机号和网站记录都会从这台设备上删除。建议先导出备份。") }
+    .alert("导入备份？", isPresented: Binding(get: { pendingImport != nil }, set: { if !$0 { pendingImport = nil } })) {
+      Button("导入") { if let d = pendingImport, store.importBackup(d) { dismiss() }; pendingImport = nil }
+      Button("取消", role: .cancel) { pendingImport = nil }
+    } message: { Text("导入会替换现在的 \(store.data.identities.count) 个身份和 \(store.data.accounts.count) 个网站与 App。替换前的数据会先存一份，可以在设置里恢复。") }
+    .alert("载入示例数据？", isPresented: $askDemo) {
+      Button("载入") { store.loadDemo(); dismiss() }
+      Button("取消", role: .cancel) {}
+    } message: { Text("会加入几个虚构的邮箱、手机号和 App，都带示例标记，「清除示例数据」只会删掉它们。") }
+    .alert(store.restoreTitle ?? "恢复数据", isPresented: $askRestore) {
+      Button("恢复") { store.restore(); dismiss() }
+      Button("取消", role: .cancel) {}
+    } message: { Text("会把数据换回那时的样子。现在的数据也会先存一份，可以再换回来。") }
   }
   /// the existing import path: a plain backup (straight from the file, or just decrypted)
   func importPlain(_ d: Data) {
