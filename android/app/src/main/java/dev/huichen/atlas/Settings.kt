@@ -58,6 +58,9 @@ import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Update
+import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -235,11 +238,24 @@ fun SettingsMain(go: (String) -> Unit) {
           }) { askRestore = true }
         }
       }
-      FormGroup(footer = "在蓝奏云下载，密码 0874。直接覆盖安装，数据不会丢失。") {
+      FormGroup(footer = "在蓝奏云下载，密码 0874。直接覆盖安装，数据不会丢失。自动检查更新每天最多一次，只读取最新版本号，不发送任何数据。") {
         val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() }
         val uri = LocalUriHandler.current
         SettingRow(Icons.Outlined.NewReleases, "下载新版本", trailing = { if (ver != null) T("当前 $ver", 14f, color = pal.secondary) }, chevron = true) {
           runCatching { uri.openUri("https://wwbsj.lanzoup.com/b01i61dn1a") }
+        }
+        // 检查更新
+        Divider()
+        SettingRow(Icons.Outlined.Update, "检查更新", trailing = {
+          (if (Updater.checking) "检查中…" else Updater.status)?.let { T(it, 14f, color = pal.secondary) }
+        }) { Updater.checkNow() }
+        Divider()
+        SettingRow(Icons.Outlined.Autorenew, "自动检查更新", trailing = {
+          Switch(Updater.auto, { Updater.putAuto(it) }, colors = SwitchDefaults.colors(checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
+        }) { Updater.putAuto(!Updater.auto) }
+        Divider()
+        SettingRow(Icons.Outlined.Code, "源代码 / GitHub 仓库", chevron = true) {
+          runCatching { uri.openUri("https://github.com/Ckxkx/account-atlas") }
         }
       }
       FormGroup {

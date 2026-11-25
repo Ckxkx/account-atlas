@@ -45,6 +45,15 @@ git tag v2.2 && git push origin v2.2
 
 `release.yml` 会用这个提交同时构建 APK 和 IPA，生成一个 Release 并标为最新。
 
+## App 内的「发现新版本」（version.json）
+
+iOS / 安卓每天最多一次读取 `https://huichen.dev/account-atlas/version.json`，比已安装的版本新就弹窗（去下载 / 跳过此版本 / 以后再说）。网页版不弹，它随 `sw.js` 自动更新。
+
+- **版本号不用手改**：`release.yml` 发完 Release 后，会把 gh-pages 上的 `version.json` 改成刚发布的版本；`web.yml` 每次部署网页也会按「GitHub 上最新的 Release」重新生成。所以只有 APK / IPA 都已发布的版本才会弹窗。
+- **更新说明**：发版前可以在仓库根目录的 `version.json` 里把 `version` 改成要发的版本、写好 `notes`（3–5 条，每条一句话）；版本号对得上就用它，对不上就自动取 Release 说明里「更新内容」的前 8 条。
+- `url` / `password` / `github`：蓝奏云链接、密码、GitHub Releases，直接改仓库里的 `version.json`，下次部署网页生效。
+- 生成逻辑在 `tools/version-json.mjs`。CI 测试包（安卓版本号 `dev`、iOS `0.0`）不会自动检查，设置里手动点「检查更新」会直接弹窗，方便测试。
+
 ## 提交信息
 
 一行说清改了什么，发版说明直接用它，例如：

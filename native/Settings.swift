@@ -29,6 +29,7 @@ struct SettingsSheet: View {
   var body: some View {
     // split into parts: one long chain was too much for the type checker
     NavigationStack { dataDialogs(importFlow(settingsForm)) }
+      .updateAlert(Updater.shared.manual && !AppLock.shared.blocking)   // the 检查更新 row's answer
   }
   private var settingsForm: some View {
     Form {
@@ -103,7 +104,25 @@ struct SettingsSheet: View {
           Text((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { "当前 " + $0 } ?? "").foregroundStyle(.secondary)
         }
       }
-    } footer: { Text("在蓝奏云下载，密码 0874。直接覆盖安装，数据不会丢失。") }
+      // 检查更新
+      Button { Updater.shared.checkNow(store) } label: {
+        HStack {
+          Label("检查更新", systemImage: "arrow.triangle.2.circlepath")
+          Spacer()
+          if Updater.shared.checking { ProgressView() } else if let t = Updater.shared.status { Text(t).foregroundStyle(.secondary) }
+        }
+      }
+      Toggle(isOn: Binding(get: { Updater.shared.auto }, set: { Updater.shared.setAuto($0) })) { Label("自动检查更新", systemImage: "clock.arrow.circlepath") }
+    } footer: { Text("在蓝奏云下载，密码 0874。直接覆盖安装，数据不会丢失。自动检查更新每天最多一次，只读取最新版本号，不发送任何数据。") }
+    Section {
+      Link(destination: URL(string: "https://github.com/Ckxkx/account-atlas")!) {
+        HStack {
+          Label("源代码 / GitHub 仓库", systemImage: "chevron.left.forwardslash.chevron.right")
+          Spacer()
+          Image(systemName: "arrow.up.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(.tertiary)
+        }
+      }
+    }
     Section {
       Button(role: .destructive) { askWipe = true } label: { Label("清空全部数据", systemImage: "trash") }
     }

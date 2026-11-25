@@ -99,3 +99,26 @@ jobs:
         run: |
           [ -n "$SITE_TOKEN" ] || { echo "no SITE_DISPATCH_TOKEN, skip"; exit 0; }
           curl -fsS -X POST -H "Authorization: Bearer $SITE_TOKEN" -H "Accept: application/vnd.github+json" https://api.github.com/repos/zhc425/zhc425.github.io/dispatches -d '{"event_type":"atlas-release"}'
+      # the apps' 检查更新 reads https://huichen.dev/account-atlas/version.json: point it at the version just published.
+      # Only that one file changes on gh-pages; web.yml writes the same thing on its next deploy (latest release).
+      - name: Update version.json on the website
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R: ${{ github.repository }}
+          V: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          node tools/version-json.mjs "$V" notes.md "$RUNNER_TEMP/version.json"
+          for i in 1 2 3; do
+            rm -rf "$RUNNER_TEMP/pages"
+            git clone -q --depth 1 --branch gh-pages "https://x-access-token:${GH_TOKEN}@github.com/$R.git" "$RUNNER_TEMP/pages" || { echo "no gh-pages branch yet, skip"; exit 0; }
+            cp "$RUNNER_TEMP/version.json" "$RUNNER_TEMP/pages/version.json"
+            cd "$RUNNER_TEMP/pages"
+            git add version.json
+            if git diff --cached --quiet; then echo "version.json already says $V"; exit 0; fi
+            git -c user.name=Ckxkx -c user.email=138646608+Ckxkx@users.noreply.github.com commit -qm "version.json: $V"
+            if git push -q origin HEAD:gh-pages; then echo "version.json -> $V"; exit 0; fi
+            cd "$GITHUB_WORKSPACE"; sleep 5
+          done
+          echo "::warning::could not update version.json on gh-pages"; exit 1

@@ -95,6 +95,7 @@ class MainActivity : FragmentActivity() {
     Store.init(applicationContext)
     AppLock.init(applicationContext)
     AppLock.applyRecents(this)
+    Updater.init(applicationContext)
     if (intent?.hasExtra("atlasRoute") == true || intent?.hasExtra("atlasTab") == true) Store.seedDemo()
     IconCache.prewarm(applicationContext)
     Sync.init()
@@ -115,7 +116,7 @@ class MainActivity : FragmentActivity() {
     enableEdgeToEdge(SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
     setContent { AtlasRoot(startTab) }
   }
-  override fun onResume() { super.onResume(); AppLock.onResume(); Sync.runNow(); Store.checkClipboard(applicationContext) }
+  override fun onResume() { super.onResume(); AppLock.onResume(); Sync.runNow(); Store.checkClipboard(applicationContext); Updater.maybeCheck() }
   // 2.6: with the 应用锁 on, the screen is covered as soon as the app leaves the front (app switcher)
   override fun onPause() { AppLock.onPause(); super.onPause() }
   // 2.5: values shown with the eye are masked again whenever the app leaves the screen
@@ -168,6 +169,8 @@ fun AtlasRoot(startTab: Int) {
             confirmButton = { androidx.compose.material3.TextButton({ Store.mergeDuplicates() }) { Text("合并") } },
             dismissButton = { androidx.compose.material3.TextButton({ Store.declineMerge() }) { Text("暂不") } })
         }
+        // 检查更新: waits while the lock screen / 操作演示 is up
+        UpdateDialog()
         // 2.6 应用锁: the lock screen / app-switcher cover goes over everything (sheets and toasts included)
         LockOverlay()
         BackHandler(enabled = AppLock.blocking) { (view.context as? android.app.Activity)?.moveTaskToBack(true) }

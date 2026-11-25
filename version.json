@@ -1,0 +1,13 @@
+{
+  "version": "2.6",
+  "notes": [
+    "登录方式重做：App 和身份直接关联，Apple ID 归到对应的邮箱或手机号",
+    "应用锁：面容 / 指纹 / 锁屏密码解锁；导出备份可以加密码",
+    "新增分享我的星图、操作演示，QQ / 微信可以绑定多个手机号或邮箱",
+    "账号默认打码，卡片上的眼睛可以临时显示",
+    "应用内检查更新，可在设置里关闭"
+  ],
+  "url": "https://wwbsj.lanzoup.com/b01i61dn1a",
+  "password": "0874",
+  "github": "https://github.com/Ckxkx/account-atlas/releases/latest"
+}

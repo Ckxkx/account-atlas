@@ -29,10 +29,12 @@ struct AtlasApp: App {
           let s = sync
           store.onSaved = { [weak s] in s?.schedule() }
           Task { await sync.run() }
+          // 检查更新: once a day at most; the alert waits for the lock screen / 操作演示 (RootView)
+          DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Updater.shared.maybeCheck() }
         }
         .onChange(of: phase) { _, p in
           AppLock.shared.scenePhase(p)
-          if p == .active { Task { await sync.run() } }
+          if p == .active { Task { await sync.run() }; Updater.shared.maybeCheck() }
           // 2.5: values shown with the eye are masked again whenever the app leaves the screen
           if p != .active { store.remask() }
         }
@@ -44,6 +46,7 @@ struct RootView: View {
   @Environment(Store.self) var store
   @State private var tab = 0
   @State private var dir: CGFloat = 1
+  private var updateOK: Bool { store.route == nil && store.tourStep == nil && store.mergeAsk == 0 && !AppLock.shared.blocking }
 
   var body: some View {
     TabView(selection: Binding(get: { tab }, set: { t in dir = t >= tab ? 1 : -1; tab = t })) {
@@ -74,6 +77,8 @@ struct RootView: View {
       Button("合并") { store.mergeDuplicates() }
       Button("暂不", role: .cancel) { store.declineMerge() }
     } message: { Text("发现 \(store.mergeAsk) 个重复的身份，合并后关系图更清晰，数据不会丢。") }
+    // 检查更新: never over the lock screen, the 操作演示, a sheet or the merge question
+    .updateAlert(updateOK)
     .onAppear {
       // launch arguments used by the CI preview screenshots
       let d = UserDefaults.standard

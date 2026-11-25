@@ -1,5 +1,5 @@
 // 账号星图 offline shell. HTML: network first (3 s), then cache. Same-origin assets: cache first, refreshed in background.
-const CACHE = 'atlas-v23';
+const CACHE = 'atlas-v24';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.png', './icon-512.png', './logo.svg'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -7,6 +7,8 @@ const put = (req, res) => { if (res && res.ok) { const c = res.clone(); caches.o
 self.addEventListener('fetch', e => {
   const r = e.request, u = new URL(r.url);
   if (r.method !== 'GET' || u.origin !== location.origin) return;   // GitHub sync & favicon proxies go straight to network
+  // version.json (read by the iOS / Android apps' 检查更新) is never cached: always the network, no HTTP cache either
+  if (u.pathname.endsWith('/version.json')) { e.respondWith(fetch(r, { cache: 'no-store' })); return; }
   if (r.mode === 'navigate') {
     e.respondWith(new Promise(res => {
       let done = false;

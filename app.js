@@ -1700,6 +1700,7 @@
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
       if (d.act === 'download') window.open('https://wwbsj.lanzoup.com/b01i61dn1a', '_blank', 'noopener');
+      if (d.act === 'repo') window.open('https://github.com/Ckxkx/account-atlas', '_blank', 'noopener');
       if (d.act === 'demo') askDemo();
       if (d.act === 'tour') Tour.start(false);
       if (d.act === 'share') shareSheet();
