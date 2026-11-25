@@ -53,22 +53,42 @@ struct UpdateInfo: Equatable {
   }
 }
 
-/// 检查更新 (on by default, 设置 → 自动检查更新). When the app comes to the front, at most once a day, a
+/// what the 软件更新 page shows
+enum UpdateScreen: Equatable {
+  case checking, failed
+  /// up to date: the notes only when version.json is about this very version
+  case latest([String])
+  /// a newer version (a skipped one too: the page always shows it)
+  case newer(UpdateInfo)
+  /// CI test build: the latest release, whatever its number
+  case testBuild(UpdateInfo)
+  static func of(_ info: UpdateInfo?, installed: String) -> UpdateScreen {
+    guard let info else { return .failed }
+    if !VersionCmp.isRelease(installed) { return .testBuild(info) }
+    if VersionCmp.isNewer(info.version, than: installed) { return .newer(info) }
+    return .latest(VersionCmp.compare(info.version, installed) == 0 ? info.notes : [])
+  }
+}
+
+/// 检查更新 (on by default, 设置 → 软件更新 → 自动检查更新). When the app comes to the front, at most once a day, a
 /// plain GET of a static file on the website (no account data, no ids, no cookies). A newer version shows
-/// one alert: 去下载 / 跳过此版本 / 以后再说 (again the next day). Errors and 404 are ignored. The alert
-/// waits while the 应用锁, the 操作演示 or a sheet is up (see RootView).
+/// one alert: 去下载 / 跳过此版本 / 以后再说 (again the next day). Errors and 404 are ignored and don't count as the
+/// day's check, so the next launch tries again. The alert waits while the 应用锁, the 操作演示 or a sheet is up
+/// (see RootView). 设置 → 软件更新 (SoftwareUpdateView) asks every time it opens and shows the answer on the page.
 @MainActor @Observable final class Updater {
   static let shared = Updater()
   private let d = UserDefaults.standard
   private(set) var auto: Bool = UserDefaults.standard.object(forKey: "atlas.updateCheck") as? Bool ?? true
   var pending: UpdateInfo? = nil
-  /// the pending one came from the 检查更新 row: shown by the settings sheet
-  private(set) var manual = false
   private(set) var checking = false
-  private(set) var status: String? = nil
+  /// what the 软件更新 page shows
+  private(set) var screen: UpdateScreen = .checking
+  private var pageRun = 0
   let installed: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
 
   func setAuto(_ v: Bool) { auto = v; d.set(v, forKey: "atlas.updateCheck") }
+  /// only a readable version.json counts as the day's check
+  private func record(_ info: UpdateInfo?) { if info != nil { d.set(Date().timeIntervalSince1970, forKey: "atlas.updateLast") } }
 
   func maybeCheck() {
     guard auto, !checking, pending == nil, VersionCmp.isRelease(installed) else { return }
@@ -79,23 +99,21 @@ struct UpdateInfo: Equatable {
     Task {
       let info = await Self.fetch()
       checking = false
-      guard let info else { return }   // offline / 404 / bad file: quietly try again next time
-      d.set(Date().timeIntervalSince1970, forKey: "atlas.updateLast")
-      if VersionCmp.isNewer(info.version, than: installed) && d.string(forKey: "atlas.updateSkip") != info.version { manual = false; pending = info }
+      record(info)   // offline / 404 / bad file: not recorded, so the next launch tries again
+      guard let info else { return }
+      if VersionCmp.isNewer(info.version, than: installed) && d.string(forKey: "atlas.updateSkip") != info.version { pending = info }
     }
   }
 
-  /// the 检查更新 row: always asks, and shows the alert even for a skipped version
-  func checkNow(_ store: Store) {
-    guard !checking else { return }
-    checking = true; status = nil
+  /// the 软件更新 page: asks every time it opens (and on 重试); a skipped version is shown anyway
+  func checkPage() {
+    pageRun += 1
+    let run = pageRun
+    screen = .checking
     Task {
       let info = await Self.fetch()
-      checking = false
-      guard let info else { store.show("检查失败，请稍后再试"); return }
-      d.set(Date().timeIntervalSince1970, forKey: "atlas.updateLast")
-      if VersionCmp.isNewer(info.version, than: installed) || !VersionCmp.isRelease(installed) { manual = true; pending = info }
-      else { status = "已是最新版本"; store.show("已是最新版本") }
+      record(info)
+      if run == pageRun { screen = UpdateScreen.of(info, installed: installed) }
     }
   }
 
@@ -103,9 +121,10 @@ struct UpdateInfo: Equatable {
   func skip(_ p: UpdateInfo) { d.set(p.version, forKey: "atlas.updateSkip"); pending = nil }
   /// 以后再说: the check ran today, so the next one (and the alert) comes after a day
   func later() { pending = nil }
+  /// 去下载: copies the 蓝奏云 password and opens the download page
   func download(_ p: UpdateInfo) {
     if !p.password.isEmpty { UIPasteboard.general.string = p.password }
-    pending = nil
+    if pending?.version == p.version { pending = nil }
     if let u = URL(string: p.url) { UIApplication.shared.open(u) }
   }
 
@@ -115,7 +134,6 @@ struct UpdateInfo: Equatable {
     var s = p.notes.map { "• " + $0 }.joined(separator: "\n")
     if !s.isEmpty { s += "\n\n" }
     s += p.password.isEmpty ? "在蓝奏云下载，直接覆盖安装，数据不会丢失。" : "蓝奏云密码 \(p.password)，点「去下载」会自动复制。"
-    if !VersionCmp.isRelease(installed) { s += "\n\n（当前是测试版）" }
     return s
   }
 
@@ -145,5 +163,101 @@ extension View {
       Button("跳过此版本") { if let p { u.skip(p) } }
       Button("以后再说", role: .cancel) { u.later() }
     } message: { Text(u.message) }
+  }
+}
+
+// MARK: 设置 → 软件更新 (like iOS 设置 → 通用 → 软件更新). Small subviews: one big body is too much for the type checker.
+
+struct SoftwareUpdateView: View {
+  var body: some View {
+    let u = Updater.shared
+    List {
+      Section { UpdateHeader(installed: u.installed) }.listRowBackground(Color.clear)
+      UpdateStatusSections(screen: u.screen)
+      Section {
+        Toggle(isOn: Binding(get: { Updater.shared.auto }, set: { Updater.shared.setAuto($0) })) { Label("自动检查更新", systemImage: "clock.arrow.circlepath") }
+      } footer: { Text("每天最多检查一次，只读取最新版本号，不发送任何数据。") }
+    }
+    .navigationTitle("软件更新").navigationBarTitleDisplayMode(.inline)
+    .onAppear { Updater.shared.checkPage() }
+  }
+}
+
+private struct UpdateHeader: View {
+  let installed: String
+  var body: some View {
+    VStack(spacing: 0) {
+      Image(uiImage: UIImage(named: "AppIcon60x60") ?? UIImage(systemName: "app.fill")!)
+        .resizable().frame(width: 76, height: 76).clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+      Text("账号星图").font(.system(size: 20, weight: .semibold)).padding(.top, 12)
+      Text("当前版本 " + (VersionCmp.isRelease(installed) ? installed : "测试版")).font(.system(size: 14)).foregroundStyle(.secondary).padding(.top, 4)
+    }
+    .frame(maxWidth: .infinity)
+  }
+}
+
+private struct UpdateStatusSections: View {
+  let screen: UpdateScreen
+  var body: some View {
+    switch screen {
+    case .checking:
+      Section {
+        HStack(spacing: 10) { ProgressView(); Text("正在检查更新…").foregroundStyle(.secondary) }.frame(maxWidth: .infinity)
+      }
+    case .failed:
+      Section {
+        UpdateStatusLine(icon: "exclamationmark.triangle.fill", tint: .orange, text: "检查失败，请稍后再试")
+        Button("重试") { Updater.shared.checkPage() }
+      }
+    case .latest(let notes):
+      Section { UpdateStatusLine(icon: "checkmark.circle.fill", tint: .green, text: "已是最新版本") }
+      if !notes.isEmpty { UpdateNotesSection(notes: notes) }
+    case .newer(let info):
+      UpdateNewVersion(info: info, title: "发现新版本 \(info.version)")
+    case .testBuild(let info):
+      UpdateNewVersion(info: info, title: "最新版本 \(info.version)")
+    }
+  }
+}
+
+private struct UpdateStatusLine: View {
+  let icon: String, tint: Color, text: String
+  var body: some View {
+    Label { Text(text).font(.system(size: 16, weight: .semibold)) } icon: { Image(systemName: icon).foregroundStyle(tint) }
+  }
+}
+
+private struct UpdateNotesSection: View {
+  let notes: [String]
+  var body: some View {
+    Section("更新日志") {
+      VStack(alignment: .leading, spacing: 6) {
+        ForEach(Array(notes.enumerated()), id: \.offset) { e in
+          HStack(alignment: .firstTextBaseline, spacing: 8) { Text("•").foregroundStyle(.secondary); Text(e.element) }
+        }
+      }.padding(.vertical, 4)
+    }
+  }
+}
+
+private struct UpdateNewVersion: View {
+  let info: UpdateInfo, title: String
+  @State private var copied = false
+  var body: some View {
+    Section { UpdateStatusLine(icon: "arrow.down.circle.fill", tint: .accentColor, text: title) }
+    if !info.notes.isEmpty { UpdateNotesSection(notes: info.notes) }
+    Section {
+      Button { Updater.shared.download(info); copied = !info.password.isEmpty } label: {
+        Text("去下载").font(.system(size: 17, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 50)
+          .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous)).foregroundStyle(.white)
+      }
+      .buttonStyle(.plain)
+      .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+    } footer: { Text(hint) }
+  }
+  private var hint: String {
+    if info.password.isEmpty { return "在蓝奏云下载，直接覆盖安装，数据不会丢失。" }
+    return copied ? "已复制蓝奏云密码 \(info.password)，在下载页粘贴即可。直接覆盖安装，数据不会丢失。"
+      : "蓝奏云密码 \(info.password)，点「去下载」会自动复制。直接覆盖安装，数据不会丢失。"
   }
 }

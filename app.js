@@ -1818,8 +1818,11 @@
       const box = $('#mapBox'); if (!box) return;
       const n = state.accounts.length, multi = state.accounts.filter(a => a.identityIds.length > 1).length;
       $('#graphSummary').textContent = n ? `${state.identities.length} 个身份，${n} 个网站与 App` + (multi ? `，${multi} 个绑了不止一个` : '') : '';
-      if (!state.identities.length || !n) { box.innerHTML = `<div class="empty"><h3>还没有可以连线的</h3><p>添加一个邮箱或手机号，再给它记几个网站，这里就会连起来。</p><button class="btn-filled" data-new="${state.identities.length ? 'account' : 'identity'}">${state.identities.length ? '添加网站或 App' : '添加邮箱或手机号'}</button></div>`; return; }
+      if (!state.identities.length || !n) { sel = null; box.classList.remove('focus'); box.innerHTML = `<div class="empty"><h3>还没有可以连线的</h3><p>添加一个邮箱或手机号，再给它记几个网站，这里就会连起来。</p><button class="btn-filled" data-new="${state.identities.length ? 'account' : 'identity'}">${state.identities.length ? '添加网站或 App' : '添加邮箱或手机号'}</button></div>`; return; }
       const { apps, ay, pos, H, brk } = layout();
+      // the focus never outlives its node: a delete (from this map's detail sheet or anywhere else) used to keep
+      // it on the gone id, so every card and thread stayed dimmed until a reload. A duplicate moves to its node.
+      if (sel && !members.has(sel)) sel = [...members].find(([, g]) => g.includes(sel))?.[0] || null;
       const W = box.clientWidth || 350, L = Math.min(150, Math.round(W * .38)), R = L + Math.max(56, Math.round(W * .17));
       const paths = [];
       for (const p of pos) for (const a of nodeAccs(p.ids)) {

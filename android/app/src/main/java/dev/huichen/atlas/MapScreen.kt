@@ -32,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -64,18 +65,14 @@ fun MapScreen() {
   LaunchedEffect(focus) { if (focus != null) hap(TICK) }
 
   val all = Store.data.identities
-  // groups: 邮箱, 手机号, 登录 (anything unknown goes last, with the logins)
-  val ordered = all.filter { it.type == "email" } + all.filter { it.type == "phone" } + all.filter { it.type != "email" && it.type != "phone" }
-  // one node per distinct email / phone (and 微信 / QQ), even when duplicates weren't merged
-  val members = LinkedHashMap<String, MutableList<String>>(); val keyNode = HashMap<String, String>()
-  for (i in ordered) { val k = idKey(i) ?: i.id; val n = keyNode[k]; if (n != null) members[n]!!.add(i.id) else { keyNode[k] = i.id; members[i.id] = mutableListOf(i.id) } }
-  val ids = ordered.filter { it.id in members }
-  val rank = HashMap<String, Int>().apply { ids.forEachIndexed { k, i -> members[i.id]!!.forEach { put(it, k) } } }
-  fun inNode(a: Account, n: String) = a.identityIds.any { it in (members[n] ?: listOf(n)) }
-  val apps = Store.data.accounts.sortedWith(Comparator { x, y ->
-    val a = x.identityIds.mapNotNull { rank[it] }.minOrNull() ?: 999; val b = y.identityIds.mapNotNull { rank[it] }.minOrNull() ?: 999
-    if (a != b) a - b else nameOrder.compare(x.name, y.name)
-  })
+  // everything the map draws comes from the data as it is now: a delete (from this map's detail sheet or anywhere
+  // else) drops the node, its threads and the counts in the same frame
+  val model = remember(Store.data) { MapModel(Store.data) }
+  val ids = model.ids; val members = model.members; val apps = model.apps
+  fun inNode(a: Account, n: String) = model.inNode(a, n)
+  // the focus never outlives its node (deleting the focused card used to leave every node dimmed)
+  val f = model.resolve(focus)
+  LaunchedEffect(model) { if (focus != f) focus = f }
   val cardH = 64f; val cardGap = 12f; val appH = 46f; val appGap = 8f; val groupGap = 30f
   // a gap (with its title) before each group that is not the first one shown
   val starts = listOf("email", "phone").map { t -> ids.indexOfFirst { it.type == t } } + ids.indexOfFirst { it.type != "email" && it.type != "phone" }
@@ -93,11 +90,11 @@ fun MapScreen() {
       val width = maxWidth.value
       val L = minOf(160f, width * 0.42f); val rx = width - 16f - width * 0.4f
       val t = clock.value
-      val linked = apps.filter { a -> focus?.let { inNode(a, it) } ?: true }.map { it.id }.toSet()
+      val linked = apps.filter { a -> f?.let { inNode(a, it) } ?: true }.map { it.id }.toSet()
       val appIndex = apps.withIndex().associate { it.value.id to it.index }
 
       // threads
-      val focusAlpha = ids.associate { i -> i.id to animateFloatAsState(if (focus == null || focus == i.id) 1f else 0.1f, calm(), label = "f").value }
+      val focusAlpha = ids.associate { i -> i.id to key(i.id) { animateFloatAsState(if (f == null || f == i.id) 1f else 0.1f, calm(), label = "f").value } }
       Canvas(Modifier.fillMaxSize()) {
         val pm = PathMeasure()
         ids.forEachIndexed { k, i ->
@@ -111,8 +108,8 @@ fun MapScreen() {
             val full = Path().thread(Offset((16 + L).dp.toPx(), y0), Offset(rx.dp.toPx(), (appY(j) + appH / 2).dp.toPx()))
             pm.setPath(full, false)
             val seg = Path(); pm.getSegment(0f, pm.length * p, seg, true)
-            val on = focus == null || focus == i.id
-            drawPath(seg, col.copy(alpha = 0.75f * (focusAlpha[i.id] ?: 1f)), style = Stroke((if (on && focus != null) 2f else 1.3f).dp.toPx(), cap = StrokeCap.Round))
+            val on = f == null || f == i.id
+            drawPath(seg, col.copy(alpha = 0.75f * (focusAlpha[i.id] ?: 1f)), style = Stroke((if (on && f != null) 2f else 1.3f).dp.toPx(), cap = StrokeCap.Round))
           }
         }
       }
@@ -122,15 +119,16 @@ fun MapScreen() {
         if (k >= 0) T(name, 12f, FontWeight.SemiBold, pal.secondary, Modifier.offset(18.dp, (idY(k) - 22).dp))
       }
 
-      ids.forEachIndexed { k, i ->
+      // keyed by id: a node's animation / press state stays with that node when one above it is deleted
+      ids.forEachIndexed { k, i -> key(i.id) {
         val p = ease((t - k * 0.05f) / 0.5f)
-        val sel by animateFloatAsState(if (focus == i.id) 1.04f else 1f, calm(), label = "sel")
-        val dim by animateFloatAsState(if (focus == null || focus == i.id) 1f else 0.4f, calm(), label = "dim")
+        val sel by animateFloatAsState(if (f == i.id) 1.04f else 1f, calm(), label = "sel")
+        val dim by animateFloatAsState(if (f == null || f == i.id) 1f else 0.4f, calm(), label = "dim")
         Box(Modifier.offset((16 - 26 * (1 - p)).dp, idY(k).dp).graphicsLayer {
           alpha = p * dim; val s = (0.92f + 0.08f * p) * sel; scaleX = s; scaleY = s
-        }.press { if (focus == i.id) Store.push(Route.IdentityR(i.id)) else focus = i.id }) { MiniCard(i, L.dp, cardH.dp, members[i.id] ?: listOf(i.id)) }
-      }
-      apps.forEachIndexed { j, a ->
+        }.press { if (f == i.id) Store.push(Route.IdentityR(i.id)) else focus = i.id }) { MiniCard(i, L.dp, cardH.dp, members[i.id] ?: listOf(i.id)) }
+      } }
+      apps.forEachIndexed { j, a -> key(a.id) {
         val p = ease((t - (0.1f + j * 0.02f)) / 0.5f)
         val dim by animateFloatAsState(if (a.id in linked) 1f else 0.3f, calm(), label = "adim")
         Row(Modifier.offset((rx + 18 * (1 - p)).dp, appY(j).dp).graphicsLayer { alpha = p * dim }
@@ -140,7 +138,7 @@ fun MapScreen() {
           AppIcon(a, 30.dp); Spacer(Modifier.width(8.dp))
           T(a.handle?.let { Store.handleText(it) } ?: a.name, 13f, FontWeight.Medium, lines = 1)
         }
-      }
+      } }
     }
   }
 }

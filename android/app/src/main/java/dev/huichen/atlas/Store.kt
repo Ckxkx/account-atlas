@@ -149,6 +149,18 @@ object Store {
   fun push(r: Route) { routes = routes + Entry(nextKey++, r) }
   fun pop() { routes = routes.dropLast(1) }
   fun popAll() { routes = emptyList() }
+  /** after a delete: closes every sheet that shows or edits the deleted item, not just the top one */
+  fun dropRoutes(id: String) {
+    routes = routes.filterNot { e -> when (val r = e.route) {
+      is Route.IdentityR -> r.id == id
+      is Route.AccountR -> r.id == id
+      is Route.EditIdentity -> r.id == id
+      is Route.EditAccount -> r.id == id
+      is Route.Picker -> r.preset == id
+      is Route.NewIdentity -> r.via == id
+      else -> false
+    } }
+  }
 
   val deck: List<Identity> get() = data.identities.filter { it.type == kind }
   val active: Identity? get() = deck.firstOrNull { it.id == activeID } ?: if (activeID == "add") null else deck.firstOrNull()

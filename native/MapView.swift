@@ -39,6 +39,11 @@ struct MapView: View {
       .background(Glow().ignoresSafeArea())
       .sensoryFeedback(.selection, trigger: focus)
     }
+    // a delete (from this map's detail sheet or anywhere else): drop a focus whose node is gone
+    .onChange(of: store.data.identities.map(\.id)) { _, _ in
+      let f = MapLayout(store.index, cardH: cardH, cardGap: cardGap, appH: appH, appGap: appGap, groupGap: groupGap).resolve(focus)
+      if f != focus { focus = f }
+    }
     .onAppear { visible = tab == 2; if tab == 2 && !drawn { play() } }
     .onChange(of: store.demoFocus) { _, f in
       withAnimation(Motion.smooth) { focus = f == "none" ? nil : f }
@@ -55,7 +60,9 @@ struct MapView: View {
 
   func content(_ m: MapLayout, width: CGFloat) -> some View {
     let L = min(160, width * 0.42), rx = width - 16 - (width * 0.4)
-    let linked: Set<String> = focus.map { f in let g = Set(m.members[f] ?? [f]); return Set(m.apps.filter { $0.identityIds.contains(where: { g.contains($0) }) }.map(\.id)) } ?? Set(m.apps.map(\.id))
+    // the focus as it applies to the map now: never a node that was deleted (that used to leave every node dimmed)
+    let cur = m.resolve(focus)
+    let linked: Set<String> = cur.map { f in let g = Set(m.members[f] ?? [f]); return Set(m.apps.filter { $0.identityIds.contains(where: { g.contains($0) }) }.map(\.id)) } ?? Set(m.apps.map(\.id))
     var threads: [ThreadSpec] = []
     for k in m.ids.indices {
       let i = m.ids[k]
@@ -71,7 +78,7 @@ struct MapView: View {
     return ZStack(alignment: .topLeading) {
       // all threads are CAShapeLayers animated by the render server: the draw-in costs the main
       // thread nothing, so it can't stutter the tab switch it plays during
-      MapThreadsLayer(threads: threads, drawn: drawn, focus: focus)
+      MapThreadsLayer(threads: threads, drawn: drawn, focus: cur)
         .frame(width: width, height: m.height)
         .allowsHitTesting(false)
 
@@ -84,12 +91,12 @@ struct MapView: View {
         let k = e.offset, i = e.element
         Button {
           withAnimation(Motion.smooth) {
-            if focus == i.id { store.route = .identity(i.id) } else { focus = i.id }
+            if cur == i.id { store.route = .identity(i.id) } else { focus = i.id }
           }
         } label: { mini(i, members: m.members[i.id] ?? [i.id], width: L) }
           .buttonStyle(PressStyle())
-          .opacity(drawn ? (focus == nil || focus == i.id ? 1 : 0.4) : 0)
-          .scaleEffect(focus == i.id ? 1.04 : drawn ? 1 : 0.92)
+          .opacity(drawn ? (cur == nil || cur == i.id ? 1 : 0.4) : 0)
+          .scaleEffect(cur == i.id ? 1.04 : drawn ? 1 : 0.92)
           .offset(x: drawn ? 16 : -10, y: m.idY[k])
           .animation(Animation.spring(duration: 0.5, bounce: 0).delay(drawn ? Double(k) * 0.05 : 0), value: drawn)
       }
@@ -180,6 +187,13 @@ struct MapLayout {
     for j in apps.indices { ay.append(CGFloat(j) * (appH + appGap) + 22) }
     self.ids = ids; self.members = members; self.apps = apps; self.idY = iy; self.appY = ay
     height = max((iy.last ?? 22) + cardH, (ay.last ?? 22) + appH) + 10
+  }
+  /// the focused node after a change: kept while it is a node; an identity that now sits inside another node
+  /// (a duplicate) moves to that node; anything deleted means no focus
+  func resolve(_ focus: String?) -> String? {
+    guard let f = focus else { return nil }
+    if members[f] != nil { return f }
+    return ids.first { members[$0.id]?.contains(f) == true }?.id
   }
 }
 

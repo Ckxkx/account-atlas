@@ -153,9 +153,9 @@ fun IdentityDetail(id: String) {
     }
   }
   if (askDelete) Confirm("删除 ${Store.title(i)}？", if (accs.isEmpty()) "删除后可以撤销。" else "它会从 ${accs.size} 个网站与 App 的记录里移除，这些网站本身会保留。", "删除", { askDelete = false }) {
-    Store.mutate("已删除") { s -> s.copy(identities = s.identities.filter { it.id != i.id }.map { if (i.id in it.bindIds) it.withBinds(it.bindIds - i.id) else it }, accounts = s.accounts.map { a -> a.copy(identityIds = a.identityIds.filter { it != i.id }) }) }
+    Store.mutate("已删除") { s -> s.withoutIdentity(i.id) }
     Store.setKind(Store.kind)
-    Store.pop()
+    Store.dropRoutes(i.id)   // this sheet and any other sheet still open on it (e.g. 关系图 → App → back to it)
   }
 }
 
@@ -232,8 +232,8 @@ fun AccountDetail(id: String) {
     },
     confirmButton = {}, dismissButton = { TextButton({ chooser = false }) { Text("取消") } })
   if (askDelete) Confirm("删除 ${a.name}？", "只删除这条记录，不影响你在那个网站上的账号。", "删除", { askDelete = false }) {
-    Store.mutate("已删除") { s -> s.copy(accounts = s.accounts.filter { it.id != a.id }) }
-    Store.pop()
+    Store.mutate("已删除") { s -> s.withoutAccount(a.id) }
+    Store.dropRoutes(a.id)
   }
 }
 

@@ -47,12 +47,14 @@ git tag v2.2 && git push origin v2.2
 
 ## App 内的「发现新版本」（version.json）
 
-iOS / 安卓每天最多一次读取 `https://huichen.dev/account-atlas/version.json`，比已安装的版本新就弹窗（去下载 / 跳过此版本 / 以后再说）。网页版不弹，它随 `sw.js` 自动更新。
+iOS / 安卓每天最多一次读取 `https://huichen.dev/account-atlas/version.json`，比已安装的版本新就弹窗（去下载 / 跳过此版本 / 以后再说）。只有读到了文件才算当天检查过，断网 / 404 / 格式不对时下次启动会再试。网页版不弹，它随 `sw.js` 自动更新。
+
+设置 → **软件更新**（iOS / 安卓）：打开就检查，显示当前版本、最新版本的更新日志和「去下载」（打开蓝奏云并复制密码），已跳过的版本在这里照样显示；「自动检查更新」开关也在这一页。
 
 - **版本号不用手改**：`release.yml` 发完 Release 后，会把 gh-pages 上的 `version.json` 改成刚发布的版本；`web.yml` 每次部署网页也会按「GitHub 上最新的 Release」重新生成。所以只有 APK / IPA 都已发布的版本才会弹窗。
 - **更新说明**：发版前可以在仓库根目录的 `version.json` 里把 `version` 改成要发的版本、写好 `notes`（3–5 条，每条一句话）；版本号对得上就用它，对不上就自动取 Release 说明里「更新内容」的前 8 条。
 - `url` / `password` / `github`：蓝奏云链接、密码、GitHub Releases，直接改仓库里的 `version.json`，下次部署网页生效。
-- 生成逻辑在 `tools/version-json.mjs`。CI 测试包（安卓版本号 `dev`、iOS `0.0`）不会自动检查，设置里手动点「检查更新」会直接弹窗，方便测试。
+- 生成逻辑在 `tools/version-json.mjs`。CI 测试包（安卓版本号 `dev`、iOS `0.0`）不会自动检查；「软件更新」页把当前版本显示为「测试版」，并照样显示最新版本，方便测试。
 
 ## 提交信息
 
