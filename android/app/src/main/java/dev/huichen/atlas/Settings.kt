@@ -257,7 +257,7 @@ fun SettingsMain(go: (String) -> Unit) {
       }
       Column(Modifier.fillMaxWidth().padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         T("账号星图", 15f, FontWeight.SemiBold)
-        T("不保存任何密码 · 数据只在本机和你自己的私有 Gist", 12f, color = pal.secondary, modifier = Modifier.padding(top = 6.dp), align = TextAlign.Center)
+        T("不保存任何密码 · 数据只在本机和你自己的私有 Gist / WebDAV", 12f, color = pal.secondary, modifier = Modifier.padding(top = 6.dp), align = TextAlign.Center)
       }
     }
   }
@@ -407,6 +407,8 @@ fun SyncPage(back: () -> Unit) {
   var prov by remember { mutableStateOf("gitee") }
   var token by remember { mutableStateOf("") }
   var pass by remember { mutableStateOf("") }
+  var davUrl by remember { mutableStateOf(Sync.DAV_PRESET) }
+  var davUser by remember { mutableStateOf("") }
   var busy by remember { mutableStateOf(false) }
   var error by remember { mutableStateOf("") }
   var askOff by remember { mutableStateOf(false) }
@@ -423,7 +425,7 @@ fun SyncPage(back: () -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column {
               T(if (Sync.state == "error") Sync.err else if (Sync.state == "syncing") "正在同步…" else "已开启加密同步", 16f, FontWeight.SemiBold)
-              T("存放在 " + (if (Sync.provider == "gitee") "Gitee" else "GitHub") + " 私有 Gist" +
+              T("存放在 " + Sync.place +
                 (if (Sync.at > 0) " · " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA).format(java.util.Date(Sync.at.toLong())) else ""), 13f, color = pal.secondary)
             }
           }
@@ -434,13 +436,26 @@ fun SyncPage(back: () -> Unit) {
           SettingRow(null, "关闭同步", color = pal.red) { askOff = true }
         }
       } else {
-        FormGroup("存放在") {
-          listOf("gitee" to "Gitee · 国内直连", "github" to "GitHub").forEachIndexed { k, (v, n) ->
+        FormGroup("同步方式") {
+          listOf("gitee" to "Gitee · 国内直连", "github" to "GitHub Gist", "webdav" to "WebDAV · 坚果云等").forEachIndexed { k, (v, n) ->
             if (k > 0) Divider()
-            SettingRow(null, n, trailing = { if (prov == v) Icon(Icons.Outlined.CheckCircle, null, tint = pal.accent) }) { prov = v }
+            SettingRow(null, n, trailing = { if (prov == v) Icon(Icons.Outlined.CheckCircle, null, tint = pal.accent) }) { prov = v; error = "" }
           }
         }
-        FormGroup(footer = "数据先用同步密码加密，再存进你自己的私有 Gist，别人看不到内容。每台设备填同一个令牌和同步密码即可。同步密码忘了就解不开。") {
+        if (prov == "webdav") FormGroup(footer = "坚果云要用「第三方应用密码」，不是登录密码：网页版 账户信息 › 安全选项，或坚果云 App 设置 › 第三方应用管理 里添加。" +
+          "数据先用同步密码加密，再存到服务器的 AccountAtlas/atlas.enc.json，别人看不到内容。每台设备填同样的账号、应用密码和同步密码即可。同步密码忘了就解不开。") {
+          PlainField(davUrl, { davUrl = it }, "服务器地址", KeyboardType.Uri)
+          Divider()
+          PlainField(davUser, { davUser = it }, "账号（坚果云填登录邮箱）", KeyboardType.Email)
+          Divider()
+          SecretField(token, { token = it }, "应用密码")
+          Divider()
+          SecretField(pass, { pass = it }, "同步密码")
+          if ("jianguoyun" in davUrl) {
+            Divider()
+            SettingRow(null, "怎么获取坚果云应用密码", color = pal.accent) { uri.openUri("https://help.jianguoyun.com/?p=2064") }
+          }
+        } else FormGroup(footer = "数据先用同步密码加密，再存进你自己的私有 Gist，别人看不到内容。每台设备填同一个令牌和同步密码即可。同步密码忘了就解不开。") {
           SecretField(token, { token = it }, if (prov == "gitee") "Gitee 私人令牌（勾选 gists）" else "GitHub 令牌（gist 权限）")
           Divider()
           SecretField(pass, { pass = it }, "同步密码")
@@ -451,12 +466,12 @@ fun SyncPage(back: () -> Unit) {
         }
         if (error.isNotEmpty()) FormGroup { T(error, 15f, color = pal.red, modifier = Modifier.padding(16.dp)) }
         FormGroup {
-          val ok = !busy && token.isNotBlank() && pass.length >= 4
+          val ok = !busy && token.isNotBlank() && pass.length >= 4 && (prov != "webdav" || (davUrl.isNotBlank() && davUser.isNotBlank()))
           Box(Modifier.fillMaxWidth().height(50.dp).press(1f, enabled = ok) {
             busy = true; error = ""
             scope.launch {
               try {
-                val found = Sync.enable(token, pass, prov)
+                val found = Sync.enable(token, pass, prov, davUrl, davUser)
                 Store.setKind(Store.kind)
                 Store.show(if (found) "已连接，云端数据已合并" else "同步已开启")
               } catch (e: Exception) { error = e.message ?: "同步失败" }
@@ -471,6 +486,17 @@ fun SyncPage(back: () -> Unit) {
     }
   }
   if (askOff) Confirm("关闭同步？", "关闭后这台设备不再同步，云端和本机的数据都会保留。", "关闭同步", { askOff = false }) { Sync.disable() }
+}
+
+@Composable
+fun PlainField(value: String, onChange: (String) -> Unit, hint: String, keyboard: KeyboardType = KeyboardType.Text) {
+  Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+    if (value.isEmpty()) T(hint, 17f, color = pal.tertiary, lines = 1)
+    androidx.compose.foundation.text.BasicTextField(value, onChange, Modifier.fillMaxWidth(), singleLine = true,
+      textStyle = androidx.compose.ui.text.TextStyle(color = pal.primary, fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp)),
+      cursorBrush = androidx.compose.ui.graphics.SolidColor(pal.accent),
+      keyboardOptions = KeyboardOptions(keyboardType = keyboard, autoCorrectEnabled = false, capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None))
+  }
 }
 
 @Composable

@@ -2062,6 +2062,7 @@
       <div class="sec-title">同步密码</div>
       <div class="group"><div class="field" id="pwField"><input id="sPw" type="password" placeholder="至少 8 位，所有设备填同一个" autocomplete="new-password"></div></div>
       <p class="hint">同步密码不会上传，也没法找回。忘了它，云端数据就打不开了，本机数据不受影响。</p>
+      <p class="hint">iPhone / 安卓 App 还能用 WebDAV（如坚果云）同步；网页版受浏览器跨域限制，只支持 Gist。</p>
     </div>`, { kind: 'form' });
     const PROV = {
       gitee: { title: 'Gitee 私人令牌', ph: '32 位私人令牌', ok: t => /^[0-9a-f]{32}$/i.test(t),

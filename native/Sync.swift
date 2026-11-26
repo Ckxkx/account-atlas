@@ -3,7 +3,10 @@ import CryptoKit
 import CommonCrypto
 import SwiftUI
 
-// Same encrypted file as the web app: PBKDF2-SHA256 (310k) -> AES-GCM, stored in a private gist (Gitee or GitHub).
+// Same encrypted file as the web app: PBKDF2-SHA256 (310k) -> AES-GCM, stored in a private gist (Gitee or GitHub)
+// or, apps only, on a WebDAV server (坚果云 etc.) as <server>/AccountAtlas/atlas.enc.json.
+// WebDAV: provider "webdav", url = server folder (ends with /), user = account, token = 应用密码; gistId stays nil.
+// url / user are optional so configs saved by older builds still decode.
 struct SyncConf: Codable {
   var provider: String?
   var token: String
@@ -11,6 +14,8 @@ struct SyncConf: Codable {
   var key: String
   var gistId: String?
   var at: Double?
+  var url: String? = nil
+  var user: String? = nil
 }
 
 enum SyncError: LocalizedError {
@@ -33,6 +38,16 @@ final class Sync: ObservableObject {
 
   var on: Bool { conf != nil }
   var provider: String { conf?.provider ?? "github" }
+  /// where the file lives, for the status line: 「存放在 …」
+  var place: String {
+    switch provider {
+    case "gitee": return "Gitee 私有 Gist"
+    case "webdav":
+      let h = URL(string: conf?.url ?? "")?.host ?? "WebDAV"
+      return h.contains("jianguoyun") ? "坚果云 WebDAV" : "WebDAV · " + h
+    default: return "GitHub 私有 Gist"
+    }
+  }
 
   init() {
     if let s = UserDefaults.standard.string(forKey: "atlas.sync"), let d = s.data(using: .utf8), let c = try? JSONDecoder().decode(SyncConf.self, from: d) {
@@ -109,6 +124,81 @@ final class Sync: ObservableObject {
     return nil
   }
 
+  // MARK: WebDAV
+  // GET / PUT with HTTP Basic auth; a strong ETag goes back as If-Match so two devices can't overwrite each other.
+  static let DAV_DIR = "AccountAtlas/"
+  static let DAV_PRESET = "https://dav.jianguoyun.com/dav/"
+  private struct Remote { var text: String?; var etag: String? = nil }
+
+  /// normalizes what the user typed: adds https:// when missing, always ends with /
+  static func davBase(_ raw: String) throws -> String {
+    var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if s.isEmpty { throw SyncError.msg("请填写 WebDAV 服务器地址") }
+    if !s.lowercased().hasPrefix("http://") && !s.lowercased().hasPrefix("https://") { s = "https://" + s }
+    if !s.hasSuffix("/") { s += "/" }
+    guard URL(string: s)?.host != nil else { throw SyncError.msg("服务器地址格式不对") }
+    return s
+  }
+  private func dav(_ url: String, method: String = "GET", body: Data? = nil, user: String, pass: String, ifMatch: String? = nil) async throws -> (Data, HTTPURLResponse) {
+    guard let u = URL(string: url) else { throw SyncError.msg("服务器地址格式不对") }
+    var r = URLRequest(url: u)
+    r.httpMethod = method; r.cachePolicy = .reloadIgnoringLocalCacheData; r.timeoutInterval = 20
+    r.setValue("Basic " + Data((user + ":" + pass).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
+    r.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+    if let body { r.httpBody = body; r.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type") }
+    // weak ETags (W/"…") never match If-Match, so only strong ones are sent back
+    if let ifMatch, !ifMatch.hasPrefix("W/") { r.setValue(ifMatch, forHTTPHeaderField: "If-Match") }
+    do {
+      let (data, resp) = try await URLSession.shared.data(for: r)
+      guard let h = resp as? HTTPURLResponse else { throw SyncError.msg("连不上 WebDAV 服务器，检查服务器地址和网络") }
+      return (data, h)
+    } catch let e as SyncError { throw e }
+    catch { throw SyncError.msg("连不上 WebDAV 服务器，检查服务器地址和网络") }
+  }
+  private static func davFail(_ code: Int) -> SyncError {
+    switch code {
+    case 401: return .msg("账号或应用密码不对（坚果云要用第三方应用密码，不是登录密码）")
+    case 403: return .msg("WebDAV 拒绝访问（没有权限，或请求太频繁，稍后再试）")
+    case 404, 409: return .msg("服务器地址不对，找不到这个目录")
+    case 507: return .msg("WebDAV 空间已满")
+    default: return .msg("WebDAV 返回 \(code)")
+    }
+  }
+  /// nil text = no file yet
+  private func davRead(_ base: String, user: String, pass: String) async throws -> Remote {
+    let (data, h) = try await dav(base + Sync.DAV_DIR + Sync.FILE, user: user, pass: pass)
+    if h.statusCode == 404 { return Remote(text: nil) }
+    if !(200..<300).contains(h.statusCode) { throw Sync.davFail(h.statusCode) }
+    return Remote(text: String(decoding: data, as: UTF8.self), etag: h.value(forHTTPHeaderField: "ETag"))
+  }
+  /// MKCOL AccountAtlas/; 405 = it already exists
+  private func davMkdir(_ base: String, user: String, pass: String) async throws {
+    let (_, h) = try await dav(base + Sync.DAV_DIR, method: "MKCOL", user: user, pass: pass)
+    if !(200..<300).contains(h.statusCode) && h.statusCode != 405 { throw Sync.davFail(h.statusCode) }
+  }
+  /// false = 412, someone else wrote in between (read, merge and try again)
+  private func davWrite(_ base: String, user: String, pass: String, content: String, etag: String?, mkdir: Bool = true) async throws -> Bool {
+    let (_, h) = try await dav(base + Sync.DAV_DIR + Sync.FILE, method: "PUT", body: Data(content.utf8), user: user, pass: pass, ifMatch: etag)
+    if h.statusCode == 412 { return false }
+    // folder missing (deleted on the server, or first write): create it once and retry
+    if (h.statusCode == 404 || h.statusCode == 409) && mkdir {
+      try await davMkdir(base, user: user, pass: pass)
+      return try await davWrite(base, user: user, pass: pass, content: content, etag: etag, mkdir: false)
+    }
+    if !(200..<300).contains(h.statusCode) { throw Sync.davFail(h.statusCode) }
+    return true
+  }
+
+  private func readRemote(_ c: SyncConf) async throws -> Remote {
+    if c.provider == "webdav" { return try await davRead(c.url ?? "", user: c.user ?? "", pass: c.token) }
+    return Remote(text: try await readGist(c.gistId ?? "", token: c.token, prov: c.provider ?? "github"))
+  }
+  private func writeRemote(_ c: SyncConf, content: String, etag: String?) async throws -> Bool {
+    if c.provider == "webdav" { return try await davWrite(c.url ?? "", user: c.user ?? "", pass: c.token, content: content, etag: etag) }
+    _ = try await api("/gists/" + (c.gistId ?? ""), method: "PATCH", body: ["description": Sync.DESC, "files": [Sync.FILE: ["content": content]]], token: c.token, prov: c.provider ?? "github")
+    return true
+  }
+
   // MARK: merge (per item, newest wins, tombstones)
   static func merge(_ a: AtlasData, _ b: AtlasData) -> AtlasData {
     var del = a.deleted
@@ -148,20 +238,27 @@ final class Sync: ObservableObject {
   }
 
   func run() async {
-    guard let c = conf, let k = key, let gid = c.gistId, let store else { return }
+    guard let c = conf, let k = key, let store else { return }
+    if c.provider == "webdav" { guard c.url != nil, c.user != nil else { return } } else if c.gistId == nil { return }
     if busy { again = true; return }
     busy = true; state = "syncing"
     do {
-      let prov = c.provider ?? "github"
-      let text = try await readGist(gid, token: c.token, prov: prov)
-      let remote = try text.map { try Sync.open($0, key: k) } ?? AtlasData()
-      // during the 操作演示 the screen shows sandbox data: sync only ever sees (and updates) the real data
-      let local = store.realData
-      let merged = Sync.merge(local, remote)
-      if Sync.sig(merged) != Sync.sig(local) { store.adopt(merged) }
-      if text == nil || Sync.sig(merged) != Sync.sig(remote) {
-        let content = try seal(merged, key: k, salt: c.salt)
-        _ = try await api("/gists/" + gid, method: "PATCH", body: ["description": Sync.DESC, "files": [Sync.FILE: ["content": content]]], token: c.token, prov: prov)
+      // read-merge-write; on WebDAV a 412 (another device wrote in between) reads again, the 3rd try writes without If-Match
+      var tries = 0
+      while true {
+        let r = try await readRemote(c)
+        let text = r.text
+        let remote = try text.map { try Sync.open($0, key: k) } ?? AtlasData()
+        // during the 操作演示 the screen shows sandbox data: sync only ever sees (and updates) the real data
+        let local = store.realData
+        let merged = Sync.merge(local, remote)
+        if Sync.sig(merged) != Sync.sig(local) { store.adopt(merged) }
+        if text == nil || Sync.sig(merged) != Sync.sig(remote) {
+          let content = try seal(merged, key: k, salt: c.salt)
+          let ok = try await writeRemote(c, content: content, etag: tries < 2 ? r.etag : nil)
+          if !ok { tries += 1; continue }
+        }
+        break
       }
       state = "idle"; err = ""; at = nowMS(); conf?.at = at; persistConf()
     } catch {
@@ -172,17 +269,31 @@ final class Sync: ObservableObject {
   }
 
   /// returns true when existing data was found in the cloud
-  func enable(token raw: String, pass: String, prov: String) async throws -> Bool {
+  /// WebDAV: `raw` is the 应用密码, `url` / `user` the server and account
+  func enable(token raw: String, pass: String, prov: String, url: String? = nil, user: String? = nil) async throws -> Bool {
     guard let store else { return false }
     let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    let list = (try await api("/gists?per_page=100", token: token, prov: prov) as? [[String: Any]]) ?? []
-    let g = list.first { (($0["files"] as? [String: Any])?[Sync.FILE]) != nil }
-    var salt: String, k: SymmetricKey, gid: String? = nil
+    let isDav = prov == "webdav"
+    let base = try isDav ? Sync.davBase(url ?? "") : ""
+    let u = (user ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if isDav && u.isEmpty { throw SyncError.msg("请填写 WebDAV 账号") }
+    var gid: String? = nil
+    var existing: String? = nil
+    if isDav {
+      existing = try await davRead(base, user: u, pass: token).text
+    } else {
+      let list = (try await api("/gists?per_page=100", token: token, prov: prov) as? [[String: Any]]) ?? []
+      if let g = list.first(where: { (($0["files"] as? [String: Any])?[Sync.FILE]) != nil }),
+         let id = (g["id"] as? String) ?? (g["id"] as? Int).map({ String($0) }) {
+        gid = id
+        guard let t = try await readGist(id, token: token, prov: prov) else { throw SyncError.msg("云端的同步文件损坏") }
+        existing = t
+      }
+    }
+    var salt: String, k: SymmetricKey
     var foundRemote = false
-    if let g, let id = (g["id"] as? String) ?? (g["id"] as? Int).map({ String($0) }) {
-      gid = id
-      guard let text = try await readGist(id, token: token, prov: prov),
-            let env = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], let s = env["salt"] as? String,
+    if let text = existing {
+      guard let env = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any], let s = env["salt"] as? String,
             let sd = Data(base64Encoded: s) else { throw SyncError.msg("云端的同步文件损坏") }
       salt = s
       k = await Task.detached { Sync.derive(pass, salt: sd) }.value
@@ -198,13 +309,19 @@ final class Sync: ObservableObject {
     var real = store.realData
     let demo = Set(real.identities.filter(\.isDemo).map(\.id) + real.accounts.filter { $0.demo == true }.map(\.id))
     if !demo.isEmpty { Store.strip(&real, demo); store.adopt(real) }
-    if gid == nil {
+    if isDav {
+      // first device on this server: create AccountAtlas/ and put the file there now, so a bad address shows up here
+      if existing == nil {
+        try await davMkdir(base, user: u, pass: token)
+        _ = try await davWrite(base, user: u, pass: token, content: try seal(store.realData, key: k, salt: salt), etag: nil)
+      }
+    } else if gid == nil {
       let content = try seal(store.realData, key: k, salt: salt)
       let made = try await api("/gists", method: "POST", body: ["description": Sync.DESC, "public": false, "files": [Sync.FILE: ["content": content]]], token: token, prov: prov) as? [String: Any]
       gid = (made?["id"] as? String) ?? (made?["id"] as? Int).map({ String($0) })
     }
     let keyData = k.withUnsafeBytes { Data($0) }
-    conf = SyncConf(provider: prov, token: token, salt: salt, key: keyData.base64EncodedString(), gistId: gid, at: 0)
+    conf = SyncConf(provider: prov, token: token, salt: salt, key: keyData.base64EncodedString(), gistId: gid, at: 0, url: isDav ? base : nil, user: isDav ? u : nil)
     key = k; persistConf(); state = "idle"
     await run()
     return foundRemote

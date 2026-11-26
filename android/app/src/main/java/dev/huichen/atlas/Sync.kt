@@ -20,6 +20,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import okhttp3.Credentials
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -28,7 +30,10 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import javax.crypto.AEADBadTagException
 
-// Same encrypted file as the web app and iOS: PBKDF2-SHA256 (310k) -> AES-GCM, stored in a private gist (Gitee or GitHub).
+// Same encrypted file as the web app and iOS: PBKDF2-SHA256 (310k) -> AES-GCM, stored in a private gist (Gitee or GitHub)
+// or, apps only, on a WebDAV server (坚果云 etc.) as <server>/AccountAtlas/atlas.enc.json.
+// WebDAV: provider "webdav", url = server folder (ends with /), user = account, token = 应用密码; gistId stays null.
+// url / user are optional so configs saved by older builds still decode.
 @Serializable
 data class SyncConf(
   val provider: String? = null,
@@ -37,6 +42,8 @@ data class SyncConf(
   val key: String,
   val gistId: String? = null,
   val at: Double? = null,
+  val url: String? = null,
+  val user: String? = null,
 )
 
 class SyncError(msg: String) : Exception(msg)
@@ -56,6 +63,12 @@ object Sync {
 
   val on get() = conf != null
   val provider get() = conf?.provider ?: "github"
+  /** where the file lives, for the status line: 「存放在 …」 */
+  val place get() = when (provider) {
+    "gitee" -> "Gitee 私有 Gist"
+    "webdav" -> davHost(conf?.url).let { h -> if ("jianguoyun" in h) "坚果云 WebDAV" else "WebDAV · $h" }
+    else -> "GitHub 私有 Gist"
+  }
 
   fun init() {
     val s = Store.prefs().getString("atlas.sync", null) ?: return
@@ -110,6 +123,71 @@ object Sync {
     return http.newCall(Request.Builder().url(raw).build()).execute().use { it.body?.string() }
   }
 
+  // MARK: WebDAV (blocking, call on IO)
+  // GET / PUT with HTTP Basic auth; a strong ETag goes back as If-Match so two devices can't overwrite each other.
+  // OkHttp sends any method name, so MKCOL needs no workaround.
+  const val DAV_DIR = "AccountAtlas/"
+  const val DAV_PRESET = "https://dav.jianguoyun.com/dav/"
+  private class Remote(val text: String?, val etag: String? = null)
+
+  fun davHost(url: String?): String = url?.toHttpUrlOrNull()?.host ?: "WebDAV"
+  /** normalizes what the user typed: adds https:// when missing, always ends with / */
+  fun davBase(raw: String): String {
+    var s = raw.trim()
+    if (s.isEmpty()) throw SyncError("请填写 WebDAV 服务器地址")
+    if (!s.startsWith("http://", true) && !s.startsWith("https://", true)) s = "https://$s"
+    if (!s.endsWith("/")) s += "/"
+    s.toHttpUrlOrNull() ?: throw SyncError("服务器地址格式不对")
+    return s
+  }
+  private fun davCall(rb: Request.Builder, user: String, pass: String): okhttp3.Response {
+    rb.header("Authorization", Credentials.basic(user, pass, Charsets.UTF_8)).header("Cache-Control", "no-cache")
+    return try { http.newCall(rb.build()).execute() } catch (e: Exception) { throw SyncError("连不上 WebDAV 服务器，检查服务器地址和网络") }
+  }
+  private fun davFail(code: Int): Nothing = throw SyncError(when (code) {
+    401 -> "账号或应用密码不对（坚果云要用第三方应用密码，不是登录密码）"
+    403 -> "WebDAV 拒绝访问（没有权限，或请求太频繁，稍后再试）"
+    404, 409 -> "服务器地址不对，找不到这个目录"
+    507 -> "WebDAV 空间已满"
+    else -> "WebDAV 返回 $code"
+  })
+  /** null text = no file yet */
+  private fun davRead(base: String, user: String, pass: String): Remote {
+    davCall(Request.Builder().url(base + DAV_DIR + FILE), user, pass).use {
+      if (it.code == 404) return Remote(null)
+      if (it.code !in 200..299) davFail(it.code)
+      return Remote(it.body?.string() ?: "", it.header("ETag"))
+    }
+  }
+  /** MKCOL AccountAtlas/; 405 = it already exists */
+  private fun davMkdir(base: String, user: String, pass: String) {
+    davCall(Request.Builder().url(base + DAV_DIR).method("MKCOL", null), user, pass).use {
+      if (it.code !in 200..299 && it.code != 405) davFail(it.code)
+    }
+  }
+  /** false = 412, someone else wrote in between (read, merge and try again) */
+  private fun davWrite(base: String, user: String, pass: String, content: String, etag: String?, mkdir: Boolean = true): Boolean {
+    val rb = Request.Builder().url(base + DAV_DIR + FILE).put(content.toRequestBody("application/json; charset=utf-8".toMediaType()))
+    // weak ETags (W/"…") never match If-Match, so only strong ones are sent back
+    if (etag != null && !etag.startsWith("W/")) rb.header("If-Match", etag)
+    davCall(rb, user, pass).use {
+      if (it.code == 412) return false
+      // folder missing (deleted on the server, or first write): create it once and retry
+      if ((it.code == 404 || it.code == 409) && mkdir) { davMkdir(base, user, pass); return davWrite(base, user, pass, content, etag, false) }
+      if (it.code !in 200..299) davFail(it.code)
+      return true
+    }
+  }
+
+  private fun readRemote(c: SyncConf): Remote =
+    if (c.provider == "webdav") davRead(c.url ?: "", c.user ?: "", c.token)
+    else Remote(readGist(c.gistId ?: "", c.token, c.provider ?: "github"))
+  private fun writeRemote(c: SyncConf, content: String, etag: String?): Boolean {
+    if (c.provider == "webdav") return davWrite(c.url ?: "", c.user ?: "", c.token, content, etag)
+    api("/gists/${c.gistId}", "PATCH", filesBody(content), c.token, c.provider ?: "github")
+    return true
+  }
+
   // MARK: run
   fun schedule() {
     if (conf == null) return
@@ -120,20 +198,27 @@ object Sync {
   fun runNow() { Store.scope.launch { run() } }
 
   suspend fun run() {
-    val c = conf ?: return; val k = key ?: return; val gid = c.gistId ?: return
+    val c = conf ?: return; val k = key ?: return
+    if (c.provider == "webdav") { if (c.url == null || c.user == null) return } else if (c.gistId == null) return
     if (busy) { again = true; return }
     busy = true; state = "syncing"
     try {
-      val prov = c.provider ?: "github"
-      val text = withContext(Dispatchers.IO) { readGist(gid, c.token, prov) }
-      val remote = withContext(Dispatchers.Default) { text?.let { AtlasCrypto.openData(it, k) } ?: AtlasData() }
-      // during the 操作演示 the screen shows sandbox data: sync only ever sees (and updates) the real data
-      val local = Store.realData()
-      val merged = Merge.merge(local, remote)
-      if (Merge.sig(merged) != Merge.sig(local)) Store.adopt(merged)
-      if (text == null || Merge.sig(merged) != Merge.sig(remote)) {
-        val content = AtlasCrypto.sealData(merged, k, c.salt)
-        withContext(Dispatchers.IO) { api("/gists/$gid", "PATCH", filesBody(content), c.token, prov) }
+      // read-merge-write; on WebDAV a 412 (another device wrote in between) reads again, the 3rd try writes without If-Match
+      var tries = 0
+      while (true) {
+        val r = withContext(Dispatchers.IO) { readRemote(c) }
+        val text = r.text
+        val remote = withContext(Dispatchers.Default) { text?.let { AtlasCrypto.openData(it, k) } ?: AtlasData() }
+        // during the 操作演示 the screen shows sandbox data: sync only ever sees (and updates) the real data
+        val local = Store.realData()
+        val merged = Merge.merge(local, remote)
+        if (Merge.sig(merged) != Merge.sig(local)) Store.adopt(merged)
+        if (text == null || Merge.sig(merged) != Merge.sig(remote)) {
+          val content = AtlasCrypto.sealData(merged, k, c.salt)
+          val etag = if (tries < 2) r.etag else null
+          if (!withContext(Dispatchers.IO) { writeRemote(c, content, etag) }) { tries++; continue }
+        }
+        break
       }
       state = "idle"; err = ""; at = nowMS(); conf = conf?.copy(at = at); persistConf()
     } catch (e: Exception) {
@@ -151,14 +236,23 @@ object Sync {
   }
 
   /** returns true when existing data was found in the cloud */
-  suspend fun enable(raw: String, pass: String, prov: String): Boolean {
+  /** WebDAV: [raw] is the 应用密码, [url] / [user] the server and account */
+  suspend fun enable(raw: String, pass: String, prov: String, url: String? = null, user: String? = null): Boolean {
     val token = raw.trim()
-    val list = withContext(Dispatchers.IO) { api("/gists?per_page=100", token = token, prov = prov) } as? JsonArray ?: JsonArray(emptyList())
-    val g = list.firstOrNull { ((it as? JsonObject)?.get("files") as? JsonObject)?.containsKey(FILE) == true } as? JsonObject
-    val salt: String; val k: ByteArray; var gid: String? = null; var found = false
-    if (g != null && idOf(g["id"]) != null) {
-      gid = idOf(g["id"])
-      val text = withContext(Dispatchers.IO) { readGist(gid!!, token, prov) } ?: throw SyncError("云端的同步文件损坏")
+    val dav = prov == "webdav"
+    val base = if (dav) davBase(url ?: "") else null
+    val u = user?.trim() ?: ""
+    if (dav && u.isEmpty()) throw SyncError("请填写 WebDAV 账号")
+    var gid: String? = null
+    val existing: String? = if (dav) withContext(Dispatchers.IO) { davRead(base!!, u, token) }.text else {
+      val list = withContext(Dispatchers.IO) { api("/gists?per_page=100", token = token, prov = prov) } as? JsonArray ?: JsonArray(emptyList())
+      val g = list.firstOrNull { ((it as? JsonObject)?.get("files") as? JsonObject)?.containsKey(FILE) == true } as? JsonObject
+      val id = g?.let { idOf(it["id"]) }
+      if (id != null) { gid = id; withContext(Dispatchers.IO) { readGist(id, token, prov) } ?: throw SyncError("云端的同步文件损坏") } else null
+    }
+    val salt: String; val k: ByteArray; var found = false
+    if (existing != null) {
+      val text = existing
       val s = AtlasCrypto.saltOf(text) ?: throw SyncError("云端的同步文件损坏")
       val sd = runCatching { AtlasCrypto.unb64(s) }.getOrNull() ?: throw SyncError("云端的同步文件损坏")
       salt = s
@@ -172,12 +266,18 @@ object Sync {
     }
     // sample data stays on this device: it is taken out (without tombstones) before the first merge
     Store.realData().let { if (Demo.has(it)) Store.adopt(Demo.clear(it)) }
-    if (gid == null) {
+    if (dav) {
+      // first device on this server: create AccountAtlas/ and put the file there now, so a bad address shows up here
+      if (existing == null) withContext(Dispatchers.IO) {
+        davMkdir(base!!, u, token)
+        davWrite(base, u, token, AtlasCrypto.sealData(Store.data, k, salt), null)
+      }
+    } else if (gid == null) {
       val content = AtlasCrypto.sealData(Store.data, k, salt)
       val made = withContext(Dispatchers.IO) { api("/gists", "POST", filesBody(content, public = false), token, prov) } as? JsonObject
       gid = idOf(made?.get("id"))
     }
-    conf = SyncConf(prov, token, salt, AtlasCrypto.b64(k), gid, 0.0)
+    conf = SyncConf(prov, token, salt, AtlasCrypto.b64(k), gid, 0.0, base, if (dav) u else null)
     key = k; persistConf(); state = "idle"
     run()
     return found
