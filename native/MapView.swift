@@ -76,6 +76,11 @@ struct MapView: View {
       }
     }
     return ZStack(alignment: .topLeading) {
+      // tapping empty space clears the focus. A layer under the nodes, not a tap gesture on the whole
+      // ZStack: that one made every node button wait to see whether the tap was the parent's, so the
+      // app tiles on the right sometimes reacted late.
+      Color.clear.frame(width: width, height: m.height).contentShape(Rectangle())
+        .onTapGesture { withAnimation(Motion.smooth) { focus = nil } }
       // all threads are CAShapeLayers animated by the render server: the draw-in costs the main
       // thread nothing, so it can't stutter the tab switch it plays during
       MapThreadsLayer(threads: threads, drawn: drawn, focus: cur)
@@ -118,8 +123,6 @@ struct MapView: View {
         .animation(Animation.spring(duration: 0.5, bounce: 0).delay(drawn ? 0.1 + Double(j) * 0.02 : 0), value: drawn)
       }
     }
-    .contentShape(Rectangle())
-    .onTapGesture { withAnimation(Motion.smooth) { focus = nil } }
   }
 
   func label(_ s: String) -> some View {

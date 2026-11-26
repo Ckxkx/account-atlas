@@ -368,6 +368,10 @@ struct AtlasData: Codable {
     // element by element: one damaged entry is skipped instead of emptying the whole list
     identities = (try? c.decode(Lossy<Identity>.self, forKey: .identities))?.items ?? []
     accounts = (try? c.decode(Lossy<Account>.self, forKey: .accounts))?.items ?? []
+    // the same id twice (an old import / sync merge) makes SwiftUI lists crash; keep the first
+    var si = Set<String>(), sa = Set<String>()
+    identities = identities.filter { si.insert($0.id).inserted }
+    accounts = accounts.filter { sa.insert($0.id).inserted }
     deleted = (try? c.decode([String: Double].self, forKey: .deleted)) ?? [:]
     demo = try? c.decode(Bool.self, forKey: .demo)
   }
