@@ -10,6 +10,14 @@ struct ChipChrome: ViewModifier {
   }
 }
 
+/// iOS 26: the chips' glass is drawn as one group (one pass, no per-chip re-materialising on appear).
+struct ChipGlassGroup<C: View>: View {
+  @ViewBuilder let content: C
+  var body: some View {
+    if #available(iOS 26.0, *) { GlassEffectContainer(spacing: 8) { content } } else { content }
+  }
+}
+
 struct SitesView: View {
   @Environment(Store.self) var store
   @State private var cat = "全部"
@@ -67,6 +75,7 @@ struct SitesView: View {
 
   var chips: some View {
     ScrollView(.horizontal) {
+      ChipGlassGroup {
       HStack(spacing: 8) {
         ForEach(["全部"] + cats, id: \.self) { c in
           let n = c == "全部" ? store.data.accounts.count : (store.index.categoryCount[c] ?? 0)
@@ -79,6 +88,7 @@ struct SitesView: View {
           }.buttonStyle(PressStyle(scale: 0.94))
         }
       }.padding(.horizontal, 16)
+      }
     }
     .scrollIndicators(.hidden)
     .sensoryFeedback(.selection, trigger: cat)

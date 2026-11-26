@@ -227,6 +227,7 @@ struct TabEnter: ViewModifier {
   let index: Int, tab: Int, dir: CGFloat
   @State private var shown: Bool
   @State private var selected: Bool
+  static let glass: Bool = { if #available(iOS 26.0, *) { return true } else { return false } }()
   init(index: Int, tab: Int, dir: CGFloat) {
     self.index = index; self.tab = tab; self.dir = dir
     _shown = State(initialValue: index == tab); _selected = State(initialValue: index == tab)
@@ -236,7 +237,9 @@ struct TabEnter: ViewModifier {
     // scroll insets) is never pulled into the spring, so the title doesn't slide around.
     content
       .animation(Motion.tab) {
-        $0.opacity(shown ? 1 : 0.35).offset(x: shown ? 0 : dir * 28)
+        // iOS 26: no fade. Liquid Glass can't draw under a parent opacity below 1 — the 全部 App
+        // filter chips turned into white blobs for a few frames on every switch back to that page.
+        $0.opacity(shown || Self.glass ? 1 : 0.35).offset(x: shown ? 0 : dir * 28)
       }
       .onChange(of: tab) { old, t in
         selected = t == index
