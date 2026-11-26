@@ -497,7 +497,7 @@ fun ExportDialog(onDismiss: () -> Unit, onReady: (String) -> Unit) {
   var error by remember { mutableStateOf("") }
   var busy by remember { mutableStateOf(false) }
   val scope = rememberCoroutineScope()
-  androidx.compose.material3.AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("导出备份") },
+  GlassAlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("导出备份") },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth().press(1f) { encrypt = !encrypt; error = "" }, verticalAlignment = Alignment.CenterVertically) {
@@ -544,7 +544,7 @@ fun BackupPasswordDialog(env: String, onDismiss: () -> Unit, onPlain: (String) -
   var error by remember { mutableStateOf("") }
   var busy by remember { mutableStateOf(false) }
   val scope = rememberCoroutineScope()
-  androidx.compose.material3.AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("加密的备份") },
+  GlassAlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("加密的备份") },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("这份备份设置了密码，输入导出时设的密码。", color = pal.secondary)

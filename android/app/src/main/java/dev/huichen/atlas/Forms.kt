@@ -54,7 +54,6 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.SimCard
 import androidx.compose.material.icons.outlined.Circle
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -728,7 +727,7 @@ fun PickerSheet(presetIdentity: String?) {
         }
       }
       confirmRemove?.takeIf { !AppLock.blocking }?.let { p ->
-        AlertDialog(onDismissRequest = { confirmRemove = null }, title = { Text("从列表移除“${p.name}”？") },
+        GlassAlertDialog(onDismissRequest = { confirmRemove = null }, title = { Text("从列表移除“${p.name}”？") },
           text = { Text("只会从这个列表移除，已记录的账号不受影响。") },
           confirmButton = { TextButton({ confirmRemove = null; removeCustom(p) }) { Text("移除", color = Color(0xFFFF453A)) } },
           dismissButton = { TextButton({ confirmRemove = null }) { Text("取消") } })
@@ -806,7 +805,7 @@ fun ManualAdd(initial: String, onDismiss: () -> Unit, onAdd: (String, String, St
   }
   val domainHits = if (cleanDomain(d).isNotEmpty()) emptyList() else localHits.ifEmpty { webHits }
   if (AppLock.blocking) return
-  AlertDialog(onDismissRequest = onDismiss, title = { Text("手动添加") },
+  GlassAlertDialog(onDismissRequest = onDismiss, title = { Text("手动添加") },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {

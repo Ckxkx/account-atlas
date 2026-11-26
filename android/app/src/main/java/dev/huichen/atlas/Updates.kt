@@ -19,7 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
@@ -140,7 +139,7 @@ fun UpdateDialog() {
     if (p.notes.isNotEmpty()) append('\n')
     if (p.password.isNotEmpty()) append("蓝奏云密码 ${p.password}，点「去下载」会自动复制。") else append("在蓝奏云下载，直接覆盖安装，数据不会丢失。")
   }
-  AlertDialog(onDismissRequest = { Updater.later() },
+  GlassAlertDialog(onDismissRequest = { Updater.later() },
     title = { Text("发现新版本 ${p.version}") },
     text = { Text(body) },
     confirmButton = { TextButton({ Updater.download(ctx, p) { uri.openUri(it) } }) { Text("去下载") } },

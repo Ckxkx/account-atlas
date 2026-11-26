@@ -50,6 +50,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -163,7 +164,7 @@ fun AtlasRoot(startTab: Int) {
         FirstRunTour()
         // 2.4: duplicates (incl. a former Apple login card and its email) are merged only after a yes, asked once
         if (Store.mergeAsk > 0 && !Tour.on && Store.routes.isEmpty() && !AppLock.blocking) {
-          androidx.compose.material3.AlertDialog(onDismissRequest = { Store.declineMerge() },
+          GlassAlertDialog(onDismissRequest = { Store.declineMerge() },
             title = { Text("合并重复的身份") },
             text = { Text("发现 ${Store.mergeAsk} 个重复的身份，合并后关系图更清晰，数据不会丢。") },
             confirmButton = { androidx.compose.material3.TextButton({ Store.mergeDuplicates() }) { Text("合并") } },
@@ -196,9 +197,15 @@ fun Shell(startTab: Int) {
   val backScale by animateFloatAsState(if (sheetUp) 0.94f else 1f, calm(), label = "back")
   LaunchedEffect(Unit) { Tour.requestTab = { t -> if (t != tab) { dir = if (t >= tab) 1 else -1; tab = t } } }
   BackHandler(enabled = sheetUp) { Store.pop() }
+  // Liquid Glass (Android 12+): the pages are what the tab bar sees through, the whole shell is what sheets see through
+  val pageBackdrop = rememberBackdrop()
+  val shellBackdrop = rememberBackdrop()
+  val glass = Glass.blur
 
   Box(Modifier.fillMaxSize()) {
+   Box(Modifier.fillMaxSize().then(if (glass) Modifier.backdropSource(shellBackdrop) else Modifier)) {
     Box(Modifier.fillMaxSize().graphicsLayer { scaleX = backScale; scaleY = backScale }.clip(RoundedCornerShape(if (sheetUp) 28.dp else 0.dp))) {
+     Box(Modifier.fillMaxSize().then(if (glass) Modifier.backdropSource(pageBackdrop) else Modifier)) {
       Glow()
       // the page you switch to slides in a little from the side you came from
       for (k in 0..2) {
@@ -214,9 +221,11 @@ fun Shell(startTab: Int) {
           }
         }
       }
-      TabBar(tab, Modifier.align(Alignment.BottomCenter)) { t -> if (t != tab) { dir = if (t >= tab) 1 else -1; tab = t; hap(TICK) } }
+     }
+      TabBar(tab, pageBackdrop, Modifier.align(Alignment.BottomCenter)) { t -> if (t != tab) { dir = if (t >= tab) 1 else -1; tab = t; hap(TICK) } }
     }
-    Sheets()
+   }
+    Sheets(shellBackdrop)
     ToastView(Modifier.align(Alignment.TopCenter))
   }
 }
@@ -233,19 +242,42 @@ fun Glow() {
 }
 
 @Composable
-fun TabBar(tab: Int, modifier: Modifier, onTab: (Int) -> Unit) {
+fun TabBar(tab: Int, backdrop: Backdrop, modifier: Modifier, onTab: (Int) -> Unit) {
   val items = listOf(Triple("卡包", Icons.Filled.ViewCarousel, 0), Triple("全部 App", Icons.Filled.Apps, 1), Triple("关系图", Icons.Filled.AccountTree, 2))
-  Box(modifier.fillMaxWidth().background(if (pal.dark) Color(0xE6121212) else Color(0xE6F9F9F9))) {
-    Box(Modifier.fillMaxWidth().height(0.5.dp).background(pal.stroke))
-    Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).height(56.dp)) {
-      items.forEach { (name, icon, k) ->
-        val on = tab == k
-        Column(Modifier.weight(1f).fillMaxSize().clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) { onTab(k) },
-          horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-          Icon(icon, name, Modifier.size(24.dp), tint = if (on) pal.accent else pal.secondary)
-          T(name, 10.5f, FontWeight.Medium, if (on) pal.accent else pal.secondary)
-        }
+  @Composable fun Item(name: String, icon: androidx.compose.ui.graphics.vector.ImageVector, k: Int, m: Modifier) {
+    val on = tab == k
+    Column(m.clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) { onTab(k) },
+      horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+      Icon(icon, name, Modifier.size(24.dp), tint = if (on) pal.accent else pal.secondary)
+      T(name, 10.5f, FontWeight.Medium, if (on) pal.accent else pal.secondary)
+    }
+  }
+  if (!Glass.blur) {
+    // before Android 12: the translucent full-width bar as before
+    Box(modifier.fillMaxWidth().background(if (pal.dark) Color(0xE6121212) else Color(0xE6F9F9F9))) {
+      Box(Modifier.fillMaxWidth().height(0.5.dp).background(pal.stroke))
+      Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).height(56.dp)) {
+        items.forEach { (name, icon, k) -> Item(name, icon, k, Modifier.weight(1f).fillMaxSize()) }
       }
+    }
+    return
+  }
+  // Android 12+: a floating Liquid Glass capsule over the page, with a soft pill under the current tab
+  val dark = pal.dark
+  val capsule = RoundedCornerShape(50)
+  val at by animateFloatAsState(tab.toFloat(), calm(), label = "tabPill")
+  val pill = if (dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
+  Box(modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(start = 18.dp, end = 18.dp, bottom = 6.dp).fillMaxWidth().height(58.dp)
+    .shadow(14.dp, capsule, clip = false, ambientColor = Color.Black.copy(alpha = if (dark) 0.6f else 0.22f), spotColor = Color.Black.copy(alpha = if (dark) 0.6f else 0.22f))) {
+    GlassBackdrop(listOf(backdrop), capsule, tabGlass(dark), Modifier.matchParentSize())
+    Canvas(Modifier.matchParentSize()) {
+      val inset = 4.dp.toPx()
+      val w = (size.width - inset * 2) / items.size
+      drawRoundRect(pill, Offset(inset + w * at, inset), androidx.compose.ui.geometry.Size(w, size.height - inset * 2),
+        androidx.compose.ui.geometry.CornerRadius((size.height - inset * 2) / 2))
+    }
+    Row(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
+      items.forEach { (name, icon, k) -> Item(name, icon, k, Modifier.weight(1f).fillMaxSize()) }
     }
   }
 }
@@ -253,7 +285,7 @@ fun TabBar(tab: Int, modifier: Modifier, onTab: (Int) -> Unit) {
 // MARK: - sheets (a stack, like a sheet presented over a sheet)
 
 @Composable
-fun Sheets() {
+fun Sheets(shell: Backdrop) {
   val items = remember { mutableStateListOf<Entry>() }
   val leaving = remember { mutableStateMapOf<Long, Boolean>() }
   LaunchedEffect(Store.routes) {
@@ -261,9 +293,15 @@ fun Sheets() {
     for (e in items) leaving[e.key] = Store.routes.none { it.key == e.key }
   }
   val top = items.lastOrNull { leaving[it.key] != true }?.key
-  items.toList().forEach { e ->
+  // each sheet is recorded as a backdrop too, so a sheet over a sheet sees the one below through its glass
+  val frames = remember { HashMap<Long, Backdrop>() }
+  items.toList().forEachIndexed { i, e ->
     key(e.key) {
-      SheetFrame(leaving[e.key] == true, covered = top != null && e.key != top && leaving[e.key] != true, onGone = { items.remove(e); leaving.remove(e.key) }) {
+      val own = rememberBackdrop()
+      frames[e.key] = own
+      DisposableEffect(Unit) { onDispose { frames.remove(e.key) } }
+      val below = listOf(shell) + items.take(i).mapNotNull { frames[it.key] }
+      SheetFrame(leaving[e.key] == true, covered = top != null && e.key != top && leaving[e.key] != true, own, below, onGone = { items.remove(e); leaving.remove(e.key) }) {
         SheetHost(e.route)
       }
     }
@@ -273,7 +311,7 @@ fun Sheets() {
 private val SheetShape = RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp)
 
 @Composable
-fun SheetFrame(leaving: Boolean, covered: Boolean, onGone: () -> Unit, content: @Composable () -> Unit) {
+fun SheetFrame(leaving: Boolean, covered: Boolean, own: Backdrop, below: List<Backdrop>, onGone: () -> Unit, content: @Composable () -> Unit) {
   val y = remember { Animatable(1f) }
   var h by remember { mutableStateOf(1f) }
   val scope = rememberCoroutineScope()
@@ -287,7 +325,9 @@ fun SheetFrame(leaving: Boolean, covered: Boolean, onGone: () -> Unit, content: 
     }
   }
   val coverScale by animateFloatAsState(if (covered) 0.94f else 1f, calm(), label = "cover")
-  Box(Modifier.fillMaxSize()) {
+  val glass = Glass.blur
+  val dark = pal.dark
+  Box(Modifier.fillMaxSize().then(if (glass) Modifier.backdropSource(own) else Modifier)) {
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = (1 - y.value) }.background(Color.Black.copy(alpha = 0.4f))
       .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) { Store.pop() })
     BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().padding(top = 10.dp)) {
@@ -298,9 +338,12 @@ fun SheetFrame(leaving: Boolean, covered: Boolean, onGone: () -> Unit, content: 
           translationY = y.value * h; scaleX = coverScale; scaleY = coverScale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
           shadowElevation = 20.dp.toPx(); shape = SheetShape; clip = true
         }
-        .background(if (pal.dark) hex("#0b0b0d") else hex("#f2f2f7"))
+        .then(if (glass) Modifier else Modifier.background(if (pal.dark) hex("#0b0b0d") else hex("#f2f2f7")))
         .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {}
       ) {
+        // Android 12+: the sheet is glass over what is below it (dimmed by its own scrim, as on screen)
+        if (glass) GlassBackdrop(below, SheetShape, sheetGlass(dark), Modifier.matchParentSize(),
+          over = { drawRect(Color.Black.copy(alpha = 0.4f * (1 - y.value))) }, track = { y.value; coverScale })
         content()
         // drag handle: pull down to dismiss
         Box(Modifier.fillMaxWidth().height(28.dp).pointerInput(Unit) {
