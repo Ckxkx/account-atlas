@@ -127,7 +127,26 @@ object Sync {
   // GET / PUT with HTTP Basic auth; a strong ETag goes back as If-Match so two devices can't overwrite each other.
   // OkHttp sends any method name, so MKCOL needs no workaround.
   const val DAV_DIR = "AccountAtlas/"
-  const val DAV_PRESET = "https://dav.jianguoyun.com/dav/"
+  const val DAV_JIANGUOYUN = "https://dav.jianguoyun.com/dav/"
+  /** 服务器地址 shortcuts on the WebDAV form, same order and wording as Sync.swift. A template's placeholder
+   *  (NAS地址 / 你的域名 / 用户名 / 节点名 / 地址) is for the user to replace; 账号 and 密码 are never prefilled. */
+  class DavPreset(val id: String, val name: String, val url: String, val template: Boolean, val hint: String)
+  val DAV_PRESETS = listOf(
+    DavPreset("jianguoyun", "坚果云", DAV_JIANGUOYUN, false, ""),
+    DavPreset("synology", "群晖 NAS", "https://NAS地址:5006/", true, "在群晖套件中心安装 WebDAV Server 并开启 HTTPS（默认 5006 端口），账号密码用 DSM 账号；局域网也可以用 http://NAS地址:5005/。"),
+    DavPreset("nextcloud", "Nextcloud", "https://你的域名/remote.php/dav/files/用户名/", true, "把「你的域名」「用户名」换成自己的；密码建议用 Nextcloud 设置 › 安全 里生成的应用密码。"),
+    DavPreset("alist", "AList", "http://地址:5244/dav/", true, "在 /dav/ 后面接上 AList 里挂载的存储路径；AList 用户权限里要打开 WebDAV 读取和 WebDAV 管理。"),
+    DavPreset("infinicloud", "InfiniCLOUD", "https://节点名.teracloud.jp/dav/", true, "完整地址在 InfiniCLOUD 我的页面 › 外部应用连接 里查看；账号填连接 ID，密码填应用密码。"),
+    DavPreset("koofr", "Koofr", "https://app.koofr.net/dav/Koofr", false, "账号填 Koofr 登录邮箱；密码要用 Koofr 网页版 偏好设置 › 密码 里生成的应用密码。"),
+    DavPreset("pcloud", "pCloud", "https://webdav.pcloud.com", false, "账号密码就是 pCloud 登录邮箱和密码；欧洲区账号把地址改成 https://ewebdav.pcloud.com；开了两步验证的话，首次连接要在邮件里确认。"),
+    DavPreset("custom", "自定义", "", false, ""),
+  )
+  private val DAV_PLACEHOLDERS = listOf("NAS地址", "你的域名", "用户名", "节点名", "地址")
+  /** http:// only where iOS allows it too (NSAllowsLocalNetworking): IP addresses, .local names, single-label names */
+  fun davLocalHost(host: String): Boolean {
+    val h = host.trim('[', ']').lowercase()
+    return h.contains(':') || Regex("""\d{1,3}(\.\d{1,3}){3}""").matches(h) || h.endsWith(".local") || !h.contains('.')
+  }
   private class Remote(val text: String?, val etag: String? = null)
 
   fun davHost(url: String?): String = url?.toHttpUrlOrNull()?.host ?: "WebDAV"
@@ -137,15 +156,18 @@ object Sync {
     if (s.isEmpty()) throw SyncError("请填写 WebDAV 服务器地址")
     if (!s.startsWith("http://", true) && !s.startsWith("https://", true)) s = "https://$s"
     if (!s.endsWith("/")) s += "/"
-    s.toHttpUrlOrNull() ?: throw SyncError("服务器地址格式不对")
+    DAV_PLACEHOLDERS.firstOrNull { it in s }?.let { throw SyncError("把服务器地址里的「$it」换成你自己的") }
+    val u = s.toHttpUrlOrNull() ?: throw SyncError("服务器地址格式不对")
+    if (u.scheme == "http" && !davLocalHost(u.host)) throw SyncError("外网服务器请用 https://（http 只能用于局域网地址，如 192.168.x.x 或 nas.local）")
     return s
   }
   private fun davCall(rb: Request.Builder, user: String, pass: String): okhttp3.Response {
     rb.header("Authorization", Credentials.basic(user, pass, Charsets.UTF_8)).header("Cache-Control", "no-cache")
     return try { http.newCall(rb.build()).execute() } catch (e: Exception) { throw SyncError("连不上 WebDAV 服务器，检查服务器地址和网络") }
   }
-  private fun davFail(code: Int): Nothing = throw SyncError(when (code) {
-    401 -> "账号或应用密码不对（坚果云要用第三方应用密码，不是登录密码）"
+  private fun davFail(code: Int, base: String): Nothing = throw SyncError(when (code) {
+    401 -> if ("jianguoyun" in davHost(base)) "账号或应用密码不对（坚果云要用第三方应用密码，不是登录密码）"
+           else "账号或密码不对（${davHost(base)}；有的服务要用应用密码，不是登录密码）"
     403 -> "WebDAV 拒绝访问（没有权限，或请求太频繁，稍后再试）"
     404, 409 -> "服务器地址不对，找不到这个目录"
     507 -> "WebDAV 空间已满"
@@ -155,14 +177,14 @@ object Sync {
   private fun davRead(base: String, user: String, pass: String): Remote {
     davCall(Request.Builder().url(base + DAV_DIR + FILE), user, pass).use {
       if (it.code == 404) return Remote(null)
-      if (it.code !in 200..299) davFail(it.code)
+      if (it.code !in 200..299) davFail(it.code, base)
       return Remote(it.body?.string() ?: "", it.header("ETag"))
     }
   }
   /** MKCOL AccountAtlas/; 405 = it already exists */
   private fun davMkdir(base: String, user: String, pass: String) {
     davCall(Request.Builder().url(base + DAV_DIR).method("MKCOL", null), user, pass).use {
-      if (it.code !in 200..299 && it.code != 405) davFail(it.code)
+      if (it.code !in 200..299 && it.code != 405) davFail(it.code, base)
     }
   }
   /** false = 412, someone else wrote in between (read, merge and try again) */
@@ -174,7 +196,7 @@ object Sync {
       if (it.code == 412) return false
       // folder missing (deleted on the server, or first write): create it once and retry
       if ((it.code == 404 || it.code == 409) && mkdir) { davMkdir(base, user, pass); return davWrite(base, user, pass, content, etag, false) }
-      if (it.code !in 200..299) davFail(it.code)
+      if (it.code !in 200..299) davFail(it.code, base)
       return true
     }
   }

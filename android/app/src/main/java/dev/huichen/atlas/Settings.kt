@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.drawBehind
@@ -407,8 +408,10 @@ fun SyncPage(back: () -> Unit) {
   var prov by remember { mutableStateOf("gitee") }
   var token by remember { mutableStateOf("") }
   var pass by remember { mutableStateOf("") }
-  var davUrl by remember { mutableStateOf(Sync.DAV_PRESET) }
+  var davUrl by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("")) }
+  var davPick by remember { mutableStateOf("") }
   var davUser by remember { mutableStateOf("") }
+  val urlFocus = remember { androidx.compose.ui.focus.FocusRequester() }
   var busy by remember { mutableStateOf(false) }
   var error by remember { mutableStateOf("") }
   var askOff by remember { mutableStateOf(false) }
@@ -437,23 +440,49 @@ fun SyncPage(back: () -> Unit) {
         }
       } else {
         FormGroup("同步方式") {
-          listOf("gitee" to "Gitee · 国内直连", "github" to "GitHub Gist", "webdav" to "WebDAV · 坚果云等").forEachIndexed { k, (v, n) ->
+          listOf("gitee" to "Gitee · 国内直连", "github" to "GitHub Gist", "webdav" to "WebDAV · 坚果云、NAS 等").forEachIndexed { k, (v, n) ->
             if (k > 0) Divider()
             SettingRow(null, n, trailing = { if (prov == v) Icon(Icons.Outlined.CheckCircle, null, tint = pal.accent) }) { prov = v; error = "" }
           }
         }
-        if (prov == "webdav") FormGroup(footer = "坚果云要用「第三方应用密码」，不是登录密码：网页版 账户信息 › 安全选项，或坚果云 App 设置 › 第三方应用管理 里添加。" +
-          "数据先用同步密码加密，再存到服务器的 AccountAtlas/atlas.enc.json，别人看不到内容。每台设备填同样的账号、应用密码和同步密码即可。同步密码忘了就解不开。") {
-          PlainField(davUrl, { davUrl = it }, "服务器地址", KeyboardType.Uri)
-          Divider()
-          PlainField(davUser, { davUser = it }, "账号（坚果云填登录邮箱）", KeyboardType.Email)
-          Divider()
-          SecretField(token, { token = it }, "应用密码")
-          Divider()
-          SecretField(pass, { pass = it }, "同步密码")
-          if ("jianguoyun" in davUrl) {
+        if (prov == "webdav") {
+          val url = davUrl.text
+          val nut = "jianguoyun" in url
+          val preset = Sync.DAV_PRESETS.firstOrNull { it.id == davPick }
+          FormGroup(footer = if (nut) "坚果云要用「第三方应用密码」，不是登录密码：网页版 账户信息 › 安全选项，或坚果云 App 设置 › 第三方应用管理 里添加。" +
+            "数据先用同步密码加密，再存到服务器的 AccountAtlas/atlas.enc.json，别人看不到内容。每台设备填同样的账号、应用密码和同步密码即可。同步密码忘了就解不开。"
+            else (preset?.hint?.takeIf { it.isNotEmpty() }?.let { "$it\n" } ?: "") +
+            "数据先用同步密码加密，再存到服务器的 AccountAtlas/atlas.enc.json，别人看不到内容。每台设备填同样的服务器地址、账号、密码和同步密码即可。同步密码忘了就解不开。") {
+            Box(Modifier.padding(vertical = 12.dp)) {
+              Chips(Sync.DAV_PRESETS.map { it.name to null }, preset?.name) { name ->
+                val p = Sync.DAV_PRESETS.first { it.name == name }
+                davPick = p.id; error = ""
+                // a template selects its first placeholder so typing replaces it
+                val ph = listOf("NAS地址", "你的域名", "节点名", "地址").firstOrNull { it in p.url }
+                val at = if (ph != null) p.url.indexOf(ph) else -1
+                davUrl = androidx.compose.ui.text.input.TextFieldValue(p.url,
+                  if (ph != null && at >= 0) androidx.compose.ui.text.TextRange(at, at + ph.length) else androidx.compose.ui.text.TextRange(p.url.length))
+                if (p.template || p.url.isEmpty()) urlFocus.requestFocus()
+              }
+            }
             Divider()
-            SettingRow(null, "怎么获取坚果云应用密码", color = pal.accent) { uri.openUri("https://help.jianguoyun.com/?p=2064") }
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+              if (url.isEmpty()) T("https://example.com/dav/", 17f, color = pal.tertiary, lines = 1)
+              androidx.compose.foundation.text.BasicTextField(davUrl, { davUrl = it }, Modifier.fillMaxWidth().focusRequester(urlFocus), singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = pal.primary, fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp)),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(pal.accent),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false, capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None))
+            }
+            Divider()
+            PlainField(davUser, { davUser = it }, if (nut) "账号（坚果云登录邮箱）" else "账号", KeyboardType.Email)
+            Divider()
+            SecretField(token, { token = it }, if (nut || "koofr" in url) "应用密码" else "密码")
+            Divider()
+            SecretField(pass, { pass = it }, "同步密码")
+            if (nut) {
+              Divider()
+              SettingRow(null, "怎么获取坚果云应用密码", color = pal.accent) { uri.openUri("https://help.jianguoyun.com/?p=2064") }
+            }
           }
         } else FormGroup(footer = "数据先用同步密码加密，再存进你自己的私有 Gist，别人看不到内容。每台设备填同一个令牌和同步密码即可。同步密码忘了就解不开。") {
           SecretField(token, { token = it }, if (prov == "gitee") "Gitee 私人令牌（勾选 gists）" else "GitHub 令牌（gist 权限）")
@@ -466,12 +495,12 @@ fun SyncPage(back: () -> Unit) {
         }
         if (error.isNotEmpty()) FormGroup { T(error, 15f, color = pal.red, modifier = Modifier.padding(16.dp)) }
         FormGroup {
-          val ok = !busy && token.isNotBlank() && pass.length >= 4 && (prov != "webdav" || (davUrl.isNotBlank() && davUser.isNotBlank()))
+          val ok = !busy && token.isNotBlank() && pass.length >= 4 && (prov != "webdav" || (davUrl.text.isNotBlank() && davUser.isNotBlank()))
           Box(Modifier.fillMaxWidth().height(50.dp).press(1f, enabled = ok) {
             busy = true; error = ""
             scope.launch {
               try {
-                val found = Sync.enable(token, pass, prov, davUrl, davUser)
+                val found = Sync.enable(token, pass, prov, davUrl.text, davUser)
                 Store.setKind(Store.kind)
                 Store.show(if (found) "已连接，云端数据已合并" else "同步已开启")
               } catch (e: Exception) { error = e.message ?: "同步失败" }

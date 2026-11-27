@@ -25,5 +25,7 @@
   <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
   <key>NSFaceIDUsageDescription</key><string>用于解锁账号星图和查看完整账号</string>
   <key>ITSAppUsesNonExemptEncryption</key><false/>
+  <!-- http:// only for WebDAV on a LAN NAS (IP / .local / single-label host); every public host stays https-only -->
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict>
 </plist>

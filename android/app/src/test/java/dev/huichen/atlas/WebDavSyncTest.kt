@@ -15,7 +15,7 @@ class WebDavSyncTest {
   }
 
   @Test fun davConfRoundTrips() {
-    val c = SyncConf("webdav", "app-pass", "c2FsdA==", "a2V5", null, 0.0, Sync.DAV_PRESET, "me@example.com")
+    val c = SyncConf("webdav", "app-pass", "c2FsdA==", "a2V5", null, 0.0, Sync.DAV_JIANGUOYUN, "me@example.com")
     val back = JSON.decodeFromString(SyncConf.serializer(), JSON.encodeToString(SyncConf.serializer(), c))
     assertEquals(c, back)
   }
@@ -25,6 +25,17 @@ class WebDavSyncTest {
     assertEquals("https://dav.jianguoyun.com/dav/", Sync.davBase("dav.jianguoyun.com/dav/"))
     assertEquals("http://192.168.1.2:5005/", Sync.davBase("http://192.168.1.2:5005"))
     assertThrows(SyncError::class.java) { Sync.davBase("  ") }
-    assertEquals("dav.jianguoyun.com", Sync.davHost(Sync.DAV_PRESET))
+    assertEquals("dav.jianguoyun.com", Sync.davHost(Sync.DAV_JIANGUOYUN))
+    assertEquals("http://nas.local:5005/", Sync.davBase("http://nas.local:5005"))
+    assertEquals("http://[fd00::2]:5005/", Sync.davBase("http://[fd00::2]:5005/"))
+    assertEquals("https://app.koofr.net/dav/Koofr/", Sync.davBase("https://app.koofr.net/dav/Koofr"))
+    assertThrows(SyncError::class.java) { Sync.davBase("http://dav.example.com/dav/") }   // cleartext to a public host
+    assertThrows(SyncError::class.java) { Sync.davBase("https://NAS地址:5006/") }          // template left as is
+  }
+
+  @Test fun davPresets() {
+    assertEquals(listOf("坚果云", "群晖 NAS", "Nextcloud", "AList", "InfiniCLOUD", "Koofr", "pCloud", "自定义"), Sync.DAV_PRESETS.map { it.name })
+    Sync.DAV_PRESETS.filter { !it.template && it.url.isNotEmpty() }.forEach { Sync.davBase(it.url) }
+    Sync.DAV_PRESETS.filter { it.template }.forEach { p -> assertThrows(SyncError::class.java) { Sync.davBase(p.url) } }
   }
 }

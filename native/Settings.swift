@@ -273,8 +273,10 @@ struct SyncView: View {
   @State private var prov = "gitee"
   @State private var token = ""
   @State private var pass = ""
-  @State private var davUrl = Sync.DAV_PRESET
+  @State private var davUrl = ""
+  @State private var davPick = ""
   @State private var davUser = ""
+  @FocusState private var urlFocused: Bool
   @State private var busy = false
   @State private var error = ""
   @State private var askOff = false
@@ -301,17 +303,36 @@ struct SyncView: View {
           Picker("同步方式", selection: $prov) {
             Text("Gitee · 国内直连").tag("gitee")
             Text("GitHub Gist").tag("github")
-            Text("WebDAV · 坚果云等").tag("webdav")
+            Text("WebDAV · 坚果云、NAS 等").tag("webdav")
           }.pickerStyle(.inline).labelsHidden()
         } header: { Text("同步方式") }
         if prov == "webdav" {
+          let nut = davUrl.contains("jianguoyun")
+          let hint = Sync.DAV_PRESETS.first(where: { $0.id == davPick })?.hint ?? ""
+          let footer: String = nut ? "坚果云要用「第三方应用密码」，不是登录密码：网页版 账户信息 › 安全选项，或坚果云 App 设置 › 第三方应用管理 里添加。数据先用同步密码加密，再存到服务器的 AccountAtlas/atlas.enc.json，别人看不到内容。每台设备填同样的账号、应用密码和同步密码即可。同步密码忘了就解不开。"
+            : (hint.isEmpty ? "" : hint + "\n") + "数据先用同步密码加密，再存到服务器的 AccountAtlas/atlas.enc.json，别人看不到内容。每台设备填同样的服务器地址、账号、密码和同步密码即可。同步密码忘了就解不开。"
           Section {
-            TextField("服务器地址", text: $davUrl).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-            TextField("账号（坚果云填登录邮箱）", text: $davUser).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
-            SecureField("应用密码", text: $token).textInputAutocapitalization(.never).autocorrectionDisabled()
+            ScrollView(.horizontal) {
+              HStack(spacing: 8) {
+                ForEach(Sync.DAV_PRESETS, id: \.id) { p in
+                  Button {
+                    davPick = p.id; davUrl = p.url; error = ""
+                    if p.template || p.url.isEmpty { urlFocused = true }
+                  } label: {
+                    Text(p.name).font(.system(size: 14, weight: .semibold)).padding(.horizontal, 13).frame(height: 32)
+                      .foregroundStyle(davPick == p.id ? Color.white : Color.primary)
+                      .background(davPick == p.id ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.glass), in: Capsule())
+                  }.buttonStyle(PressStyle(scale: 0.94))
+                }
+              }.padding(.horizontal, 16).padding(.vertical, 4)
+            }.scrollIndicators(.hidden).listRowInsets(EdgeInsets())
+            TextField("https://example.com/dav/", text: $davUrl).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+              .focused($urlFocused)
+            TextField(nut ? "账号（坚果云登录邮箱）" : "账号", text: $davUser).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+            SecureField(nut || davUrl.contains("koofr") ? "应用密码" : "密码", text: $token).textInputAutocapitalization(.never).autocorrectionDisabled()
             SecureField("同步密码", text: $pass)
-            if davUrl.contains("jianguoyun") { Link("怎么获取坚果云应用密码", destination: URL(string: "https://help.jianguoyun.com/?p=2064")!) }
-          } footer: { Text("坚果云要用「第三方应用密码」，不是登录密码：网页版 账户信息 › 安全选项，或坚果云 App 设置 › 第三方应用管理 里添加。数据先用同步密码加密，再存到服务器的 AccountAtlas/atlas.enc.json，别人看不到内容。每台设备填同样的账号、应用密码和同步密码即可。同步密码忘了就解不开。") }
+            if nut { Link("怎么获取坚果云应用密码", destination: URL(string: "https://help.jianguoyun.com/?p=2064")!) }
+          } footer: { Text(footer) }
         } else {
         Section {
           SecureField(prov == "gitee" ? "Gitee 私人令牌（勾选 gists）" : "GitHub 令牌（gist 权限）", text: $token).textInputAutocapitalization(.never).autocorrectionDisabled()

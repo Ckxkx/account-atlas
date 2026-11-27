@@ -43,7 +43,7 @@ final class Sync: ObservableObject {
     switch provider {
     case "gitee": return "Gitee 私有 Gist"
     case "webdav":
-      let h = URL(string: conf?.url ?? "")?.host ?? "WebDAV"
+      let h = Sync.davHost(conf?.url)
       return h.contains("jianguoyun") ? "坚果云 WebDAV" : "WebDAV · " + h
     default: return "GitHub 私有 Gist"
     }
@@ -127,7 +127,27 @@ final class Sync: ObservableObject {
   // MARK: WebDAV
   // GET / PUT with HTTP Basic auth; a strong ETag goes back as If-Match so two devices can't overwrite each other.
   static let DAV_DIR = "AccountAtlas/"
-  static let DAV_PRESET = "https://dav.jianguoyun.com/dav/"
+  static let DAV_JIANGUOYUN = "https://dav.jianguoyun.com/dav/"
+  /// 服务器地址 shortcuts on the WebDAV form, same order and wording as Sync.kt. A template's placeholder
+  /// (NAS地址 / 你的域名 / 用户名 / 节点名 / 地址) is for the user to replace; 账号 and 密码 are never prefilled.
+  struct DavPreset: Hashable { let id: String; let name: String; let url: String; let template: Bool; let hint: String }
+  static let DAV_PRESETS: [DavPreset] = [
+    DavPreset(id: "jianguoyun", name: "坚果云", url: DAV_JIANGUOYUN, template: false, hint: ""),
+    DavPreset(id: "synology", name: "群晖 NAS", url: "https://NAS地址:5006/", template: true, hint: "在群晖套件中心安装 WebDAV Server 并开启 HTTPS（默认 5006 端口），账号密码用 DSM 账号；局域网也可以用 http://NAS地址:5005/。"),
+    DavPreset(id: "nextcloud", name: "Nextcloud", url: "https://你的域名/remote.php/dav/files/用户名/", template: true, hint: "把「你的域名」「用户名」换成自己的；密码建议用 Nextcloud 设置 › 安全 里生成的应用密码。"),
+    DavPreset(id: "alist", name: "AList", url: "http://地址:5244/dav/", template: true, hint: "在 /dav/ 后面接上 AList 里挂载的存储路径；AList 用户权限里要打开 WebDAV 读取和 WebDAV 管理。"),
+    DavPreset(id: "infinicloud", name: "InfiniCLOUD", url: "https://节点名.teracloud.jp/dav/", template: true, hint: "完整地址在 InfiniCLOUD 我的页面 › 外部应用连接 里查看；账号填连接 ID，密码填应用密码。"),
+    DavPreset(id: "koofr", name: "Koofr", url: "https://app.koofr.net/dav/Koofr", template: false, hint: "账号填 Koofr 登录邮箱；密码要用 Koofr 网页版 偏好设置 › 密码 里生成的应用密码。"),
+    DavPreset(id: "pcloud", name: "pCloud", url: "https://webdav.pcloud.com", template: false, hint: "账号密码就是 pCloud 登录邮箱和密码；欧洲区账号把地址改成 https://ewebdav.pcloud.com；开了两步验证的话，首次连接要在邮件里确认。"),
+    DavPreset(id: "custom", name: "自定义", url: "", template: false, hint: ""),
+  ]
+  private static let DAV_PLACEHOLDERS = ["NAS地址", "你的域名", "用户名", "节点名", "地址"]
+  /// http:// only where ATS allows it with NSAllowsLocalNetworking: IP addresses, .local names, single-label names
+  static func davLocalHost(_ host: String) -> Bool {
+    let h = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
+    return h.contains(":") || h.range(of: #"^\d{1,3}(\.\d{1,3}){3}$"#, options: .regularExpression) != nil || h.hasSuffix(".local") || !h.contains(".")
+  }
+  static func davHost(_ url: String?) -> String { URL(string: url ?? "")?.host ?? "WebDAV" }
   private struct Remote { var text: String?; var etag: String? = nil }
 
   /// normalizes what the user typed: adds https:// when missing, always ends with /
@@ -136,7 +156,9 @@ final class Sync: ObservableObject {
     if s.isEmpty { throw SyncError.msg("请填写 WebDAV 服务器地址") }
     if !s.lowercased().hasPrefix("http://") && !s.lowercased().hasPrefix("https://") { s = "https://" + s }
     if !s.hasSuffix("/") { s += "/" }
-    guard URL(string: s)?.host != nil else { throw SyncError.msg("服务器地址格式不对") }
+    if let ph = DAV_PLACEHOLDERS.first(where: { s.contains($0) }) { throw SyncError.msg("把服务器地址里的「\(ph)」换成你自己的") }
+    guard let u = URL(string: s), let host = u.host, !host.isEmpty else { throw SyncError.msg("服务器地址格式不对") }
+    if u.scheme?.lowercased() == "http" && !davLocalHost(host) { throw SyncError.msg("外网服务器请用 https://（http 只能用于局域网地址，如 192.168.x.x 或 nas.local）") }
     return s
   }
   private func dav(_ url: String, method: String = "GET", body: Data? = nil, user: String, pass: String, ifMatch: String? = nil) async throws -> (Data, HTTPURLResponse) {
@@ -153,11 +175,16 @@ final class Sync: ObservableObject {
       guard let h = resp as? HTTPURLResponse else { throw SyncError.msg("连不上 WebDAV 服务器，检查服务器地址和网络") }
       return (data, h)
     } catch let e as SyncError { throw e }
+    catch let e as URLError where e.code == .appTransportSecurityRequiresSecureConnection {
+      throw SyncError.msg("外网服务器请用 https://（http 只能用于局域网地址，如 192.168.x.x 或 nas.local）")
+    }
     catch { throw SyncError.msg("连不上 WebDAV 服务器，检查服务器地址和网络") }
   }
-  private static func davFail(_ code: Int) -> SyncError {
+  private static func davFail(_ code: Int, _ base: String) -> SyncError {
     switch code {
-    case 401: return .msg("账号或应用密码不对（坚果云要用第三方应用密码，不是登录密码）")
+    case 401:
+      let h = davHost(base)
+      return .msg(h.contains("jianguoyun") ? "账号或应用密码不对（坚果云要用第三方应用密码，不是登录密码）" : "账号或密码不对（\(h)；有的服务要用应用密码，不是登录密码）")
     case 403: return .msg("WebDAV 拒绝访问（没有权限，或请求太频繁，稍后再试）")
     case 404, 409: return .msg("服务器地址不对，找不到这个目录")
     case 507: return .msg("WebDAV 空间已满")
@@ -168,13 +195,13 @@ final class Sync: ObservableObject {
   private func davRead(_ base: String, user: String, pass: String) async throws -> Remote {
     let (data, h) = try await dav(base + Sync.DAV_DIR + Sync.FILE, user: user, pass: pass)
     if h.statusCode == 404 { return Remote(text: nil) }
-    if !(200..<300).contains(h.statusCode) { throw Sync.davFail(h.statusCode) }
+    if !(200..<300).contains(h.statusCode) { throw Sync.davFail(h.statusCode, base) }
     return Remote(text: String(decoding: data, as: UTF8.self), etag: h.value(forHTTPHeaderField: "ETag"))
   }
   /// MKCOL AccountAtlas/; 405 = it already exists
   private func davMkdir(_ base: String, user: String, pass: String) async throws {
     let (_, h) = try await dav(base + Sync.DAV_DIR, method: "MKCOL", user: user, pass: pass)
-    if !(200..<300).contains(h.statusCode) && h.statusCode != 405 { throw Sync.davFail(h.statusCode) }
+    if !(200..<300).contains(h.statusCode) && h.statusCode != 405 { throw Sync.davFail(h.statusCode, base) }
   }
   /// false = 412, someone else wrote in between (read, merge and try again)
   private func davWrite(_ base: String, user: String, pass: String, content: String, etag: String?, mkdir: Bool = true) async throws -> Bool {
@@ -185,7 +212,7 @@ final class Sync: ObservableObject {
       try await davMkdir(base, user: user, pass: pass)
       return try await davWrite(base, user: user, pass: pass, content: content, etag: etag, mkdir: false)
     }
-    if !(200..<300).contains(h.statusCode) { throw Sync.davFail(h.statusCode) }
+    if !(200..<300).contains(h.statusCode) { throw Sync.davFail(h.statusCode, base) }
     return true
   }
 
