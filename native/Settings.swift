@@ -275,36 +275,44 @@ struct CategoriesView: View {
   @State private var adding = false
   @State private var renaming: String? = nil
   @State private var deleting: String? = nil
-  @State private var text = ""
   @State private var error = ""
+  /// sorting is its own mode: a List that is always in edit mode and also opens a text alert from a
+  /// row tap could freeze after a drag (the alert came up but nothing responded)
+  @State private var mode: EditMode = .inactive
 
   var body: some View {
     let all = store.index.allCategories
+    let sorting = mode == .active
     List {
       Section {
         ForEach(Array(all.dropLast()), id: \.self) { c in
-          Button { text = c; error = ""; renaming = c } label: { row(c) }
+          row(c, chevron: !sorting)
+            .contentShape(Rectangle())
+            .onTapGesture { if !sorting { renaming = c } }
         }
         .onMove { from, to in store.moveCategories(from, to) }
         .onDelete { s in if let k = s.first { deleting = all[k] } }
-        row(OTHER_CAT)
-      } footer: { Text("拖动右侧把手排序，点分类可以改名。排在前面的分类，在「全部 App」里也排在前面。「其他」不能改名或删除，总在最后。") }
-      Section {
-        Button { text = ""; error = ""; adding = true } label: { Label("添加分类", systemImage: "plus") }
+        row(OTHER_CAT, chevron: false).moveDisabled(true).deleteDisabled(true)
+      } footer: { Text(sorting ? "拖动右侧把手调整顺序，排在前面的分类在「全部 App」里也排在前面。「其他」总在最后。" : "点分类改名，左滑删除，右上角「排序」调整顺序。「其他」不能改名或删除，总在最后。") }
+      if !sorting {
+        Section {
+          Button { adding = true } label: { Label("添加分类", systemImage: "plus") }
+        }
       }
     }
-    .environment(\.editMode, .constant(.active))
+    .environment(\.editMode, $mode)
+    .toolbar {
+      ToolbarItem(placement: .topBarTrailing) {
+        Button(sorting ? "完成" : "排序") { withAnimation { mode = sorting ? .inactive : .active } }.fontWeight(sorting ? .semibold : .regular)
+      }
+    }
     .navigationTitle("分类管理").navigationBarTitleDisplayMode(.inline)
-    .alert("添加分类", isPresented: $adding) {
-      TextField("分类名，最多 \(CAT_MAX) 个字", text: $text)
-      Button("添加") { retry(store.addCategory(text)) { adding = true } }
-      Button("取消", role: .cancel) {}
-    } message: { Text(error.isEmpty ? "新分类会排在「其他」前面。" : error) }
-    .alert("重命名分类", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-      TextField("分类名", text: $text)
-      Button("保存") { if let c = renaming { retry(store.renameCategory(c, to: text)) { renaming = c } } }
-      Button("取消", role: .cancel) { renaming = nil }
-    } message: { Text(error.isEmpty ? "用这个分类的 App 会一起改过去。" : error) }
+    .sheet(isPresented: $adding) {
+      CategoryNameSheet(title: "添加分类", initial: "", note: "新分类会排在「其他」前面。", action: "添加") { store.addCategory($0) }
+    }
+    .sheet(item: Binding(get: { renaming.map(CatName.init) }, set: { renaming = $0?.id })) { r in
+      CategoryNameSheet(title: "重命名分类", initial: r.id, note: "用这个分类的 App 会一起改过去。", action: "保存") { store.renameCategory(r.id, to: $0) }
+    }
     .confirmationDialog(deleting.map { "删除分类「\($0)」？" } ?? "", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
       Button("删除", role: .destructive) { if let c = deleting { store.deleteCategory(c) }; deleting = nil }
       Button("取消", role: .cancel) { deleting = nil }
@@ -314,18 +322,49 @@ struct CategoriesView: View {
     }
   }
 
-  func row(_ c: String) -> some View {
+  func row(_ c: String, chevron: Bool) -> some View {
     HStack {
       Text(c).foregroundStyle(.primary)
       Spacer()
       Text("\(store.index.categoryCount[c] ?? 0) 个 App").font(.system(size: 14)).foregroundStyle(.secondary)
+      if chevron { Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(.tertiary) }
     }
   }
-  /// a refused name: the alert comes back with the reason
-  func retry(_ problem: String?, _ show: @escaping () -> Void) {
-    guard let p = problem else { error = ""; return }
-    error = p
-    Task { try? await Task.sleep(for: .milliseconds(350)); show() }
+}
+
+private struct CatName: Identifiable { let id: String }
+
+/// add / rename in a small sheet: the field is focused right away and a refused name shows its
+/// reason in place (an alert had to be dismissed and re-shown, which is where it could get stuck)
+struct CategoryNameSheet: View {
+  let title: String, initial: String, note: String, action: String
+  let submit: (String) -> String?
+  @Environment(\.dismiss) private var dismiss
+  @State private var text = ""
+  @State private var error = ""
+  @FocusState private var focused: Bool
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section {
+          TextField("分类名，最多 \(CAT_MAX) 个字", text: $text)
+            .focused($focused).submitLabel(.done).onSubmit(save)
+        } footer: { Text(error.isEmpty ? note : error).foregroundStyle(error.isEmpty ? Color.secondary : Color.red) }
+      }
+      .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+        ToolbarItem(placement: .confirmationAction) {
+          Button(action) { save() }.disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+      }
+    }
+    .presentationDetents([.height(240)])
+    .onAppear { text = initial; focused = true }
+  }
+  func save() {
+    if let p = submit(text) { error = p } else { dismiss() }
   }
 }
 
