@@ -11,6 +11,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -325,6 +326,9 @@ fun SheetFrame(leaving: Boolean, covered: Boolean, own: Backdrop, below: List<Ba
     }
   }
   val coverScale by animateFloatAsState(if (covered) 0.94f else 1f, calm(), label = "cover")
+  // the live glass comes in only once the sheet has settled (a short fade, so there's no pop)
+  val settled = y.value == 0f && !y.isRunning
+  val glassIn by animateFloatAsState(if (settled) 1f else 0f, if (settled) tween(220) else snap(), label = "glassIn")
   val glass = Glass.blur
   val dark = pal.dark
   Box(Modifier.fillMaxSize().then(if (glass) Modifier.backdropSource(own) else Modifier)) {
@@ -343,7 +347,8 @@ fun SheetFrame(leaving: Boolean, covered: Boolean, own: Backdrop, below: List<Ba
       ) {
         // Android 12+: the sheet is glass over what is below it (dimmed by its own scrim, as on screen)
         if (glass) GlassBackdrop(below, SheetShape, sheetGlass(dark), Modifier.matchParentSize(),
-          over = { drawRect(Color.Black.copy(alpha = 0.4f * (1 - y.value))) }, track = { y.value; coverScale })
+          over = { drawRect(Color.Black.copy(alpha = 0.4f * (1 - y.value))) }, track = { y.value; coverScale },
+          solid = { 1f - glassIn })
         content()
         // drag handle: pull down to dismiss
         Box(Modifier.fillMaxWidth().height(28.dp).pointerInput(Unit) {

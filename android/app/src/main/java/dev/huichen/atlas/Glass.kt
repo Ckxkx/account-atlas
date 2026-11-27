@@ -117,6 +117,10 @@ fun glassRim(dark: Boolean, size: Size): Brush = Brush.linearGradient(
 fun GlassBackdrop(
   sources: List<Backdrop>, shape: Shape, style: GlassStyle, modifier: Modifier = Modifier,
   over: (DrawScope.() -> Unit)? = null, track: () -> Unit = {},
+  /** 1 = draw the tint opaque and skip the live blur; between 0 and 1 the opaque tint fades over the glass.
+   *  A sheet uses it while it slides: re-blurring a full-screen backdrop on every frame of the slide is
+   *  what made sheets stutter on the way up. */
+  solid: () -> Float = { 0f },
 ) {
   val glassLayer = rememberGraphicsLayer()
   val me = remember { arrayOfNulls<LayoutCoordinates>(1) }
@@ -132,6 +136,12 @@ fun GlassBackdrop(
       onDrawBehind {
         track()
         val mine = me[0]
+        val sol = solid()
+        if (sol >= 1f) {
+          drawRect(style.tint.copy(alpha = 1f))
+          drawOutline(outline, rim, style = Stroke(rimW))
+          return@onDrawBehind
+        }
         if (effect != null && mine != null && mine.isAttached) {
           glassLayer.renderEffect = effect
           glassLayer.record {
@@ -147,6 +157,7 @@ fun GlassBackdrop(
           drawLayer(glassLayer)
         }
         drawRect(style.tint)
+        if (sol > 0f) drawRect(style.tint.copy(alpha = sol))
         drawOutline(outline, rim, style = Stroke(rimW))
       }
     })
