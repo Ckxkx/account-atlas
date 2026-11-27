@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// Selected filter chip: solid accent. The rest are Liquid Glass on iOS 26, a flat tint below it.
+/// Selected filter chip: solid accent. The rest are a flat glass tint (no live Liquid Glass, see below).
 struct ChipChrome: ViewModifier {
   let on: Bool
   @ViewBuilder func body(content: Content) -> some View {
+    // No live glassEffect here: on iOS 26 the unselected chips re-materialised a few hundred ms after
+    // every switch back to this tab and flashed as grey / white blobs. A flat tint never does.
     if on { content.background(Color.accentColor, in: Capsule()) }
-    else if #available(iOS 26.0, *) { content.glassEffect(.regular, in: Capsule()) }
-    else { content.background(.glass, in: Capsule()) }
+    else { content.background(.glass, in: Capsule()).overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)) }
   }
 }
 
