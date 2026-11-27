@@ -58,11 +58,18 @@ jobs:
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/apksigner" verify --print-certs "$APK"
           cp "$APK" "$GITHUB_WORKSPACE/Atlas.apk"
+          cp app/build/outputs/mapping/release/mapping.txt "$GITHUB_WORKSPACE/mapping.txt" || true
           ls -la "$GITHUB_WORKSPACE/Atlas.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: Atlas-apk
           path: Atlas.apk
+      # R8 mapping, to read the stack traces a tester copies from 上次意外退出了
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Atlas-mapping
+          path: mapping.txt
+          if-no-files-found: ignore
 
   # emulator screenshots: only when run by hand (Actions -> Run workflow)
   shots:
