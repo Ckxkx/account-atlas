@@ -340,7 +340,9 @@ fun SheetFrame(leaving: Boolean, covered: Boolean, own: Backdrop, below: List<Ba
         // one layer does the move, the shadow and the rounded clip (no separate shadow + clip layers)
         .graphicsLayer {
           translationY = y.value * h; scaleX = coverScale; scaleY = coverScale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
-          shadowElevation = 20.dp.toPx(); shape = SheetShape; clip = true
+          // shadow only once settled: a 20dp shadow under a full-screen rounded layer is re-rasterised on
+          // every frame it moves, which cost frames on the slide-up (the dim scrim separates it anyway)
+          shadowElevation = if (glassIn > 0f) 20.dp.toPx() * glassIn else 0f; shape = SheetShape; clip = true
         }
         .then(if (glass) Modifier else Modifier.background(if (pal.dark) hex("#0b0b0d") else hex("#f2f2f7")))
         .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {}
