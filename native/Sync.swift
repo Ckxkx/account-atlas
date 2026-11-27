@@ -194,7 +194,8 @@ final class Sync: ObservableObject {
   /// nil text = no file yet
   private func davRead(_ base: String, user: String, pass: String) async throws -> Remote {
     let (data, h) = try await dav(base + Sync.DAV_DIR + Sync.FILE, user: user, pass: pass)
-    if h.statusCode == 404 { return Remote(text: nil) }
+    // 坚果云 answers 409 (not 404) when the AccountAtlas folder itself doesn't exist yet
+    if h.statusCode == 404 || h.statusCode == 409 { return Remote(text: nil) }
     if !(200..<300).contains(h.statusCode) { throw Sync.davFail(h.statusCode, base) }
     return Remote(text: String(decoding: data, as: UTF8.self), etag: h.value(forHTTPHeaderField: "ETag"))
   }

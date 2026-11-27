@@ -176,7 +176,8 @@ object Sync {
   /** null text = no file yet */
   private fun davRead(base: String, user: String, pass: String): Remote {
     davCall(Request.Builder().url(base + DAV_DIR + FILE), user, pass).use {
-      if (it.code == 404) return Remote(null)
+      // 坚果云 answers 409 (not 404) when the AccountAtlas folder itself doesn't exist yet
+      if (it.code == 404 || it.code == 409) return Remote(null)
       if (it.code !in 200..299) davFail(it.code, base)
       return Remote(it.body?.string() ?: "", it.header("ETag"))
     }
