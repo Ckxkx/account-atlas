@@ -836,3 +836,14 @@ html[data-theme=light] .tour-a .tour-go{color:#fff}
 .chk-row input{width:22px;height:22px;flex:none;accent-color:var(--tint);margin:0}
 .hint.warn{color:#ff9f0a}
 .hint.err{color:var(--red)}
+/* categories: 编辑分类… in the form's picker, and the manager's rows */
+.cats .cat-edit{background:none;color:var(--tint);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--tint) 45%,transparent)}
+.cat-row{min-height:56px;padding-left:16px}
+.cat-row+.cat-row::before{left:16px}
+.cat-fixed{padding-right:16px}
+.cat-act{flex:none;width:36px;height:44px;display:grid;place-items:center;color:var(--secondary);border-radius:10px}
+.cat-act svg{width:18px;height:18px}
+.cat-act.del{color:var(--red)}
+.cat-act:focus-visible{outline:2px solid var(--tint);outline-offset:-4px}
+.cat-ren{width:100%;border:0;outline:none;background:var(--fill);border-radius:8px;font-size:16px;padding:7px 10px;color:inherit}
+.cat-new button{flex:none;color:var(--tint);font-size:16px;font-weight:600;padding:8px 0 8px 8px}

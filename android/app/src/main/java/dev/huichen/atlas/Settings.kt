@@ -52,6 +52,7 @@ import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.PlaylistAdd
 import androidx.compose.material.icons.outlined.PlaylistRemove
 import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.PersonOff
 import androidx.compose.material.icons.outlined.Restore
@@ -120,6 +121,7 @@ fun SettingsSheet() {
     when (p) {
       "sync" -> SyncPage { page = "main" }
       "order" -> OrderPage { page = "main" }
+      "cats" -> CategoriesPage { page = "main" }
       "update" -> UpdatePage { page = "main" }
       else -> SettingsMain { page = it }
     }
@@ -191,6 +193,8 @@ fun SettingsMain(go: (String) -> Unit) {
         }
         Divider()
         SettingRow(Icons.Outlined.SwapVert, "调整卡片顺序", chevron = true) { go("order") }
+        Divider()
+        SettingRow(Icons.Outlined.Folder, "分类管理", chevron = true) { go("cats") }
         Divider()
         SettingRow(Icons.Outlined.School, "操作演示", chevron = true) { Tour.start(firstRun = false) }
       }

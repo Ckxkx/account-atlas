@@ -466,13 +466,17 @@ fun AccountForm(existing: Account) {
 
   fun pickPreset(p: Preset) {
     hap(TICK); token++; pending = null
-    name = p.name; if (p.domain.isNotEmpty()) domain = p.domain; category = p.category; icon = null; typed = false
+    name = p.name; if (p.domain.isNotEmpty()) domain = p.domain; category = Store.catOr(p.category); icon = null; typed = false
   }
   fun pickHit(h: AppHit) {
     hap(TICK); val t = ++token
-    name = h.name; if (h.domain.isNotEmpty()) domain = h.domain; category = h.category; typed = false; pending = h
+    name = h.name; if (h.domain.isNotEmpty()) domain = h.domain; category = Store.catOr(h.category); typed = false; pending = h
     scope.launch { val ic = AppStore.icon(h); if (t == token) { icon = ic; pending = null } }
   }
+
+  // back from 编辑分类…: a renamed category follows to its new name (a deleted one becomes 其他)
+  val allCats = Store.cats
+  LaunchedEffect(allCats) { category = Store.catFollow(category) }
 
   Column {
     SheetBar("取消", "编辑", "保存", name.isNotBlank()) {
@@ -528,7 +532,8 @@ fun AccountForm(existing: Account) {
             T("分类", 17f, modifier = Modifier.weight(1f)); T(category, 17f, color = pal.secondary)
           }
           DropdownMenu(catMenu, { catMenu = false }) {
-            CATS.forEach { c -> DropdownMenuItem({ Text(c) }, { category = c; catMenu = false }) }
+            (if (category in allCats) allCats else allCats.dropLast(1) + category + OTHER_CAT).forEach { c -> DropdownMenuItem({ Text(c) }, { category = c; catMenu = false }) }
+            DropdownMenuItem({ Text("编辑分类…", color = pal.accent) }, { catMenu = false; Store.push(Route.Categories) })
           }
         }
       }
@@ -610,7 +615,7 @@ fun PickerSheet(presetIdentity: String?) {
     val now = nowMS()
     val made = picked.mapIndexed { k, p ->
       val ph = photos[key(p)]
-      Account(newID(), p.name, p.domain, p.category, ids, handle = handles[key(p)]?.trim()?.ifEmpty { null }, createdAt = now - k,
+      Account(newID(), p.name, p.domain, Store.catOr(p.category), ids, handle = handles[key(p)]?.trim()?.ifEmpty { null }, createdAt = now - k,
         icon = if (ph != null) ph.ifEmpty { null } else icons[key(p)] ?: ownIcon(p))
     }
     Store.unhideApps(made.map { it.name })
@@ -632,7 +637,7 @@ fun PickerSheet(presetIdentity: String?) {
     else (slideInHorizontally(calm()) { -it / 3 } + fadeIn()) togetherWith (slideOutHorizontally(calm()) { it } + fadeOut())
   }, label = "step") { s2 ->
     if (!s2) {
-      val cats = (if (custom.isEmpty()) emptyList() else listOf("我添加的")) + "常用" + CATS.filter { c -> Presets.all.any { it.category == c } }
+      val cats = (if (custom.isEmpty()) emptyList() else listOf("我添加的")) + "常用" + Store.cats.filter { c -> Presets.all.any { Store.catOr(it.category) == c } }
       val q = query.trim().lowercase()
       val all = custom + Presets.all
       val mine = q.isEmpty() && cat == "我添加的"
@@ -640,7 +645,7 @@ fun PickerSheet(presetIdentity: String?) {
         "我添加的" -> custom
         // the first 12 most-used apps (3 rows of 4), custom apps only under 我添加的
         "常用" -> Presets.popular.take(12).mapNotNull { n -> Presets.all.firstOrNull { it.name == n } }
-        else -> Presets.all.filter { it.category == cat }
+        else -> Presets.all.filter { Store.catOr(it.category) == cat }
       }
       Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {

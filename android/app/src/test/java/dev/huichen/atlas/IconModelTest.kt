@@ -34,6 +34,7 @@ class IconModelTest {
     assertEquals("支付金融", appStoreCategory("Lifestyle", listOf("生活", "财务"), listOf("6012", "6015")))
     assertEquals("娱乐", appStoreCategory("Photo & Video", emptyList()))
     assertEquals("出行", appStoreCategory("Navigation", emptyList()))
+    assertEquals("生活", appStoreCategory("Food & Drink", listOf("美食佳饮"), listOf("6023")))
     assertEquals("工具", appStoreCategory("Productivity", listOf("效率")))
     val hits = parseAppStore("""{"resultCount":1,"results":[{"trackName":"微信","sellerUrl":"http://www.weixin.qq.com/x","primaryGenreName":"Social Networking",
       "genres":["社交"],"genreIds":["6005"],"artworkUrl100":"https://a/100x100bb.jpg"}]}""")

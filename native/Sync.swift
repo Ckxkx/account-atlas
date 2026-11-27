@@ -248,12 +248,20 @@ final class Sync: ObservableObject {
     let old = nowMS() - 90 * 86_400_000
     del = del.filter { $0.value >= old }
     out.deleted = del
+    // the category list is one value: the side that changed it last wins (a tie takes the larger text, so
+    // both sides agree). Categories still used by an account but missing from it are shown at the end.
+    let ca = a.categoriesAt ?? 0, cb = b.categoriesAt ?? 0
+    let w = ca > cb ? a : cb > ca ? b : (Sync.joined(a.categories).lexicographicallyPrecedes(Sync.joined(b.categories)) ? b : a)
+    out.categories = w.categories; out.categoriesAt = w.categoriesAt
     return out
   }
+  /// compared as UTF-16, the way the web and Android clients compare strings
+  private static func joined(_ c: [String]?) -> [UInt16] { Array((c ?? []).joined(separator: "\n").utf16) }
   private static func sig(_ d: AtlasData) -> String {
     let e = JSONEncoder(); e.outputFormatting = .sortedKeys
     let a = (try? e.encode(d.identities)) ?? Data(), b = (try? e.encode(d.accounts)) ?? Data(), c = (try? e.encode(d.deleted)) ?? Data()
-    return String(decoding: a + b + c, as: UTF8.self)
+    let k = (try? e.encode(d.categories ?? [])) ?? Data()
+    return String(decoding: a + b + c + k, as: UTF8.self) + "|\(d.categoriesAt ?? 0)"
   }
 
   // MARK: run

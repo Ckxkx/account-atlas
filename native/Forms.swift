@@ -283,6 +283,11 @@ struct AccountForm: View {
   }
 
   var query: String { typed && nameFocused ? name.trimmingCharacters(in: .whitespaces) : "" }
+  /// the user's categories (其他 last); the account's own one is always there to pick
+  var pickerCats: [String] {
+    let l = store.index.allCategories
+    return l.contains(category) ? l : Array(l.dropLast()) + [category, OTHER_CAT]
+  }
   var presetHits: [Preset] {
     let q = query.lowercased()
     guard !q.isEmpty else { return [] }
@@ -314,7 +319,9 @@ struct AccountForm: View {
             }
           }.padding(.vertical, 4)
           TextField("账号名（可选）", text: $handle).textInputAutocapitalization(.never).autocorrectionDisabled()
-          Picker("分类", selection: $category) { ForEach(CATS, id: \.self) { Text($0).tag($0) } }
+          Picker("分类", selection: $category) { ForEach(pickerCats, id: \.self) { Text($0).tag($0) } }
+          // 编辑分类…: the manager opens on top; coming back, a renamed category follows to its new name
+          NavigationLink { CategoriesView() } label: { Text("编辑分类…").foregroundStyle(Color.accentColor) }
         }
         if !presetHits.isEmpty || !storeHits.isEmpty {
           Section {
@@ -337,6 +344,7 @@ struct AccountForm: View {
       }
       .animation(Motion.snappy, value: presetHits.count + storeHits.count)
       .onChange(of: name) { if nameFocused { typed = true } }
+      .onChange(of: store.index.allCategories) { category = store.catFollow(category) }
       .appStoreResults(for: query, into: $appResults)
       .confirmationDialog("更换图标", isPresented: $iconMenu, titleVisibility: .visible) {
         Button("从相册选择") { photos = true }
@@ -396,14 +404,14 @@ struct AccountForm: View {
   }
   func pick(_ p: Preset) {
     typed = false; nameFocused = false
-    name = p.name; domain = p.domain; category = p.category
+    name = p.name; domain = p.domain; category = store.catOr(p.category)
     setIcon(nil)
   }
   func pick(_ a: AppStoreApp) {
     typed = false; nameFocused = false
     name = a.cleanName
     if !a.domain.isEmpty { domain = a.domain }
-    category = a.category
+    category = store.catOr(a.category)
     iconJob &+= 1; let job = iconJob
     withAnimation(Motion.snappy) { icon = nil; art = a.thumbURL.isEmpty ? nil : a.thumbURL }
     Task {
@@ -576,7 +584,7 @@ struct PickerSheet: View {
   @State private var photoItem: PhotosPickerItem? = nil
 
   var cats: [String] {
-    (store.customApps.isEmpty ? [] : ["我添加的"]) + ["常用"] + CATS.filter { c in Presets.all.contains { $0.category == c } }
+    (store.customApps.isEmpty ? [] : ["我添加的"]) + ["常用"] + store.index.allCategories.filter { c in Presets.all.contains { store.catOr($0.category) == c } }
   }
   var list: [Preset] {
     let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -588,7 +596,7 @@ struct PickerSheet: View {
     switch cat {
     case "我添加的": return store.customApps
     case "常用": return Array(Presets.popular.compactMap { n in Presets.all.first { $0.name == n } }.prefix(12))
-    default: return Presets.all.filter { $0.category == cat }
+    default: return Presets.all.filter { store.catOr($0.category) == cat }
     }
   }
   func key(_ p: Preset) -> String { p.name.lowercased() }
@@ -841,7 +849,7 @@ struct PickerSheet: View {
     let now = nowMS()
     let made: [Account] = picked.enumerated().map { e in
       let k = e.offset, p = e.element
-      return Account(name: p.name, domain: p.domain, category: p.category, identityIds: ids,
+      return Account(name: p.name, domain: p.domain, category: store.catOr(p.category), identityIds: ids,
               handle: (handles[key(p)] ?? "").trimmingCharacters(in: .whitespaces).isEmpty ? nil : handles[key(p)]!.trimmingCharacters(in: .whitespaces),
               createdAt: now - Double(k), icon: p.icon)
     }

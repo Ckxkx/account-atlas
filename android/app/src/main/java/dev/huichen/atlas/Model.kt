@@ -286,6 +286,10 @@ data class AtlasData(
   val accounts: List<Account> = emptyList(),
   val deleted: Map<String, @Serializable(with = MsSerializer::class) Double> = emptyMap(),
   val demo: Boolean? = null,
+  /** the user's categories in order; null = DEFAULT_CATS. One value with one stamp: sync takes the side
+   *  whose list changed last. Older builds drop both keys (their list is just the defaults). */
+  val categories: List<String>? = null,
+  @Serializable(with = MsSerializer::class) val categoriesAt: Double? = null,
 )
 
 val JSON = Json {
@@ -306,6 +310,8 @@ private fun decodeLossy(text: String): AtlasData = runCatching { JSON.decodeFrom
     accounts = list("accounts", Account.serializer()),
     deleted = runCatching { JSON.decodeFromJsonElement(AtlasData.serializer(), kotlinx.serialization.json.JsonObject(mapOf("deleted" to (o["deleted"] ?: kotlinx.serialization.json.JsonObject(emptyMap()))))).deleted }.getOrDefault(emptyMap()),
     demo = (o["demo"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull(),
+    categories = (o["categories"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content },
+    categoriesAt = (o["categoriesAt"] as? JsonPrimitive)?.content?.toDoubleOrNull(),
   )
 }
 
@@ -338,7 +344,30 @@ fun newID(): String {
 }
 fun nowMS(): Double = System.currentTimeMillis().toDouble()
 
-val CATS = listOf("社交", "购物", "支付金融", "开发", "AI", "娱乐", "游戏", "出行", "工具", "加密", "其他")
+// categories are the user's own: the ordered list lives in the synced data (AtlasData.categories, null = these).
+// 其他 is always there and always last; it can't be renamed or deleted.
+val DEFAULT_CATS = listOf("社交", "购物", "支付金融", "开发", "AI", "娱乐", "游戏", "出行", "生活", "工具", "加密", "其他")
+const val OTHER_CAT = "其他"
+const val CAT_MAX = 8
+val CAT_RESERVED = setOf("全部", "常用", "我添加的")
+
+/** In order: the saved list (or the defaults), then any category an account still uses that isn't in it
+ *  (renamed on another device, an older client), so nothing disappears; 其他 always last. */
+fun catList(d: AtlasData): List<String> {
+  val out = ArrayList<String>()
+  val base = d.categories?.takeIf { it.isNotEmpty() } ?: DEFAULT_CATS
+  for (c in base) if (c.isNotBlank() && c != OTHER_CAT && c !in out) out += c
+  val extra = d.accounts.map { it.category }.filter { it.isNotEmpty() && it != OTHER_CAT && it !in out }.toSortedSet()
+  return out + extra + OTHER_CAT
+}
+/** why a (trimmed) name can't be a category, null when it can */
+fun catProblem(name: String, list: List<String>, except: String? = null): String? = when {
+  name.isEmpty() -> "分类名不能为空"
+  name.codePointCount(0, name.length) > CAT_MAX -> "分类名最多 $CAT_MAX 个字"
+  name in CAT_RESERVED -> "这个名字不能用"
+  list.any { it != except && it.lowercase() == name.lowercase() } -> "已经有这个分类了"
+  else -> null
+}
 
 data class Preset(val name: String, val domain: String, val category: String, val color: String, val aliases: String = "")
 
@@ -470,13 +499,13 @@ fun appStoreCategory(primary: String, genres: List<String>, ids: List<String> = 
     "Entertainment" to "娱乐", "娱乐" to "娱乐", "Music" to "娱乐", "音乐" to "娱乐", "Video" to "娱乐",
     "Photo & Video" to "娱乐", "摄影与录像" to "娱乐",
     "Travel" to "出行", "旅游" to "出行", "旅行" to "出行", "Navigation" to "出行", "导航" to "出行",
+    "Lifestyle" to "生活", "生活" to "生活", "Food & Drink" to "生活", "美食佳饮" to "生活",
   )
   val byId = mapOf("6005" to "社交", "6024" to "购物", "6015" to "支付金融", "6026" to "开发", "6014" to "游戏",
-    "6016" to "娱乐", "6011" to "娱乐", "6008" to "娱乐", "6003" to "出行", "6010" to "出行")
-  byName[primary.trim()]?.let { return it }
-  for (g in genres) byName[g.trim()]?.let { return it }
-  for (i in ids) byId[i.trim()]?.let { return it }
-  return "工具"
+    "6016" to "娱乐", "6011" to "娱乐", "6008" to "娱乐", "6003" to "出行", "6010" to "出行", "6012" to "生活", "6023" to "生活")
+  val hits = listOfNotNull(byName[primary.trim()]) + genres.mapNotNull { byName[it.trim()] } + ids.mapNotNull { byId[it.trim()] }
+  // 生活 (Lifestyle, Food & Drink) is a catch-all genre: only when nothing more specific fits
+  return hits.firstOrNull { it != "生活" } ?: hits.firstOrNull() ?: "工具"
 }
 
 fun parseAppStore(text: String): List<AppHit> = runCatching {
@@ -521,8 +550,12 @@ object Merge {
     val idSet = ids.map { it.id }.toSet()
     accs = accs.map { it.copy(identityIds = it.identityIds.filter { x -> x in idSet }) }
     val old = now - 90 * 86_400_000.0
-    return AtlasData(identities = ids, accounts = accs, deleted = del.filterValues { it >= old })
+    // the category list is one value: the side that changed it last wins (a tie takes the larger text, so
+    // both sides agree). Categories still used by an account but missing from it are shown at the end.
+    val ca = a.categoriesAt ?: 0.0; val cb = b.categoriesAt ?: 0.0
+    val w = if (ca > cb) a else if (cb > ca) b else if ((a.categories ?: emptyList()).joinToString("\n") >= (b.categories ?: emptyList()).joinToString("\n")) a else b
+    return AtlasData(identities = ids, accounts = accs, deleted = del.filterValues { it >= old }, categories = w.categories, categoriesAt = w.categoriesAt)
   }
   /** Signature used to decide whether anything changed (order-sensitive like the iOS one). */
-  fun sig(d: AtlasData): String = encodeAtlas(AtlasData(d.identities, d.accounts, d.deleted.toSortedMap()))
+  fun sig(d: AtlasData): String = encodeAtlas(AtlasData(d.identities, d.accounts, d.deleted.toSortedMap(), categories = d.categories, categoriesAt = d.categoriesAt))
 }

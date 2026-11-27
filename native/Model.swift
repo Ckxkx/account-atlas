@@ -360,8 +360,12 @@ struct AtlasData: Codable {
   var accounts: [Account] = []
   var deleted: [String: Double] = [:]
   var demo: Bool? = nil
-  init(identities: [Identity] = [], accounts: [Account] = [], deleted: [String: Double] = [:], demo: Bool? = nil) {
-    self.identities = identities; self.accounts = accounts; self.deleted = deleted; self.demo = demo
+  /// the user's categories in order; nil = DEFAULT_CATS. One value with one stamp: sync takes the side
+  /// whose list changed last. Older clients drop both keys (their list is just the defaults).
+  var categories: [String]? = nil
+  var categoriesAt: Double? = nil
+  init(identities: [Identity] = [], accounts: [Account] = [], deleted: [String: Double] = [:], demo: Bool? = nil, categories: [String]? = nil) {
+    self.identities = identities; self.accounts = accounts; self.deleted = deleted; self.demo = demo; self.categories = categories
   }
   init(from d: Decoder) throws {
     let c = try d.container(keyedBy: CodingKeys.self)
@@ -374,6 +378,8 @@ struct AtlasData: Codable {
     accounts = accounts.filter { sa.insert($0.id).inserted }
     deleted = (try? c.decode([String: Double].self, forKey: .deleted)) ?? [:]
     demo = try? c.decode(Bool.self, forKey: .demo)
+    categories = try? c.decode([String].self, forKey: .categories)
+    categoriesAt = try? c.decode(Double.self, forKey: .categoriesAt)
   }
 }
 
@@ -397,7 +403,31 @@ func newID() -> String {
 }
 func nowMS() -> Double { (Date().timeIntervalSince1970 * 1000).rounded() }
 
-let CATS = ["社交", "购物", "支付金融", "开发", "AI", "娱乐", "游戏", "出行", "工具", "加密", "其他"]
+// categories are the user's own: the ordered list lives in the synced data (AtlasData.categories, nil = these).
+// 其他 is always there and always last; it can't be renamed or deleted.
+let DEFAULT_CATS = ["社交", "购物", "支付金融", "开发", "AI", "娱乐", "游戏", "出行", "生活", "工具", "加密", "其他"]
+let OTHER_CAT = "其他"
+let CAT_MAX = 8
+let CAT_RESERVED: Set<String> = ["全部", "常用", "我添加的"]
+
+/// in order: the saved list (or the defaults), then any category an account still uses that isn't in it
+/// (renamed on another device, an older client), so nothing disappears; 其他 always last
+func catList(_ d: AtlasData) -> [String] {
+  var out: [String] = []
+  let base = (d.categories?.isEmpty ?? true) ? DEFAULT_CATS : d.categories!
+  for c in base where !c.trimmingCharacters(in: .whitespaces).isEmpty && c != OTHER_CAT && !out.contains(c) { out.append(c) }
+  var extra = Set<String>()
+  for a in d.accounts where !a.category.isEmpty && a.category != OTHER_CAT && !out.contains(a.category) { extra.insert(a.category) }
+  return out + extra.sorted { Array($0.utf16).lexicographicallyPrecedes(Array($1.utf16)) } + [OTHER_CAT]
+}
+/// why a (trimmed) name can't be a category, nil when it can
+func catProblem(_ name: String, in list: [String], except: String? = nil) -> String? {
+  if name.isEmpty { return "分类名不能为空" }
+  if name.count > CAT_MAX { return "分类名最多 \(CAT_MAX) 个字" }
+  if CAT_RESERVED.contains(name) { return "这个名字不能用" }
+  if list.contains(where: { $0 != except && $0.lowercased() == name.lowercased() }) { return "已经有这个分类了" }
+  return nil
+}
 
 struct Preset: Hashable { let name: String; let domain: String; let category: String; let color: String; var icon: String? = nil; var aliases: String = "" }
 
@@ -494,7 +524,8 @@ struct AtlasIndex {
   var logins: [Identity] = []                    // 微信 / QQ / Apple
   var boundLogins: [String: [Identity]] = [:]    // email/phone id -> login cards bound to it
   var categoryCount: [String: Int] = [:]
-  var categories: [String] = []
+  var categories: [String] = []                  // the ones with apps, in the user's order
+  var allCategories: [String] = DEFAULT_CATS   // every category, in the user's order (其他 last)
   var byCategory: [String: [Account]] = [:]      // sorted by name
   init() {}
   init(_ d: AtlasData) {
@@ -515,8 +546,8 @@ struct AtlasIndex {
       byCategory[a.category, default: []].append(a)
     }
     recent = Array(d.accounts.sorted { $0.createdAt > $1.createdAt }.prefix(5))
-    let have = Set(categoryCount.keys)
-    categories = CATS.filter { have.contains($0) } + have.filter { !CATS.contains($0) }.sorted()
+    allCategories = catList(d)
+    categories = allCategories.filter { categoryCount[$0] != nil }
   }
 }
 
@@ -560,6 +591,7 @@ final class Store {
 
   @ObservationIgnored private var seenI: [String: Identity] = [:]
   @ObservationIgnored private var seenA: [String: Account] = [:]
+  @ObservationIgnored private var seenCats: [String]? = nil
   @ObservationIgnored private var undoSnap: AtlasData? = nil
   private let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("atlas.json")
   private let io = DispatchQueue(label: "atlas.persist", qos: .utility)
@@ -662,6 +694,7 @@ final class Store {
     seenI = [:]; seenA = [:]
     for x in data.identities { seenI[x.id] = Store.plain(x) }
     for x in data.accounts { seenA[x.id] = Store.plain(x) }
+    seenCats = data.categories
   }
   /// stamps changed records (compared field by field, ignoring updatedAt) and tombstones removed ones
   private func stamp(_ d: inout AtlasData) {
@@ -679,6 +712,8 @@ final class Store {
     }
     for id in seenI.keys where !live.contains(id) { d.deleted[id] = now }
     for id in seenA.keys where !live.contains(id) { d.deleted[id] = now }
+    // the category list is one value with one stamp (sync takes the side that changed it last)
+    if d.categories != seenCats { d.categoriesAt = now }
   }
   func save() {
     var d = data
@@ -873,7 +908,8 @@ final class Store {
     let iso = ISO8601DateFormatter().string(from: Date())
     let ids = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(data.identities))) ?? []
     let accs = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(data.accounts))) ?? []
-    let o: [String: Any] = ["app": "atlas", "version": 1, "exportedAt": iso, "identities": ids, "accounts": accs]
+    var o: [String: Any] = ["app": "atlas", "version": 1, "exportedAt": iso, "identities": ids, "accounts": accs]
+    if let c = data.categories { o["categories"] = c }
     return (try? JSONSerialization.data(withJSONObject: o, options: [.prettyPrinted, .sortedKeys])) ?? Data()
   }
   /// a backup file, read but not applied (nil when it isn't one)
@@ -885,7 +921,10 @@ final class Store {
   func importBackup(_ d: Data) -> Bool {
     guard let b = readBackup(d) else { return false }
     saveRestorePoint("import")   // the data it replaces can always be brought back from 设置
-    mutate("已导入 \(b.identities.count) 个身份和 \(b.accounts.count) 个网站") { s in s.identities = b.identities; s.accounts = b.accounts }
+    mutate("已导入 \(b.identities.count) 个身份和 \(b.accounts.count) 个网站") { s in
+      s.identities = b.identities; s.accounts = b.accounts
+      if let c = b.categories { s.categories = c }   // a backup without a list (older versions) keeps the categories you have
+    }
     setKind(kind)
     return true
   }
@@ -919,7 +958,7 @@ final class Store {
     saveRestorePoint("demo")
     var d = Store.demo()
     for k in d.identities.indices { d.identities[k].demo = true }
-    for k in d.accounts.indices { d.accounts[k].demo = true }
+    for k in d.accounts.indices { d.accounts[k].demo = true; d.accounts[k].category = catOr(d.accounts[k].category) }
     let have = Set(data.identities.map(\.id) + data.accounts.map(\.id))
     mutate("已载入示例，可在「设置」里清除") { s in
       s.identities += d.identities.filter { !have.contains($0.id) }
@@ -964,7 +1003,8 @@ final class Store {
   func restore() {
     guard let raw = try? Data(contentsOf: restoreURL), let b = try? JSONDecoder().decode(AtlasData.self, from: raw) else { show("备份读不出来了"); return }
     let keep = try? JSONEncoder().encode(data)
-    mutate("已恢复 \(b.identities.count) 个身份和 \(b.accounts.count) 个网站") { s in s.identities = b.identities; s.accounts = b.accounts }
+    // no list in the restore point = the defaults back then
+    mutate("已恢复 \(b.identities.count) 个身份和 \(b.accounts.count) 个网站") { s in s.identities = b.identities; s.accounts = b.accounts; s.categories = b.categories }
     // the data that was just replaced becomes the new restore point, so a restore can be taken back too
     if let keep, (try? keep.write(to: restoreURL, options: .atomic)) != nil {
       restoreWhy = "restore"; restoreAt = nowMS()
@@ -991,7 +1031,7 @@ final class Store {
     undoSnap = nil
     var sample = Identity(type: "email", value: "me@example.com", label: "示例邮箱", color: COLORS[0])
     sample.demo = true
-    data = AtlasData(identities: [sample])
+    data = AtlasData(identities: [sample], categories: realSnap?.categories)
     remember()
     setKind("email", focus: sample.id)
     tourFirstRun = firstRun
@@ -1011,6 +1051,56 @@ final class Store {
     UserDefaults.standard.set(true, forKey: "atlas.tourDone")
     onSaved?()
     if demoAfter { loadDemo() }
+  }
+
+  // MARK: categories: add, rename, delete, reorder (every change saved right away, with 撤销)
+
+  /// a preset / App Store / sample category that isn't in the list (deleted or renamed) becomes 其他
+  func catOr(_ c: String) -> String { index.allCategories.contains(c) ? c : OTHER_CAT }
+  /// renames made this session, so an open form follows its category to the new name
+  @ObservationIgnored private var catRenames: [String: String] = [:]
+  func catFollow(_ c: String) -> String {
+    var c = c
+    for _ in 0..<20 { guard let n = catRenames[c] else { break }; c = n }
+    return catOr(c)
+  }
+  /// nil when added, else why not
+  func addCategory(_ raw: String) -> String? {
+    let name = raw.trimmingCharacters(in: .whitespaces), list = index.allCategories
+    if let bad = catProblem(name, in: list) { return bad }
+    mutate("已添加分类「\(name)」") { s in s.categories = Array(list.dropLast()) + [name, OTHER_CAT] }
+    return nil
+  }
+  func renameCategory(_ from: String, to raw: String) -> String? {
+    let name = raw.trimmingCharacters(in: .whitespaces), list = index.allCategories
+    guard from != OTHER_CAT, name != from else { return nil }
+    if let bad = catProblem(name, in: list, except: from) { return bad }
+    catRenames[from] = name; catRenames[name] = nil
+    // apps typed in by hand remember their category too
+    var saved = (UserDefaults.standard.array(forKey: "atlas.custom") as? [[String]]) ?? []
+    if saved.contains(where: { $0.count > 2 && $0[2] == from }) {
+      saved = saved.map { t in var t = t; if t.count > 2 && t[2] == from { t[2] = name }; return t }
+      UserDefaults.standard.set(saved, forKey: "atlas.custom"); customRev &+= 1
+    }
+    mutate("已改名为「\(name)」") { s in
+      s.categories = list.map { $0 == from ? name : $0 }
+      for k in s.accounts.indices where s.accounts[k].category == from { s.accounts[k].category = name }
+    }
+    return nil
+  }
+  func deleteCategory(_ c: String) {
+    guard c != OTHER_CAT else { return }
+    let list = index.allCategories
+    mutate("已删除分类「\(c)」") { s in
+      s.categories = list.filter { $0 != c }
+      for k in s.accounts.indices where s.accounts[k].category == c { s.accounts[k].category = OTHER_CAT }
+    }
+  }
+  /// offsets within the list without 其他 (it stays last)
+  func moveCategories(_ from: IndexSet, _ to: Int) {
+    var l = Array(index.allCategories.dropLast())
+    l.move(fromOffsets: from, toOffset: to)
+    mutate(nil) { s in s.categories = l + [OTHER_CAT] }
   }
 
   // MARK: 2.5 copying an account value: local only, expires after 60 s
@@ -1044,7 +1134,7 @@ final class Store {
       mk("微信", "weixin.qq.com", "社交", [p1], 30), mk("支付宝", "alipay.com", "支付金融", [p1], 30),
       mk("哔哩哔哩", "bilibili.com", "娱乐", [p2], 40), mk("Steam", "steampowered.com", "游戏", [q], 60, "令牌在主力手机上"),
       mk("Apple ID", "apple.com", "工具", [g, p1], 90), mk("Notion", "notion.so", "工具", [a], 120), mk("网易云音乐", "music.163.com", "娱乐", [p2], 150),
-      mk("美团", "meituan.com", "出行", [w], 20), mk("拼多多", "pinduoduo.com", "购物", [w], 25),
+      mk("美团", "meituan.com", "生活", [w], 20), mk("拼多多", "pinduoduo.com", "购物", [w], 25),
     ])
   }
 }

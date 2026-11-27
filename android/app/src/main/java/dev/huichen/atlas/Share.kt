@@ -121,7 +121,8 @@ fun ShareCard(ids: List<Identity>, hideValues: Boolean) {
   val sub = if (dark) Color.White.copy(alpha = 0.62f) else hex("#3c3c43").copy(alpha = 0.7f)
   val accent = hex(ids.firstOrNull()?.color ?: "#0a84ff")
   val accs = Store.data.accounts.filter { a -> a.identityIds.any { x -> ids.any { it.id == x } } }
-  val cats = accs.groupingBy { it.category }.eachCount().entries.sortedByDescending { it.value }
+  val order = Store.cats
+  val cats = accs.groupingBy { it.category }.eachCount().entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { order.indexOf(it.key).let { k -> if (k < 0) Int.MAX_VALUE else k } })
   Column(Modifier.width(360.dp).clip(RoundedCornerShape(28.dp))
     .drawBehind {
       drawRect(Brush.verticalGradient(if (dark) listOf(hex("#15151b"), hex("#07070a")) else listOf(hex("#ffffff"), hex("#eef0f6"))))

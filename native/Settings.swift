@@ -65,6 +65,7 @@ struct SettingsSheet: View {
         Text("跟随系统").tag("system")
       } label: { Label("外观", systemImage: "circle.lefthalf.filled") }
       NavigationLink { OrderView() } label: { Label("调整卡片顺序", systemImage: "arrow.up.arrow.down") }
+      NavigationLink { CategoriesView() } label: { Label("分类管理", systemImage: "folder") }
       Button { store.startTour(firstRun: false) } label: { Label("操作演示", systemImage: "hand.tap") }
     } footer: { Text("账号默认打码，卡片上的眼睛可以临时显示，App 退到后台会重新打码。") }
   }
@@ -264,6 +265,67 @@ struct OrderView: View {
       func of(_ t: String) -> [Identity] { t == type ? list : others.filter { $0.type == t } }
       s.identities = of("email") + of("phone") + of("login") + others.filter { !KINDS.contains($0.type) }
     }
+  }
+}
+
+/// 分类管理: add, rename, delete, drag to reorder. Every change is saved right away (with 撤销);
+/// 其他 is always last and can't be renamed or deleted.
+struct CategoriesView: View {
+  @Environment(Store.self) var store
+  @State private var adding = false
+  @State private var renaming: String? = nil
+  @State private var deleting: String? = nil
+  @State private var text = ""
+  @State private var error = ""
+
+  var body: some View {
+    let all = store.index.allCategories
+    List {
+      Section {
+        ForEach(Array(all.dropLast()), id: \.self) { c in
+          Button { text = c; error = ""; renaming = c } label: { row(c) }
+        }
+        .onMove { from, to in store.moveCategories(from, to) }
+        .onDelete { s in if let k = s.first { deleting = all[k] } }
+        row(OTHER_CAT)
+      } footer: { Text("拖动右侧把手排序，点分类可以改名。排在前面的分类，在「全部 App」里也排在前面。「其他」不能改名或删除，总在最后。") }
+      Section {
+        Button { text = ""; error = ""; adding = true } label: { Label("添加分类", systemImage: "plus") }
+      }
+    }
+    .environment(\.editMode, .constant(.active))
+    .navigationTitle("分类管理").navigationBarTitleDisplayMode(.inline)
+    .alert("添加分类", isPresented: $adding) {
+      TextField("分类名，最多 \(CAT_MAX) 个字", text: $text)
+      Button("添加") { retry(store.addCategory(text)) { adding = true } }
+      Button("取消", role: .cancel) {}
+    } message: { Text(error.isEmpty ? "新分类会排在「其他」前面。" : error) }
+    .alert("重命名分类", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+      TextField("分类名", text: $text)
+      Button("保存") { if let c = renaming { retry(store.renameCategory(c, to: text)) { renaming = c } } }
+      Button("取消", role: .cancel) { renaming = nil }
+    } message: { Text(error.isEmpty ? "用这个分类的 App 会一起改过去。" : error) }
+    .confirmationDialog(deleting.map { "删除分类「\($0)」？" } ?? "", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
+      Button("删除", role: .destructive) { if let c = deleting { store.deleteCategory(c) }; deleting = nil }
+      Button("取消", role: .cancel) { deleting = nil }
+    } message: {
+      let n = deleting.flatMap { store.index.categoryCount[$0] } ?? 0
+      Text(n > 0 ? "其中的 \(n) 个 App 会移到「其他」。" : "这个分类里还没有 App。")
+    }
+  }
+
+  func row(_ c: String) -> some View {
+    HStack {
+      Text(c).foregroundStyle(.primary)
+      Spacer()
+      Text("\(store.index.categoryCount[c] ?? 0) 个 App").font(.system(size: 14)).foregroundStyle(.secondary)
+    }
+  }
+  /// a refused name: the alert comes back with the reason
+  func retry(_ problem: String?, _ show: @escaping () -> Void) {
+    guard let p = problem else { error = ""; return }
+    error = p
+    Task { try? await Task.sleep(for: .milliseconds(350)); show() }
   }
 }
 

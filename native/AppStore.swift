@@ -89,9 +89,11 @@ struct AppStoreApp: Decodable, Hashable, Identifiable {
       "Entertainment": "娱乐", "Music": "娱乐", "Video": "娱乐", "Photo & Video": "娱乐",
       "娱乐": "娱乐", "音乐": "娱乐", "摄影与录像": "娱乐",
       "Travel": "出行", "Navigation": "出行", "旅游": "出行", "导航": "出行",
+      "Lifestyle": "生活", "Food & Drink": "生活", "生活": "生活", "美食佳饮": "生活",
     ]
-    for g in [primaryGenreName].compactMap({ $0 }) + (genres ?? []) { if let c = map[g] { return c } }
-    return "工具"
+    let hits = ([primaryGenreName].compactMap { $0 } + (genres ?? [])).compactMap { map[$0] }
+    // 生活 (Lifestyle, Food & Drink) is a catch-all genre: only when nothing more specific fits
+    return hits.first { $0 != "生活" } ?? hits.first ?? "工具"
   }
   var thumbURL: String { artworkUrl100 ?? "" }
   var bigURL: URL? {

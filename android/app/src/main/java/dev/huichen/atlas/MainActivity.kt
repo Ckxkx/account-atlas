@@ -370,6 +370,7 @@ fun SheetHost(r: Route) {
     is Route.Picker -> PickerSheet(r.preset)
     Route.Settings -> SettingsSheet()
     Route.Share -> ShareSheet()
+    Route.Categories -> CategoriesPage(null)
   }
 }
 

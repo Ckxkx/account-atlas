@@ -82,7 +82,7 @@ fun SitesScreen() {
       a.identityIds.mapNotNull { Store.identity(it) }.any { it.value.lowercase().contains(q) || it.label.lowercase().contains(q) }
   }
   val have = all.map { it.category }.toSet()
-  val cats = CATS.filter { it in have } + have.filter { it !in CATS }.sorted()
+  val cats = Store.cats.filter { it in have }
   val shown = if (cat == "全部" || cat !in cats) cats else listOf(cat)
 
   LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 110.dp)) {

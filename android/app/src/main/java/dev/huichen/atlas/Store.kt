@@ -27,6 +27,8 @@ sealed class Route {
   data class Picker(val preset: String?) : Route()
   data object Settings : Route()
   data object Share : Route()
+  /** 分类管理 opened from the account form's 编辑分类… */
+  data object Categories : Route()
 }
 
 data class Entry(val key: Long, val route: Route)
@@ -92,6 +94,7 @@ object Store {
   }
 
   private var seen = HashMap<String, Any>()
+  private var seenCats: List<String>? = null
   private var undoSnap: AtlasData? = null
   private var toastJob: Job? = null
 
@@ -199,6 +202,7 @@ object Store {
     seen = HashMap()
     for (x in data.identities) seen[x.id] = x.copy(updatedAt = null)
     for (x in data.accounts) seen[x.id] = x.copy(updatedAt = null)
+    seenCats = data.categories
   }
   fun save() {
     val now = nowMS()
@@ -207,7 +211,9 @@ object Store {
     val ids = data.identities.map { x -> live += x.id; del.remove(x.id); if (seen[x.id] != x.copy(updatedAt = null) || x.updatedAt == null) x.copy(updatedAt = now) else x }
     val accs = data.accounts.map { x -> live += x.id; del.remove(x.id); if (seen[x.id] != x.copy(updatedAt = null) || x.updatedAt == null) x.copy(updatedAt = now) else x }
     for (id in seen.keys) if (id !in live) del[id] = now
-    data = data.copy(identities = ids, accounts = accs, deleted = del)
+    // the category list is one value with one stamp (sync takes the side that changed it last)
+    val catsAt = if (data.categories != seenCats) now else data.categoriesAt
+    data = data.copy(identities = ids, accounts = accs, deleted = del, categoriesAt = catsAt)
     remember(); persist(); if (!sandbox) onSaved?.invoke()
   }
   fun persist() {
@@ -235,7 +241,7 @@ object Store {
     sandbox = true
     undoSnap = null
     val sample = Identity(newID(), "email", "me@example.com", "示例邮箱", COLORS[0], demo = true)
-    data = AtlasData(identities = listOf(sample))
+    data = AtlasData(identities = listOf(sample), categories = realSnap?.categories)
     remember()
     setKind("email", sample.id)
   }
@@ -269,7 +275,8 @@ object Store {
     val f = File(file.parentFile, "atlas.restore.json")
     val b = runCatching { decodeAtlas(f.readText()) }.getOrNull() ?: run { show("备份读不出来了"); return }
     val keep = runCatching { encodeAtlas(data) }.getOrNull()
-    mutate("已恢复 ${b.identities.size} 个身份和 ${b.accounts.size} 个网站") { it.copy(identities = b.identities, accounts = b.accounts) }
+    // no list in the restore point = the defaults back then
+    mutate("已恢复 ${b.identities.size} 个身份和 ${b.accounts.size} 个网站") { it.copy(identities = b.identities, accounts = b.accounts, categories = b.categories) }
     // the data that was just replaced becomes the new restore point, so a restore can be taken back too
     if (keep != null) runCatching { f.writeText(keep) }.onSuccess {
       restoreWhy = "restore"; restoreAt = System.currentTimeMillis()
@@ -415,6 +422,54 @@ object Store {
     val h = hiddenApps(); val keys = names.map { it.trim().lowercase() }.toSet()
     if (h.any { it in keys }) { putHidden(h - keys); customRev++ }
   }
+  // MARK: categories: add, rename, delete, reorder (every change saved right away, with 撤销)
+
+  /** every category, in the user's order (其他 last) */
+  val cats: List<String> get() = catList(data)
+  /** a preset / App Store / sample category that isn't in the list (deleted or renamed) becomes 其他 */
+  fun catOr(c: String): String = if (c in cats) c else OTHER_CAT
+  /** renames made this session, so an open form follows its category to the new name */
+  private val catRenames = HashMap<String, String>()
+  fun catFollow(c: String): String {
+    var x = c
+    repeat(20) { catRenames[x]?.let { x = it } }
+    return catOr(x)
+  }
+  /** null when added, else why not */
+  fun addCategory(raw: String): String? {
+    val name = raw.trim(); val list = cats
+    catProblem(name, list)?.let { return it }
+    mutate("已添加分类「$name」") { it.copy(categories = list.dropLast(1) + name + OTHER_CAT) }
+    return null
+  }
+  fun renameCategory(from: String, raw: String): String? {
+    val name = raw.trim(); val list = cats
+    if (from == OTHER_CAT || name == from) return null
+    catProblem(name, list, from)?.let { return it }
+    catRenames[from] = name; catRenames.remove(name)
+    // apps typed in by hand remember their category too
+    val saved = savedCustom()
+    if (saved.any { it.getOrNull(2) == from }) {
+      prefs.edit().putString("atlas.custom", JSON.encodeToString(saved.map { t -> if (t.getOrNull(2) == from) t.toMutableList().also { it[2] = name } else t })).apply()
+      customRev++
+    }
+    mutate("已改名为「$name」") { d ->
+      d.copy(categories = list.map { if (it == from) name else it }, accounts = d.accounts.map { if (it.category == from) it.copy(category = name) else it })
+    }
+    return null
+  }
+  fun deleteCategory(c: String) {
+    if (c == OTHER_CAT) return
+    val list = cats
+    mutate("已删除分类「$c」") { d ->
+      d.copy(categories = list.filter { it != c }, accounts = d.accounts.map { if (it.category == c) it.copy(category = OTHER_CAT) else it })
+    }
+  }
+  /** the new order of everything but 其他 (it stays last) */
+  fun reorderCategories(order: List<String>) {
+    mutate(null) { it.copy(categories = order.filter { c -> c != OTHER_CAT } + OTHER_CAT) }
+  }
+
   /** "从列表移除": drop it from the saved list and hide it, accounts stay as they are. */
   fun removeApp(name: String) {
     val k = name.trim().lowercase()
@@ -431,6 +486,7 @@ object Store {
       put("exportedAt", kotlinx.serialization.json.JsonPrimitive(Instant.now().toString()))
       put("identities", JSON.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Identity.serializer()), data.identities))
       put("accounts", JSON.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Account.serializer()), data.accounts))
+      data.categories?.let { c -> put("categories", kotlinx.serialization.json.JsonArray(c.map { kotlinx.serialization.json.JsonPrimitive(it) })) }
     }
     return kotlinx.serialization.json.Json { prettyPrint = true }.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), o)
   }
@@ -443,7 +499,8 @@ object Store {
   fun importBackup(text: String): Boolean {
     val b = readBackup(text) ?: return false
     saveRestorePoint("import")   // the data it replaces can always be brought back from 设置
-    mutate("已导入 ${b.identities.size} 个身份和 ${b.accounts.size} 个网站") { it.copy(identities = b.identities, accounts = b.accounts) }
+    // a backup without a list (older versions) keeps the categories you have
+    mutate("已导入 ${b.identities.size} 个身份和 ${b.accounts.size} 个网站") { it.copy(identities = b.identities, accounts = b.accounts, categories = b.categories ?: it.categories) }
     setKind(kind)
     return true
   }
@@ -459,7 +516,7 @@ object Store {
   fun loadDemo() {
     if (Demo.hasReal(data)) { show("已有自己的数据，不能载入示例"); return }
     saveRestorePoint("demo")
-    val d = demo()
+    val d = demo().let { s -> s.copy(accounts = s.accounts.map { it.copy(category = catOr(it.category)) }) }
     mutate("已载入示例，可在「设置」里清除") { Demo.add(it, d) }
     setKind("email")
   }
@@ -497,7 +554,7 @@ object Store {
       mk("微信", "weixin.qq.com", "社交", listOf(p1), 30.0), mk("支付宝", "alipay.com", "支付金融", listOf(p1), 30.0),
       mk("哔哩哔哩", "bilibili.com", "娱乐", listOf(p2), 40.0), mk("Steam", "steampowered.com", "游戏", listOf(q), 60.0, "令牌在主力手机上"),
       mk("Apple ID", "apple.com", "工具", listOf(g, p1), 90.0), mk("Notion", "notion.so", "工具", listOf(g), 120.0), mk("网易云音乐", "music.163.com", "娱乐", listOf(p2, ai), 150.0),
-      mk("美团", "meituan.com", "出行", listOf(w), 6.0), mk("拼多多", "pinduoduo.com", "购物", listOf(w), 15.0),
+      mk("美团", "meituan.com", "生活", listOf(w), 6.0), mk("拼多多", "pinduoduo.com", "购物", listOf(w), 15.0),
     ), demo = true)
   }
 }

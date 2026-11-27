@@ -39,13 +39,16 @@
   const provOf = i => i.provider === 'apple' || i.provider === 'qq' ? i.provider : 'wechat';
   const typeName = i => i.type === 'login' ? LOGIN[provOf(i)].name : i.type === 'phone' ? '手机号' : '邮箱';
   const skin = c => `linear-gradient(145deg, ${SKINS[c] ? SKINS[c][1] : `color-mix(in srgb, ${c} 70%, #fff) 0%, ${c} 50%, color-mix(in srgb, ${c} 70%, #000) 100%`})`;
-  const CATS = ['社交', '购物', '支付金融', '开发', 'AI', '娱乐', '游戏', '出行', '工具', '加密', '其他'];
+  // categories are the user's own: the ordered list lives in the synced data (state.categories, absent = these).
+  // 其他 is always there and always last; it can't be renamed or deleted.
+  const DEFAULT_CATS = ['社交', '购物', '支付金融', '开发', 'AI', '娱乐', '游戏', '出行', '生活', '工具', '加密', '其他'];
+  const OTHER = '其他', CAT_MAX = 8, CAT_RESERVED = ['全部', '常用', '我添加的'];
   // name, domain, category, brand colour
   const PRESETS = [
     ['微信', 'weixin.qq.com', '社交', '#07c160'], ['QQ', 'qq.com', '社交', '#12b7f5'], ['微博', 'weibo.com', '社交', '#e6162d'], ['小红书', 'xiaohongshu.com', '社交', '#ff2442'],
     ['知乎', 'zhihu.com', '社交', '#0066ff'], ['抖音', 'douyin.com', '娱乐', '#fe2c55'], ['哔哩哔哩', 'bilibili.com', '娱乐', '#fb7299'], ['网易云音乐', 'music.163.com', '娱乐', '#e60026'],
     ['淘宝', 'taobao.com', '购物', '#ff5000'], ['京东', 'jd.com', '购物', '#e1251b'], ['拼多多', 'pinduoduo.com', '购物', '#e02e24'], ['闲鱼', 'goofish.com', '购物', '#ffda44'],
-    ['美团', 'meituan.com', '出行', '#ffc300'], ['携程', 'ctrip.com', '出行', '#2577e3'], ['12306', '12306.cn', '出行', '#3b6fd8'], ['高德地图', 'amap.com', '出行', '#0091ff'],
+    ['美团', 'meituan.com', '生活', '#ffc300'], ['携程', 'ctrip.com', '出行', '#2577e3'], ['12306', '12306.cn', '出行', '#3b6fd8'], ['高德地图', 'amap.com', '出行', '#0091ff'],
     ['支付宝', 'alipay.com', '支付金融', '#1677ff'], ['百度', 'baidu.com', '工具', '#2932e1'], ['GitHub', 'github.com', '开发', '#6e40c9'], ['Gitee', 'gitee.com', '开发', '#c71d23'],
     ['Cloudflare', 'cloudflare.com', '开发', '#f38020'], ['Vercel', 'vercel.com', '开发', '#555555'], ['Google', 'google.com', '工具', '#4285f4'], ['Apple ID', 'apple.com', '工具', '#8e8e93'],
     ['Microsoft', 'microsoft.com', '工具', '#00a4ef'], ['Notion', 'notion.so', '工具', '#6b6b6b'], ['Figma', 'figma.com', '工具', '#a259ff'], ['ChatGPT', 'chatgpt.com', 'AI', '#10a37f'],
@@ -58,8 +61,8 @@
     ['快手', 'kuaishou.com', '娱乐', '#ff4906'], ['豆瓣', 'douban.com', '社交', '#2e963d'], ['腾讯视频', 'v.qq.com', '娱乐', '#ff7f00'], ['爱奇艺', 'iqiyi.com', '娱乐', '#00be06'],
     ['优酷', 'youku.com', '娱乐', '#1ebeff'], ['QQ 音乐', 'y.qq.com', '娱乐', '#31c27c'], ['喜马拉雅', 'ximalaya.com', '娱乐', '#f86442'], ['百度网盘', 'pan.baidu.com', '工具', '#06a7ff'],
     ['阿里云盘', 'alipan.com', '工具', '#637dff'], ['夸克', 'quark.cn', '工具', '#4a5cff'], ['钉钉', 'dingtalk.com', '工具', '#3296fa'], ['飞书', 'feishu.cn', '工具', '#3370ff'],
-    ['企业微信', 'work.weixin.qq.com', '工具', '#2b85e4'], ['腾讯会议', 'meeting.tencent.com', '工具', '#006eff'], ['WPS', 'wps.cn', '工具', '#e8463a'], ['饿了么', 'ele.me', '出行', '#0097ff'],
-    ['大众点评', 'dianping.com', '出行', '#ff6633'], ['滴滴出行', 'didiglobal.com', '出行', '#ff7e33'], ['飞猪', 'fliggy.com', '出行', '#ffc900'], ['去哪儿', 'qunar.com', '出行', '#00bcd4'],
+    ['企业微信', 'work.weixin.qq.com', '工具', '#2b85e4'], ['腾讯会议', 'meeting.tencent.com', '工具', '#006eff'], ['WPS', 'wps.cn', '工具', '#e8463a'], ['饿了么', 'ele.me', '生活', '#0097ff'],
+    ['大众点评', 'dianping.com', '生活', '#ff6633'], ['滴滴出行', 'didiglobal.com', '出行', '#ff7e33'], ['飞猪', 'fliggy.com', '出行', '#ffc900'], ['去哪儿', 'qunar.com', '出行', '#00bcd4'],
     ['得物', 'dewu.com', '购物', '#1a1a1a'], ['唯品会', 'vip.com', '购物', '#f10180'], ['云闪付', 'unionpay.com', '支付金融', '#e60012'], ['招商银行', 'cmbchina.com', '支付金融', '#c8152d'],
     ['腾讯云', 'cloud.tencent.com', '开发', '#006eff'], ['阿里云', 'aliyun.com', '开发', '#ff6a00'], ['Hugging Face', 'huggingface.co', '开发', '#ffb000'], ['Docker', 'docker.com', '开发', '#1d63ed'],
     ['npm', 'npmjs.com', '开发', '#cb3837'], ['Cursor', 'cursor.com', 'AI', '#2f2f2f'], ['豆包', 'doubao.com', 'AI', '#3c6cff'], ['通义', 'tongyi.aliyun.com', 'AI', '#615ced'],
@@ -111,6 +114,29 @@
   const zh = (a, b) => a.localeCompare(b, 'zh-CN');
   const DAY = 864e5;
 
+  // ---------- categories ----------
+  // in order: the saved list (or the defaults), then any category an account still uses that isn't in it
+  // (renamed on another device, an older client), so nothing disappears; 其他 always last
+  function catList(d = state) {
+    const out = [], base = d && Array.isArray(d.categories) && d.categories.length ? d.categories : DEFAULT_CATS;
+    for (const c of base) if (typeof c === 'string' && c.trim() && c !== OTHER && !out.includes(c)) out.push(c);
+    const extra = new Set();
+    for (const a of (d && d.accounts) || []) if (typeof a.category === 'string' && a.category && a.category !== OTHER && !out.includes(a.category)) extra.add(a.category);
+    return [...out, ...[...extra].sort((a, b) => a < b ? -1 : a > b ? 1 : 0), OTHER];
+  }
+  // a preset / App Store / sample category that isn't in the list (deleted or renamed) becomes 其他
+  const catOr = c => catList().includes(c) ? c : OTHER;
+  // renames made this session, so an open form follows its category to the new name
+  const catRenames = {};
+  const catFollow = c => { for (let n = 0; n < 20 && catRenames[c]; n++) c = catRenames[c]; return catOr(c); };
+  function catProblem(name, except = null) {
+    if (!name) return '分类名不能为空';
+    if ([...name].length > CAT_MAX) return `分类名最多 ${CAT_MAX} 个字`;
+    if (CAT_RESERVED.includes(name)) return '这个名字不能用';
+    if (catList().some(c => c !== except && c.toLowerCase() === name.toLowerCase())) return '已经有这个分类了';
+    return null;
+  }
+
   // ---------- state ----------
   let state = (() => { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } })();
   // 2.5 two-level hiding: account values are masked unless 默认隐藏账号 is off (or a card's eye is open);
@@ -118,8 +144,8 @@
   const ui = { tab: 'home', cat: '全部', mask: localStorage.getItem('atlas.mask') !== '0', hideNames: localStorage.getItem('atlas.hideNames') === '1', revealed: new Set(), active: 0, kind: KINDS.includes(localStorage.getItem('atlas.kind')) ? localStorage.getItem('atlas.kind') : 'email' };
   // every item carries updatedAt; removed ids become tombstones, so two devices can merge
   const strip = o => { const { updatedAt, ...r } = o; return JSON.stringify(r); };
-  let seen = new Map();
-  const remember = () => { seen = new Map(); if (state) for (const k of ['identities', 'accounts']) for (const x of state[k]) seen.set(x.id, strip(x)); };
+  let seen = new Map(), seenCats = 'null';
+  const remember = () => { seen = new Map(); if (state) for (const k of ['identities', 'accounts']) for (const x of state[k]) seen.set(x.id, strip(x)); seenCats = JSON.stringify(state?.categories ?? null); };
   const save = () => {
     const now = Date.now(); state.deleted = state.deleted || {};
     const live = new Set();
@@ -129,6 +155,8 @@
       delete state.deleted[x.id];
     }
     for (const id of seen.keys()) if (!live.has(id)) state.deleted[id] = now;
+    // the category list is one value with one stamp (sync takes the side that changed it last)
+    if (JSON.stringify(state.categories ?? null) !== seenCats) state.categoriesAt = now;
     remember();
     if (tourOn()) return;   // 操作演示: the sandbox is never written or synced
     localStorage.setItem(KEY, JSON.stringify(state));
@@ -156,13 +184,15 @@
   const readRestore = () => { try { const r = JSON.parse(localStorage.getItem(RESTORE)); return r && r.data && Array.isArray(r.data.identities) ? r : null; } catch { return null; } };
   function saveRestorePoint(why) {
     if (tourOn() || (!state.identities.length && !state.accounts.length)) return true;
-    try { localStorage.setItem(RESTORE, JSON.stringify({ why, at: Date.now(), data: { identities: state.identities, accounts: state.accounts } })); return true; }
+    try { localStorage.setItem(RESTORE, JSON.stringify({ why, at: Date.now(), data: { identities: state.identities, accounts: state.accounts, categories: state.categories } })); return true; }
     catch { return false; }   // storage full: the undo toast is still there
   }
   function restoreData() {
     const r = readRestore(); if (!r) return;
-    const keep = { identities: state.identities, accounts: state.accounts };
+    const keep = { identities: state.identities, accounts: state.accounts, categories: state.categories };
     snap(); state.identities = r.data.identities; state.accounts = r.data.accounts;
+    // no list in the restore point = the defaults back then
+    if (Array.isArray(r.data.categories)) state.categories = r.data.categories; else delete state.categories;
     try { localStorage.setItem(RESTORE, JSON.stringify({ why: 'restore', at: Date.now(), data: keep })); } catch {}
     save(); setKind(ui.kind); render(); undoToast(`已恢复 ${state.identities.length} 个身份和 ${state.accounts.length} 个网站`);
   }
@@ -172,7 +202,7 @@
     saveRestorePoint('demo'); snap();
     const d = demo(), have = new Set([...state.identities, ...state.accounts].map(x => x.id));
     state.identities.push(...d.identities.filter(x => !have.has(x.id)).map(x => ({ ...x, demo: true })));
-    state.accounts.push(...d.accounts.filter(x => !have.has(x.id)).map(x => ({ ...x, demo: true })));
+    state.accounts.push(...d.accounts.filter(x => !have.has(x.id)).map(x => ({ ...x, category: catOr(x.category), demo: true })));
     save(); setKind('email'); render(); undoToast('已载入示例，可在右上角「更多」里清除');
   }
   function askDemo() {
@@ -205,7 +235,7 @@
       accounts: [
         mk('GitHub', 'github.com', '开发', [o, p1], 0, '已开两步验证'), mk('Claude', 'claude.ai', 'AI', [g], 0),
         mk('Cloudflare', 'cloudflare.com', '开发', [o], 1), mk('ChatGPT', 'chatgpt.com', 'AI', [g], 1),
-        mk('小红书', 'xiaohongshu.com', '社交', [p2, wx], 3), mk('美团', 'meituan.com', '出行', [wx], 5), mk('拼多多', 'pinduoduo.com', '购物', [wx], 7), mk('Binance', 'binance.com', '加密', [o, p1], 3, '已完成 KYC'),
+        mk('小红书', 'xiaohongshu.com', '社交', [p2, wx], 3), mk('美团', 'meituan.com', '生活', [wx], 5), mk('拼多多', 'pinduoduo.com', '购物', [wx], 7), mk('Binance', 'binance.com', '加密', [o, p1], 3, '已完成 KYC'),
         mk('淘宝', 'taobao.com', '购物', [q, p1], 9), mk('京东', 'jd.com', '购物', [q, p2], 12),
         mk('微信', 'weixin.qq.com', '社交', [p1], 30), mk('支付宝', 'alipay.com', '支付金融', [p1], 30),
         mk('哔哩哔哩', 'bilibili.com', '娱乐', [p2], 40), mk('Steam', 'steampowered.com', '游戏', [q], 60, '令牌在主力手机上'),
@@ -444,7 +474,7 @@
   }
   let undoSnap = null;
   const snap = () => { undoSnap = JSON.stringify(state); };
-  const undoToast = msg => toast(msg, { label: '撤销', fn: () => { state = JSON.parse(undoSnap); save(); render(); } });
+  const undoToast = msg => toast(msg, { label: '撤销', fn: () => { state = JSON.parse(undoSnap); save(); render(); if (sheetCtx?.kind === 'cats') catSheet(sheetCtx.back); } });
 
   // ---------- wallet card ----------
   function walletCard(i, extra = '') {
@@ -655,7 +685,7 @@
     if (!state.accounts.length) { v.innerHTML = `<div class="empty"><h3>还没有网站</h3><p>记下一个网站或 App，选上它用的是哪个邮箱、哪个手机号。</p><button class="btn-filled" data-new="account">添加网站或 App</button></div>`; $('#filters').innerHTML = ''; return; }
     const counts = {};
     state.accounts.forEach(a => counts[a.category] = (counts[a.category] || 0) + 1);
-    const cats = CATS.filter(c => counts[c]);
+    const cats = catList().filter(c => counts[c]);
     if (ui.cat !== '全部' && !counts[ui.cat]) ui.cat = '全部';
     $('#filters').innerHTML = ['全部', ...cats].map(c => `<button class="${c === ui.cat ? 'active' : ''}" data-cat="${c}">${c}</button>`).join('');
     const shown = ui.cat === '全部' ? cats : [ui.cat];
@@ -1002,9 +1032,10 @@
     const head = k > 0 ? t.slice(0, k).trim() : '';
     return head.length >= 2 ? head : t;
   };
-  const GENRE = { 'Social Networking': '社交', 'Shopping': '购物', 'Finance': '支付金融', 'Developer Tools': '开发', 'Games': '游戏', 'Entertainment': '娱乐', 'Music': '娱乐', 'Video': '娱乐', 'Photo & Video': '娱乐', 'Travel': '出行', 'Navigation': '出行',
-    '社交': '社交', '社交网络': '社交', '购物': '购物', '财务': '支付金融', '财经': '支付金融', '开发工具': '开发', '游戏': '游戏', '娱乐': '娱乐', '音乐': '娱乐', '摄影与录像': '娱乐', '旅游': '出行', '旅行': '出行', '导航': '出行' };
-  const storeCat = r => { for (const g of [r.primaryGenreName, ...(r.genres || [])]) if (GENRE[g]) return GENRE[g]; return '工具'; };
+  const GENRE = { 'Social Networking': '社交', 'Shopping': '购物', 'Finance': '支付金融', 'Developer Tools': '开发', 'Games': '游戏', 'Entertainment': '娱乐', 'Music': '娱乐', 'Video': '娱乐', 'Photo & Video': '娱乐', 'Travel': '出行', 'Navigation': '出行', 'Lifestyle': '生活', 'Food & Drink': '生活',
+    '社交': '社交', '社交网络': '社交', '购物': '购物', '财务': '支付金融', '财经': '支付金融', '开发工具': '开发', '游戏': '游戏', '娱乐': '娱乐', '音乐': '娱乐', '摄影与录像': '娱乐', '旅游': '出行', '旅行': '出行', '导航': '出行', '生活': '生活', '美食佳饮': '生活' };
+  // 生活 (Lifestyle, Food & Drink) is a catch-all genre: only when nothing more specific fits
+  const storeCat = r => { const hits = [r.primaryGenreName, ...(r.genres || [])].map(g => GENRE[g]).filter(Boolean); return hits.find(c => c !== '生活') || hits[0] || '工具'; };
   const storeArt = r => r.artworkUrl512 || (r.artworkUrl100 || '').replace(/100x100/, '256x256');
   // 2.5: adult apps never show up in search. An 18+ rating, a frequent / intense (or graphic) sexual-content
   // or nudity advisory, or an adult word in the name or genre. Mild advisories (common on social apps and
@@ -1082,10 +1113,12 @@
     };
   }
 
-  function accountForm(existing, presetId, presetName = '') {
-    const a = existing || { name: presetName, domain: '', category: '其他', identityIds: presetId ? [presetId] : [], notes: '' };
+  // draft: what the form held before 编辑分类… (it comes back exactly as it was, its category following a rename)
+  function accountForm(existing, presetId, presetName = '', draft = null) {
+    const a = draft || existing || { name: presetName, domain: '', category: '其他', identityIds: presetId ? [presetId] : [], notes: '' };
     const sel = new Set(a.identityIds);
-    let cat = a.category, icon = customIcon(a) || '', iconSeq = 0;
+    let cat = draft ? catFollow(a.category) : a.category, icon = customIcon(a) || '', iconSeq = 0;
+    const catOpts = () => { const l = catList(); return l.includes(cat) ? l : [...l.slice(0, -1), cat, OTHER]; };
     openSheet(`${bar('取消', existing ? '编辑' : '新网站或 App', existing ? '保存' : '添加', 'id="saveAccount"')}
       <div class="sheet-body form">
         <div class="form-hero" id="aHero"></div>
@@ -1101,14 +1134,20 @@
         <div id="idPicksWrap">${idPicksHtml(sel)}</div>
         <p class="hint">可以多选：比如用邮箱注册、再绑了手机号，或者用微信、QQ 登录。是 Apple ID 的邮箱会带 Apple 标记。</p>
         <div class="sec-title">分类</div>
-        <div class="group"><div class="cats" id="catPicks">${CATS.map(c => `<button class="${c === cat ? 'active' : ''}" data-c="${c}">${c}</button>`).join('')}</div></div>
+        <div class="group"><div class="cats" id="catPicks">${catOpts().map(c => `<button class="${c === cat ? 'active' : ''}" data-c="${esc(c)}">${esc(c)}</button>`).join('')}<button class="cat-edit" id="catEdit">编辑分类…</button></div></div>
         <div class="sec-title">备注</div>
         <div class="group"><div class="field stack"><textarea id="aNotes" placeholder="是否开了两步验证、用户名、会员到期日">${esc(a.notes || '')}</textarea></div></div>
         <p class="hint">不要在这里填写密码。</p>
       </div>`, { kind: 'form' });
     setTimeout(() => {
       const setCat = c => { cat = c; $$('#catPicks button').forEach(x => x.classList.toggle('active', x.dataset.c === c)); };
-      $$('#catPicks button').forEach(b => b.onclick = () => setCat(b.dataset.c));
+      $$('#catPicks button[data-c]').forEach(b => b.onclick = () => setCat(b.dataset.c));
+      // 编辑分类…: the manager opens in this sheet, and its 完成 brings the form back as it was
+      $('#catEdit').onclick = () => {
+        const d = { ...(existing || {}), name: $('#aName').value, handle: $('#aHandle').value, domain: $('#aDomain').value, category: cat, identityIds: [...sel], notes: $('#aNotes').value };
+        if (icon) d.icon = icon; else delete d.icon;
+        catSheet(() => accountForm(existing && accById(existing.id) ? accById(existing.id) : null, presetId, presetName, d));
+      };
       wirePicks(sel);
       const hero = () => {
         const name = $('#aName').value.trim(), dom = cleanDomain($('#aDomain').value);
@@ -1134,11 +1173,11 @@
         try { const v = await makeIcon(f); if (seq === iconSeq) setIcon(v); } catch { toast('这张图片读不了，换一张试试'); }
       };
       hero();
-      const applyPreset = p => { $('#aName').value = p[0]; $('#aDomain').value = p[1]; setCat(p[2]); store = []; storeQ = ''; $('#suggest').innerHTML = ''; $('#webSuggest').innerHTML = ''; setIcon(p[4] || ''); };
+      const applyPreset = p => { $('#aName').value = p[0]; $('#aDomain').value = p[1]; setCat(catOr(p[2])); store = []; storeQ = ''; $('#suggest').innerHTML = ''; $('#webSuggest').innerHTML = ''; setIcon(p[4] || ''); };
       const applyStore = r => {
         $('#aName').value = storeName(r.trackName);
         const host = cleanDomain(r.sellerUrl || ''); if (host) $('#aDomain').value = host;
-        setCat(storeCat(r)); store = []; storeQ = ''; $('#suggest').innerHTML = '';
+        setCat(catOr(storeCat(r))); store = []; storeQ = ''; $('#suggest').innerHTML = '';
         const seq = ++iconSeq;
         // show the small artwork right away, then swap in the downscaled copy that gets saved
         icon = ''; hero();
@@ -1158,7 +1197,7 @@
         const ALL = [...PRESETS, ...myApps()], names = new Set(ALL.map(p => p[0].toLowerCase()));
         const POOL = [...ALL, ...SITES.filter(p => !names.has(p[0].toLowerCase()))];
         const exact = POOL.find(p => p[0].toLowerCase() === q);
-        if (exact) { if (!$('#aDomain').value) $('#aDomain').value = exact[1]; setCat(exact[2]); hero(); }
+        if (exact) { if (!$('#aDomain').value) $('#aDomain').value = exact[1]; setCat(catOr(exact[2])); hero(); }
         const list = q && !exact ? POOL.filter(p => siteHit(p, q)).slice(0, 8) : [];
         const shown = new Set(list.map(p => p[0].toLowerCase())), seen = new Set();
         const apps = q && !exact && storeQ === q ? store.filter(r => { const n = storeName(r.trackName).toLowerCase(); if (shown.has(n) || shown.has(r.trackName.toLowerCase()) || seen.has(r.trackId)) return false; seen.add(r.trackId); return true; }) : [];
@@ -1203,7 +1242,7 @@
     const have = name => state.accounts.filter(x => x.name.toLowerCase() === name.toLowerCase()).length;
     let told = false;
     const gone = new Set(), mine = () => ALL.slice(MINE, BASE).some((p, i) => !gone.has(MINE + i));
-    const cats = () => ['常用', ...(mine() ? ['我添加的'] : []), ...CATS.filter(c => ALL.some((p, i) => p[2] === c && !gone.has(i)))];
+    const cats = () => ['常用', ...(mine() ? ['我添加的'] : []), ...catList().filter(c => ALL.some((p, i) => catOr(p[2]) === c && !gone.has(i)))];
     const catsHtml = () => cats().map(c => `<button data-pc="${c}" class="${c === cat ? 'active' : ''}">${c}</button>`).join('');
     openSheet(`<div class="sheet-bar"><button data-close>取消</button><span class="t" id="pkTitle">选择网站或 App</span><button id="pkNext" disabled>下一步</button></div>
       <div class="pick-head">
@@ -1215,7 +1254,7 @@
       const ql = q.trim().toLowerCase();
       let list = ql ? ALL.filter(p => siteHit(p, ql)).slice(0, 60)
         : cat === '常用' ? POPULAR.slice(0, 12).map(n => PRESETS.find(p => p[0] === n)).filter(Boolean)
-        : cat === '我添加的' ? ALL.slice(MINE, BASE) : ALL.slice(0, BASE).filter(p => p[2] === cat);
+        : cat === '我添加的' ? ALL.slice(MINE, BASE) : ALL.slice(0, BASE).filter(p => catOr(p[2]) === cat);
       list = list.filter(p => !gone.has(ALL.indexOf(p)));
       // App Store results for this search, minus apps already shown above
       const shown = new Set(list.map(p => p[0].toLowerCase()));
@@ -1391,7 +1430,7 @@
       wirePicks(sel);
       $('#pkBack').onclick = () => pickApps(presetId, q);
       $('#pkSave').onclick = () => {
-        const now = Date.now(), made = picks.map((p, k) => ({ id: uid(), createdAt: now + k, name: p[0], handle: ($(`[data-hd="${k}"]`)?.value || '').trim(), domain: p[1], category: p[2], identityIds: [...sel], notes: '', ...(p[4] ? { icon: p[4] } : {}) }));
+        const now = Date.now(), made = picks.map((p, k) => ({ id: uid(), createdAt: now + k, name: p[0], handle: ($(`[data-hd="${k}"]`)?.value || '').trim(), domain: p[1], category: catOr(p[2]), identityIds: [...sel], notes: '', ...(p[4] ? { icon: p[4] } : {}) }));
         picks.forEach(p => { if (p.store) rememberApp(p[0], p[1], p[2], p[4]); });
         state.accounts.push(...made); save(); render();
         if (made.length === 1) showAccount(made[0].id); else if (sel.size === 1) showIdentity([...sel][0]); else closeSheet();
@@ -1438,6 +1477,82 @@
       };
     }, 0);
   }
+  // ---------- categories: add, rename, delete, drag to reorder ----------
+  // every change is saved right away (with 撤销). back: where 完成 goes (the account form for 编辑分类…)
+  function catSheet(back = null) {
+    if (tourOn()) return toast('操作演示结束后再来调整分类');
+    const counts = {}; state.accounts.forEach(a => counts[a.category] = (counts[a.category] || 0) + 1);
+    const list = catList();
+    const row = c => `<div class="ord cat-row" data-cn="${esc(c)}">
+        <span class="ord-t"><b>${esc(c)}</b><small>${counts[c] || 0} 个 App</small></span>
+        <button class="cat-act" data-cat-ren="${esc(c)}" aria-label="重命名">${ICON.edit}</button>
+        <button class="cat-act del" data-cat-del="${esc(c)}" aria-label="删除">${ICON.trash}</button>
+        <button class="ord-h" aria-label="拖动排序，可用上下方向键"><svg viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/></svg></button>
+      </div>`;
+    openSheet(`${bar('', '分类管理', '完成', 'id="catDone"')}
+      <div class="sheet-body form">
+        <div class="group ord-list" id="catList">${list.slice(0, -1).map(row).join('')}</div>
+        <div class="group"><div class="ord cat-row cat-fixed"><span class="ord-t"><b>${OTHER}</b><small>${counts[OTHER] || 0} 个 App</small></span></div></div>
+        <p class="hint">按住右侧把手上下拖动。排在前面的分类，在「全部 App」里也排在前面。「其他」不能改名或删除，总在最后。</p>
+        <div class="sec-title">添加分类</div>
+        <div class="group"><div class="field cat-new" id="catNewF"><input id="catNew" placeholder="分类名，最多 ${CAT_MAX} 个字" autocomplete="off" enterkeyhint="done"><button id="catAdd">添加</button></div></div>
+        <p class="hint err" id="catErr" hidden></p>
+      </div>`, { kind: 'cats', back });
+    const again = () => catSheet(back);
+    const fail = (f, msg) => { if (f) { f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); } const e = $('#catErr'); if (e) { e.textContent = msg; e.hidden = false; } };
+    setTimeout(() => {
+      const box = $('#catList'); dragList(box);
+      box.addEventListener('ordchange', () => {
+        snap(); state.categories = [...$$('.cat-row', box).map(r => r.dataset.cn), OTHER]; save(); render();
+      });
+      $('#catDone').onclick = () => back ? back() : closeSheet();
+      const add = () => {
+        const name = $('#catNew').value.trim(), bad = catProblem(name);
+        if (bad) return fail($('#catNewF'), bad);
+        const l = catList(); snap(); state.categories = [...l.slice(0, -1), name, OTHER]; save(); render(); again();
+        undoToast(`已添加分类「${name}」`);
+      };
+      $('#catAdd').onclick = add;
+      $('#catNew').onkeydown = e => { if (e.key === 'Enter') add(); };
+      $$('[data-cat-ren]', box).forEach(b => b.onclick = () => {
+        const c = b.dataset.catRen, t = b.closest('.cat-row').querySelector('.ord-t');
+        t.innerHTML = `<input class="cat-ren" value="${esc(c)}" autocomplete="off" enterkeyhint="done" aria-label="新的分类名">`;
+        const inp = t.querySelector('input'); inp.focus(); inp.select();
+        let done = false;
+        const commit = () => {
+          if (done) return; const name = inp.value.trim();
+          if (name === c) { done = true; return again(); }
+          const bad = catProblem(name, c); if (bad) { fail(null, bad); inp.focus(); return; }
+          done = true; renameCat(c, name); again();
+        };
+        inp.onkeydown = e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { done = true; again(); } };
+        inp.onblur = () => setTimeout(() => { if (!done && $('#catList')) { done = true; again(); } }, 150);
+      });
+      $$('[data-cat-del]', box).forEach(b => b.onclick = () => {
+        const c = b.dataset.catDel, n = counts[c] || 0;
+        openSheet(`<div class="sheet-body"><div class="alert"><h3>删除分类「${esc(c)}」？</h3><p>${n ? `其中的 ${n} 个 App 会移到「其他」。` : '这个分类里还没有 App。'}</p></div>
+          <div class="alert-actions"><button class="destructive" id="cOk" style="font-weight:600">删除</button><button id="cNo">取消</button></div></div>`, { kind: 'confirm' });
+        setTimeout(() => { $('#cOk').onclick = () => { deleteCat(c); again(); }; $('#cNo').onclick = again; }, 0);
+      });
+    }, 0);
+  }
+  function renameCat(from, to) {
+    snap();
+    state.categories = catList().map(c => c === from ? to : c);
+    state.accounts.forEach(a => { if (a.category === from) a.category = to; });
+    catRenames[from] = to; delete catRenames[to];
+    // apps typed in by hand remember their category too
+    const saved = readList('atlas.custom'); if (saved.some(t => t[2] === from)) localStorage.setItem('atlas.custom', JSON.stringify(saved.map(t => t[2] === from ? [t[0], t[1], to, ...t.slice(3)] : t)));
+    if (ui.cat === from) ui.cat = to;
+    save(); render(); undoToast(`已改名为「${to}」`);
+  }
+  function deleteCat(c) {
+    if (c === OTHER) return;
+    snap();
+    state.categories = catList().filter(x => x !== c);
+    state.accounts.forEach(a => { if (a.category === c) a.category = OTHER; });
+    save(); render(); undoToast(`已删除分类「${c}」`);
+  }
   function dragList(list) {
     const rows = () => $$('.ord', list);
     const move = (r, to) => {   // keyboard / programmatic move with a small FLIP
@@ -1448,7 +1563,8 @@
     };
     list.addEventListener('keydown', e => {
       const h = e.target.closest('.ord-h'); if (!h || !/ArrowUp|ArrowDown/.test(e.key)) return;
-      e.preventDefault(); const r = h.closest('.ord'); move(r, rows().indexOf(r) + (e.key === 'ArrowUp' ? -1 : 1)); h.focus();
+      e.preventDefault(); const r = h.closest('.ord'), at = rows().indexOf(r); move(r, at + (e.key === 'ArrowUp' ? -1 : 1)); h.focus();
+      if (rows().indexOf(r) !== at) list.dispatchEvent(new CustomEvent('ordchange'));
     });
     let busy = false;   // a drag or its settle is in progress; a second finger can't start another
     list.addEventListener('pointerdown', e => {
@@ -1488,6 +1604,7 @@
           void list.offsetHeight;
           list.classList.remove('ord-commit', 'sorting');
           busy = false;
+          if (to !== from) list.dispatchEvent(new CustomEvent('ordchange'));
         };
         if (calm()) return commit();
         let done = false;
@@ -1556,7 +1673,7 @@
     }
     return { ITER, isEnvelope, seal, open };
   })();
-  const backupText = () => JSON.stringify({ app: 'atlas', version: 1, exportedAt: new Date().toISOString(), identities: state.identities, accounts: state.accounts }, null, 2);
+  const backupText = () => JSON.stringify({ app: 'atlas', version: 1, exportedAt: new Date().toISOString(), identities: state.identities, accounts: state.accounts, ...(Array.isArray(state.categories) ? { categories: state.categories } : {}) }, null, 2);
   function saveBackupFile(text) {
     const name = `账号备份-${new Date().toISOString().slice(0, 10)}.json`;
     if (native) { native.postMessage({ file: name, text }); return; }
@@ -1609,7 +1726,10 @@
     if (!d || !Array.isArray(d.identities) || !Array.isArray(d.accounts)) return toast('这不是 Atlas 的备份文件');
     const go = () => {
       saveRestorePoint('import');   // what it replaces can always be brought back from 更多
-      snap(); state.identities = d.identities; state.accounts = d.accounts; save(); setKind(ui.kind); render();
+      snap(); state.identities = d.identities; state.accounts = d.accounts;
+      // a backup without a list (older versions) keeps the categories you have
+      if (Array.isArray(d.categories)) state.categories = d.categories.filter(c => typeof c === 'string');
+      save(); setKind(ui.kind); render();
       undoToast(`已导入 ${d.identities.length} 个身份和 ${d.accounts.length} 个网站`);
     };
     if (state.identities.length || state.accounts.length) confirmSheet('导入备份？', `导入会替换现在的 ${state.identities.length} 个身份和 ${state.accounts.length} 个网站与 App。替换前的数据会先存一份，可以在「更多」里恢复。`, '导入', go, false);
@@ -1697,6 +1817,7 @@
       if (d.act === 'theme') setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', t);
       if (d.act === 'sync') syncSheet();
       if (d.act === 'order') orderSheet();
+      if (d.act === 'cats') catSheet();
       if (d.act === 'export') exportData();
       if (d.act === 'import') $('#fileInput').click();
       if (d.act === 'download') window.open('https://wwbsj.lanzoup.com/b01i61dn1a', '_blank', 'noopener');
@@ -1948,9 +2069,15 @@
       out.accounts.forEach(x => { x.identityIds = x.identityIds.filter(i => ids.has(i)); });
       // forget tombstones older than 90 days
       const old = Date.now() - 90 * DAY; for (const [id, t] of Object.entries(del)) if (t < old) delete del[id];
+      // the category list is one value: the side that changed it last wins (a tie takes the larger text, so
+      // both sides agree). Categories still used by an account but missing from it are shown at the end.
+      const ca = a.categoriesAt || 0, cb = b.categoriesAt || 0;
+      const w = ca > cb ? a : cb > ca ? b : (a.categories || []).join('\n') >= (b.categories || []).join('\n') ? a : b;
+      if (Array.isArray(w.categories)) out.categories = w.categories;
+      if (w.categoriesAt) out.categoriesAt = w.categoriesAt;
       return out;
     }
-    const same = (a, b) => JSON.stringify([a.identities, a.accounts]) === JSON.stringify([b.identities, b.accounts]);
+    const same = (a, b) => JSON.stringify([a.identities, a.accounts, a.categories || null, a.categoriesAt || 0]) === JSON.stringify([b.identities, b.accounts, b.categories || null, b.categoriesAt || 0]);
 
     async function run() {
       if (!conf || !key || tourOn()) return;   // during the 操作演示 the screen shows sandbox data
@@ -2144,7 +2271,7 @@
       first = !!firstRun;
       closeSheet(); $('#menu').classList.remove('open'); closeSpot();
       realState = state;
-      state = { identities: [{ id: uid(), type: 'email', value: 'me@example.com', label: '示例邮箱', color: COLORS[0], notes: '', demo: true }], accounts: [], deleted: {} };
+      state = { identities: [{ id: uid(), type: 'email', value: 'me@example.com', label: '示例邮箱', color: COLORS[0], notes: '', demo: true }], accounts: [], deleted: {}, ...(realState.categories ? { categories: realState.categories } : {}) };
       remember(); setTab('home'); setKind('email'); render();
       layer = document.createElement('div'); layer.id = 'tourLayer';
       layer.innerHTML = '<div class="tour-hole"></div><div class="tour-tip"></div>';
@@ -2174,7 +2301,7 @@
     const light = document.documentElement.dataset.theme === 'light', W = 360, S = 3;
     const fg = light ? '#1c1c1e' : '#ffffff', sub = light ? 'rgba(60,60,67,.7)' : 'rgba(255,255,255,.62)';
     const accs = state.accounts.filter(a => a.identityIds.some(x => ids.some(i => i.id === x)));
-    const cats = Object.entries(accs.reduce((m, a) => (m[a.category] = (m[a.category] || 0) + 1, m), {})).sort((a, b) => b[1] - a[1]);
+    const order = catList(), cats = Object.entries(accs.reduce((m, a) => (m[a.category] = (m[a.category] || 0) + 1, m), {})).sort((a, b) => b[1] - a[1] || order.indexOf(a[0]) - order.indexOf(b[0]));
     const lists = ids.map(i => accountsOf(i.id)), rows = l => Math.max(1, Math.ceil(Math.min(l.length, 14) / 7));
     const H = 22 + 44 + 14 + 58 + 14 + (cats.length ? 26 : 0) + lists.reduce((h, l) => h + 14 + 22 + rows(l) * 42 + 10 + 12, 0) + 30 + 22;
     const c = document.createElement('canvas'); c.width = W * S; c.height = H * S;

@@ -91,7 +91,9 @@ struct ShareCard: View {
     let fg: Color = dark ? .white : Color(hex: "#1c1c1e")
     let sub: Color = dark ? Color.white.opacity(0.62) : Color(hex: "#3c3c43").opacity(0.7)
     let accs = store.data.accounts.filter { a in a.identityIds.contains { x in ids.contains { $0.id == x } } }
-    let cats = Dictionary(grouping: accs, by: \.category).map { ($0.key, $0.value.count) }.sorted { $0.1 > $1.1 }
+    let order = store.index.allCategories
+    let cats = Dictionary(grouping: accs, by: \.category).map { ($0.key, $0.value.count) }
+      .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : (order.firstIndex(of: $0.0) ?? .max) < (order.firstIndex(of: $1.0) ?? .max) }
     let accent = Color(hex: ids.first?.color ?? "#0a84ff")
     VStack(alignment: .leading, spacing: 14) {
       HStack(spacing: 12) {
