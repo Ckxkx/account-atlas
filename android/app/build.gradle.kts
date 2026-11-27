@@ -74,6 +74,10 @@ dependencies {
   implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
+  // Installs the baseline profiles that Compose / Material3 ship inside their AARs at install time.
+  // Without it a sideloaded APK (蓝奏云, no Play cloud profiles) runs Compose interpreted / JIT for days,
+  // which is what made every sheet's slide-up stutter on its first frames.
+  implementation("androidx.profileinstaller:profileinstaller:1.4.1")
   testImplementation("junit:junit:4.13.2")
 }
 
