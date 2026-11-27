@@ -261,8 +261,9 @@ extension View {
 }
 
 /// Theme switch, done outside SwiftUI so it can't stutter:
-/// 1. A frozen bitmap of the window (drawHierarchy, afterScreenUpdates: false). snapshotView() was
-///    cheaper but it's a live render-server replicant and flashed on the 关系图 page.
+/// 1. `snapshotView(afterScreenUpdates: false)` of the screen — a render-server copy of what's on
+///    screen right now (no CPU redraw, unlike drawHierarchy/UIGraphicsImageRenderer, which cost a
+///    full-screen render on the main thread before anything moved).
 /// 2. It goes into an overlay window above the app, and in the same CA transaction the app windows'
 ///    interface style flips once (the store change runs with animations disabled; there's no
 ///    preferredColorScheme, so SwiftUI doesn't run a second implicit cross-fade).
@@ -289,18 +290,8 @@ extension View {
     guard store.theme != theme else { return }
     let wins = appWindows()
     let key = wins.first(where: \.isKeyWindow) ?? wins.first
-    // A real bitmap of the window, not snapshotView(): that returns a render-server replicant, which on
-    // the 关系图 page (CAShapeLayer threads + glass tiles) didn't hold the old frame — the overlay flashed
-    // and showed the new theme straight away, so the circle had nothing to reveal. drawHierarchy is one
-    // CPU render (a frame or so) but it is a frozen picture of exactly what was on screen.
-    let snapOpt: UIView? = key.flatMap { w -> UIView? in
-      let f = UIGraphicsImageRendererFormat(for: w.traitCollection); f.opaque = true
-      let img = UIGraphicsImageRenderer(bounds: w.bounds, format: f).image { _ in
-        _ = w.drawHierarchy(in: w.bounds, afterScreenUpdates: false)
-      }
-      let v = UIImageView(image: img); v.contentMode = .scaleToFill
-      return v
-    } ?? key?.snapshotView(afterScreenUpdates: false)
+    let screenSnap: UIView? = key?.windowScene?.screen.snapshotView(afterScreenUpdates: false)
+    let snapOpt: UIView? = screenSnap ?? key?.snapshotView(afterScreenUpdates: false)
     let haptic = UIImpactFeedbackGenerator(style: .light)
     haptic.prepare()
     guard let win = key, let scene = win.windowScene,
