@@ -156,3 +156,86 @@ struct AppStoreBadge: View {
     Label("App Store", systemImage: "apple.logo").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
   }
 }
+
+/// 更换图标 › 从 App Store 搜索 (edit form): a search prefilled with the App's name; tapping a result hands
+/// it back (the caller shows its artwork right away and stores the downscaled icon). 取消 changes nothing.
+struct AppStoreIconSheet: View {
+  @Environment(\.dismiss) var dismiss
+  let onPick: (AppStoreApp) -> Void
+  @State private var query: String
+  @State private var results: [AppStoreApp] = []
+  @State private var phase: Phase = .idle
+  @State private var first = true
+  @FocusState private var focused: Bool
+  enum Phase { case idle, loading, done, offline }
+
+  init(initial: String, onPick: @escaping (AppStoreApp) -> Void) {
+    self.onPick = onPick
+    _query = State(initialValue: initial.trimmingCharacters(in: .whitespaces))
+  }
+
+  var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
+
+  var body: some View {
+    NavigationStack {
+      List {
+        Section {
+          HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("App 名称", text: $query).focused($focused).submitLabel(.search)
+              .textInputAutocapitalization(.never).autocorrectionDisabled()
+            if !query.isEmpty {
+              Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
+                .buttonStyle(.plain).accessibilityLabel("清除")
+            }
+          }
+        }
+        Section {
+          if trimmed.isEmpty {
+            message("输入 App 名称搜索")
+          } else if phase == .offline {
+            message("网络不可用")
+          } else if phase == .done && results.isEmpty {
+            message("没有找到")
+          } else if results.isEmpty {
+            HStack { Spacer(); ProgressView(); Spacer() }.listRowBackground(Color.clear)
+          } else {
+            ForEach(results) { a in
+              Button { onPick(a); dismiss() } label: {
+                HStack(spacing: 12) {
+                  AppIcon(name: a.cleanName, domain: a.domain, url: a.thumbURL, size: 40)
+                  VStack(alignment: .leading, spacing: 1) {
+                    Text(a.cleanName).foregroundStyle(.primary).lineLimit(1)
+                    Text(a.domain.isEmpty ? a.category : a.domain).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                  }
+                  Spacer(minLength: 0)
+                }
+              }
+            }
+          }
+        } header: { if !results.isEmpty { AppStoreBadge() } }
+      }
+      .task(id: trimmed) {
+        let q = trimmed
+        guard !q.isEmpty else { results = []; phase = .idle; return }
+        phase = .loading
+        // first search right away (prefilled name), later edits debounced like the add flow
+        if first { first = false } else { try? await Task.sleep(for: .milliseconds(350)) }
+        guard !Task.isCancelled else { return }
+        let r = await AppStoreSearch.search(q)
+        guard !Task.isCancelled else { return }
+        withAnimation(Motion.snappy) {
+          if let r { results = r; phase = .done } else { results = []; phase = .offline }
+        }
+      }
+      .navigationTitle("从 App Store 搜索").navigationBarTitleDisplayMode(.inline)
+      .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+    }
+    .presentationDetents([.medium, .large])
+    .presentationDragIndicator(.visible)
+  }
+
+  func message(_ s: String) -> some View {
+    Text(s).font(.system(size: 14)).foregroundStyle(.secondary).frame(maxWidth: .infinity).listRowBackground(Color.clear)
+  }
+}

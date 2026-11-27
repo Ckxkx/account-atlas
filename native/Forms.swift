@@ -270,6 +270,7 @@ struct AccountForm: View {
   @State private var typed = false               // suggestions only after the user edits the name
   @State private var appResults: [AppStoreApp] = []
   @State private var iconMenu = false
+  @State private var storeSearch = false         // 更换图标 › 从 App Store 搜索
   @State private var photos = false
   @State private var photoItem: PhotosPickerItem? = nil
   @FocusState private var nameFocused: Bool
@@ -347,9 +348,13 @@ struct AccountForm: View {
       .onChange(of: store.index.allCategories) { category = store.catFollow(category) }
       .appStoreResults(for: query, into: $appResults)
       .confirmationDialog("更换图标", isPresented: $iconMenu, titleVisibility: .visible) {
+        Button("从 App Store 搜索") { storeSearch = true }
         Button("从相册选择") { photos = true }
         if icon != nil || art != nil { Button("使用默认图标") { setIcon(nil) } }
         Button("取消", role: .cancel) {}
+      }
+      .sheet(isPresented: $storeSearch) {
+        AppStoreIconSheet(initial: name) { a in pickIcon(a) }
       }
       .photosPicker(isPresented: $photos, selection: $photoItem, matching: .images)
       .onChange(of: photoItem) {
@@ -379,7 +384,7 @@ struct AccountForm: View {
             }
             IconStore.shared.prefetch(store.data.accounts.filter { $0.id == existing.id })
             dismiss()
-          }.bold().disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+          }.bold().disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || art != nil)   // art: an App Store icon still downloading
         }
       }
     }
@@ -418,6 +423,19 @@ struct AccountForm: View {
       let u = await a.iconDataURL()
       guard job == iconJob else { return }
       withAnimation(Motion.snappy) { icon = u; art = nil }
+    }
+  }
+  /// 从 App Store 搜索: only the icon changes. The artwork shows at once; the stored copy is the same
+  /// 128 px data URL the add flow saves. A failed download keeps the icon the form had.
+  func pickIcon(_ a: AppStoreApp) {
+    let prev = icon
+    iconJob &+= 1; let job = iconJob
+    withAnimation(Motion.snappy) { icon = nil; art = a.thumbURL.isEmpty ? a.bigURL?.absoluteString : a.thumbURL }
+    Task {
+      let u = await a.iconDataURL()
+      guard job == iconJob else { return }
+      withAnimation(Motion.snappy) { icon = u ?? prev; art = nil }
+      if u == nil { store.show("图标下载失败，换一个试试") }
     }
   }
 }

@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -440,6 +441,7 @@ fun AccountForm(existing: Account) {
   var icon by remember { mutableStateOf(existing.icon) }
   var catMenu by remember { mutableStateOf(false) }
   var iconMenu by remember { mutableStateOf(false) }
+  var storeSearch by remember { mutableStateOf(false) }   // 更换图标 › 从 App Store 搜索
   // suggestions show only while the user is typing a name
   var typed by remember { mutableStateOf(false) }
   var hits by remember { mutableStateOf(listOf<AppHit>()) }
@@ -473,13 +475,23 @@ fun AccountForm(existing: Account) {
     name = h.name; if (h.domain.isNotEmpty()) domain = h.domain; category = Store.catOr(h.category); typed = false; pending = h
     scope.launch { val ic = AppStore.icon(h); if (t == token) { icon = ic; pending = null } }
   }
+  /** 从 App Store 搜索: only the icon changes; the artwork shows at once and the stored copy is the same
+   *  128 px data URL the add flow saves. A failed download keeps the icon the form had. */
+  fun pickIcon(h: AppHit) {
+    hap(TICK); val t = ++token; val prev = icon; pending = h
+    scope.launch {
+      val ic = AppStore.icon(h)
+      if (t == token) { pending = null; if (ic != null) icon = ic else { icon = prev; Store.show("图标下载失败，换一个试试") } }
+    }
+  }
 
   // back from 编辑分类…: a renamed category follows to its new name (a deleted one becomes 其他)
   val allCats = Store.cats
   LaunchedEffect(allCats) { category = Store.catFollow(category) }
 
   Column {
-    SheetBar("取消", "编辑", "保存", name.isNotBlank()) {
+    // pending: an App Store icon still downloading, saving now would drop it
+    SheetBar("取消", "编辑", "保存", name.isNotBlank() && pending == null) {
       Store.mutate("已保存") { s -> s.copy(accounts = s.accounts.map {
         if (it.id == existing.id) it.copy(name = name.trim(), domain = cleanDomain(domain), category = category, notes = notes.trim(), handle = handle.trim().ifEmpty { null }, identityIds = ids,
           icon = icon?.ifBlank { null }) else it
@@ -496,12 +508,14 @@ fun AccountForm(existing: Account) {
               T("更换图标", 11f, FontWeight.Medium, pal.accent, Modifier.padding(top = 4.dp))
             }
             DropdownMenu(iconMenu, { iconMenu = false }) {
+              DropdownMenuItem({ Text("从 App Store 搜索") }, { iconMenu = false; storeSearch = true })
               DropdownMenuItem({ Text("从相册选择") }, {
                 iconMenu = false
                 photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
               })
-              if (icon != null) DropdownMenuItem({ Text("使用默认图标") }, { iconMenu = false; token++; pending = null; icon = null; hap(TICK) })
+              if (icon != null || pending != null) DropdownMenuItem({ Text("使用默认图标") }, { iconMenu = false; token++; pending = null; icon = null; hap(TICK) })
             }
+            if (storeSearch) AppStoreIconDialog(name.trim(), { storeSearch = false }) { h -> storeSearch = false; pickIcon(h) }
           }
           Spacer(Modifier.width(14.dp))
           Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -541,6 +555,55 @@ fun AccountForm(existing: Account) {
       FormGroup("备注") { Field(notes, { notes = it }, "两步验证、找回方式…", lines = 4) }
     }
   }
+}
+
+/** 更换图标 › 从 App Store 搜索: prefilled with the App's name and searching at once, later edits debounced
+ *  like the add flow. Tapping a result hands it back; 取消 changes nothing. */
+@Composable
+private fun AppStoreIconDialog(initial: String, onDismiss: () -> Unit, onPick: (AppHit) -> Unit) {
+  var q by remember { mutableStateOf(initial) }
+  var hits by remember { mutableStateOf(listOf<AppHit>()) }
+  var phase by remember { mutableStateOf("idle") }   // idle / loading / done / offline
+  var first by remember { mutableStateOf(true) }
+  val term = q.trim()
+  LaunchedEffect(term) {
+    if (term.isEmpty()) { hits = emptyList(); phase = "idle"; return@LaunchedEffect }
+    phase = "loading"
+    if (first) first = false else delay(350)   // a newer query cancels this one, so late results are dropped
+    val r = AppStore.searchOrNull(term)
+    if (r == null) { hits = emptyList(); phase = "offline" } else { hits = r.distinctBy { it.trackName }; phase = "done" }
+  }
+  if (AppLock.blocking) return
+  GlassAlertDialog(onDismissRequest = onDismiss, title = { Text("从 App Store 搜索") },
+    text = {
+      Column {
+        OutlinedTextField(q, { q = it }, label = { Text("App 名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        val msg = when {
+          term.isEmpty() -> "输入 App 名称搜索"
+          phase == "offline" -> "网络不可用"
+          phase == "done" && hits.isEmpty() -> "没有找到"
+          hits.isEmpty() -> "正在搜索…"
+          else -> null
+        }
+        if (msg != null) T(msg, 14f, color = pal.secondary, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
+        else Column(Modifier.heightIn(max = 340.dp).verticalScroll(rememberScrollState())) {
+          hits.forEach { h ->
+            Row(Modifier.fillMaxWidth().press(0.97f) { onPick(h) }.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+              HitThumb(h, 36.dp)
+              Spacer(Modifier.width(12.dp))
+              Column(Modifier.weight(1f)) {
+                T(h.name, 16f, lines = 1)
+                val sub = h.domain.ifEmpty { h.category }
+                if (sub.isNotEmpty()) T(sub, 12f, color = pal.secondary, lines = 1)
+              }
+            }
+          }
+        }
+      }
+    },
+    confirmButton = {},
+    dismissButton = { TextButton(onDismiss) { Text("取消") } })
 }
 
 // MARK: - add apps: pick sites, then pick which email / phone each uses

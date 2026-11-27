@@ -96,14 +96,17 @@ object SiteLookup { suspend fun find(q: String): List<SiteHit> = emptyList() }
 object AppStore {
   private val http = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
 
-  suspend fun search(term: String): List<AppHit> {
+  suspend fun search(term: String): List<AppHit> = searchOrNull(term) ?: emptyList()
+
+  /** Same request as [search]; null when offline or the request fails (so a caller can say 网络不可用). */
+  suspend fun searchOrNull(term: String): List<AppHit>? {
     if (term.isBlank()) return emptyList()
     return withContext(Dispatchers.IO) {
       runCatching {
         http.newCall(Request.Builder().url(appStoreURL(term)).build()).execute().use { r ->
-          if (!r.isSuccessful) emptyList() else parseAppStore(r.body?.string().orEmpty())
+          if (!r.isSuccessful) null else parseAppStore(r.body?.string().orEmpty())
         }
-      }.getOrDefault(emptyList())
+      }.getOrNull()
     }
   }
 

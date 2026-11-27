@@ -1123,6 +1123,11 @@
       <div class="sheet-body form">
         <div class="form-hero" id="aHero"></div>
         <input type="file" id="iconFile" accept="image/*" hidden>
+        ${existing ? `<div class="icon-search" id="iconSearch" hidden>
+          <div class="sec-title">从 App Store 搜索图标</div>
+          <div class="group"><div class="field"><input id="isQ" placeholder="App 名称" autocomplete="off" enterkeyhint="search"><button class="is-cancel" id="isCancel">取消</button></div>
+          <div class="is-list" id="isList"></div></div>
+        </div>` : ''}
         <div class="group">
           <div class="field" id="nameField"><label>名称</label><input id="aName" value="${esc(a.name)}" placeholder="GitHub、淘宝、微信…" autocomplete="off"></div>
           <div class="suggest" id="suggest"></div>
@@ -1155,17 +1160,54 @@
         const fake = { name: name || '?', domain: dom, icon };
         h.style.setProperty('--pc', name || icon ? brand(fake) : 'transparent');
         h.innerHTML = `<button class="hero-icon" id="heroIcon" aria-label="更换图标">${name || icon ? favIcon(fake, 'lg') : `<span class="icon lg" style="background:rgba(255,255,255,.08);color:var(--tertiary)">${ICON.plus}</span>`}<i class="hero-edit">${ICON.edit}</i></button><b>${esc(name || '新网站或 App')}</b>
-          <div class="icon-menu" id="iconMenu"><button data-im="pick"><span>从相册选择</span><svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m4 17.5 5-4.5 4 3.5 3-2.5 4 3.5"/></svg></button>${icon ? `<button data-im="reset"><span>使用默认图标</span><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5"/></svg></button>` : ''}</div>`;
+          <div class="icon-menu" id="iconMenu">${existing ? `<button data-im="store"><span>从 App Store 搜索</span>${ICON.apple}</button>` : ''}<button data-im="pick"><span>从相册选择</span><svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m4 17.5 5-4.5 4 3.5 3-2.5 4 3.5"/></svg></button>${icon ? `<button data-im="reset"><span>使用默认图标</span><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5"/></svg></button>` : ''}</div>`;
         $('#heroIcon').onclick = e => { e.stopPropagation(); $('#iconMenu').classList.toggle('open'); };
         $$('#iconMenu button').forEach(b => b.onclick = e => {
           e.stopPropagation(); $('#iconMenu').classList.remove('open');
-          if (b.dataset.im === 'pick') $('#iconFile').click(); else setIcon('');
+          if (b.dataset.im === 'pick') $('#iconFile').click(); else if (b.dataset.im === 'store') openIconSearch(); else setIcon('');
         });
         const dup = name && state.accounts.find(x => x !== existing && x.name.toLowerCase() === name.toLowerCase());
         const dh = $('#dupHint');
         if (dup) { dh.hidden = false; dh.innerHTML = `已经记录过 ${esc(dup.name)}${dup.handle ? `（${esc(dup.handle)}）` : ''}。是另一个账号的话，填个账号名区分。`; } else dh.hidden = true;
       };
-      const setIcon = v => { iconSeq++; icon = v || ''; hero(); };
+      const setIcon = v => { iconSeq++; iconBusy = false; icon = v || ''; hero(); };
+      // 更换图标 › 从 App Store 搜索 (edit form only): search by name, tap a result to use its artwork as the icon
+      let isRes = [], isSeq = 0, isT, iconBusy = false;
+      const isClose = () => { clearTimeout(isT); isSeq++; const b = $('#iconSearch'); if (b) b.hidden = true; };
+      const isDraw = (msg) => {
+        const l = $('#isList'); if (!l) return;
+        l.innerHTML = msg ? `<p class="is-msg">${esc(msg)}</p>` : isRes.map((r, i) => { const host = cleanDomain(r.sellerUrl || ''), sub = host || storeCat(r);
+          return `<button data-is="${i}"><span class="icon fav full"><img alt="" loading="lazy" decoding="async" width="64" height="64" src="${esc(r.artworkUrl100 || storeArt(r))}"></span><span class="is-t"><b>${esc(storeName(r.trackName))}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span></button>`; }).join('');
+        $$('#isList button[data-is]').forEach(b => b.onclick = () => { pickStoreIcon(isRes[b.dataset.is]); isClose(); });
+      };
+      const isSearch = (now = false) => {
+        clearTimeout(isT); const q = $('#isQ').value.trim(), seq = ++isSeq;
+        if (!q) { isRes = []; return isDraw('输入 App 名称搜索'); }
+        isT = setTimeout(() => {
+          isDraw('正在搜索…');
+          storeSearch(q).then(res => { if (seq !== isSeq) return; isRes = res; isDraw(res.length ? '' : '没有找到'); })
+            .catch(() => { if (seq === isSeq) { isRes = []; isDraw('网络不可用'); } });
+        }, now ? 0 : 350);
+      };
+      const openIconSearch = () => {
+        const b = $('#iconSearch'); if (!b) return;
+        b.hidden = false; $('#isQ').value = $('#aName').value.trim(); isSearch(true);
+        b.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        if (matchMedia('(hover:hover)').matches) $('#isQ').focus({ preventScroll: true });
+      };
+      const pickStoreIcon = r => {
+        const seq = ++iconSeq, prev = icon; iconBusy = true;
+        // show the small artwork right away, then swap in the downscaled copy that gets saved (same as adding)
+        $('#aHero').dataset.k = '';
+        const h = $('#heroIcon .icon'); if (h) h.outerHTML = `<span class="icon fav full lg"><img alt="" width="64" height="64" src="${esc(r.artworkUrl100 || storeArt(r))}"></span>`;
+        storeIcon(storeArt(r)).catch(() => storeIcon(r.artworkUrl100)).then(v => { if (seq === iconSeq) setIcon(v); })
+          .catch(() => { if (seq === iconSeq) { setIcon(prev); toast(navigator.onLine === false ? '网络不可用' : '图标下载失败，换一个试试'); } });
+      };
+      if ($('#iconSearch')) {
+        $('#isQ').addEventListener('input', () => isSearch());
+        $('#isQ').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); isSearch(true); } });
+        $('#isCancel').onclick = isClose;
+      }
       document.addEventListener('click', function off(e) { const m = $('#iconMenu'); if (!m) return document.removeEventListener('click', off, true); if (!e.target.closest('#iconMenu,#heroIcon')) m.classList.remove('open'); }, true);
       $('#iconFile').onchange = async e => {
         const f = e.target.files[0]; e.target.value = ''; if (!f) return;
@@ -1178,11 +1220,11 @@
         $('#aName').value = storeName(r.trackName);
         const host = cleanDomain(r.sellerUrl || ''); if (host) $('#aDomain').value = host;
         setCat(catOr(storeCat(r))); store = []; storeQ = ''; $('#suggest').innerHTML = '';
-        const seq = ++iconSeq;
+        const seq = ++iconSeq; iconBusy = true;
         // show the small artwork right away, then swap in the downscaled copy that gets saved
         icon = ''; hero();
         const h = $('#heroIcon .icon'); if (h) h.outerHTML = `<span class="icon fav full lg"><img alt="" width="64" height="64" src="${esc(r.artworkUrl100 || storeArt(r))}"></span>`;
-        storeIcon(storeArt(r)).catch(() => storeIcon(r.artworkUrl100)).then(v => { if (seq === iconSeq) setIcon(v); }).catch(() => { if (seq === iconSeq) { $('#aHero').dataset.k = ''; hero(); } });
+        storeIcon(storeArt(r)).catch(() => storeIcon(r.artworkUrl100)).then(v => { if (seq === iconSeq) setIcon(v); }).catch(() => { if (seq === iconSeq) { iconBusy = false; $('#aHero').dataset.k = ''; hero(); } });
       };
       let store = [], storeQ = '', storeSeq = 0, storeT;
       let web = [], webQ = '', webSeq = 0, webT;   // official sites found online for a name we don't know
@@ -1222,6 +1264,7 @@
       if (presetName) suggest();
       $('#saveAccount').onclick = () => {
         const name = $('#aName').value.trim();
+        if (iconBusy) return toast('图标还在下载，稍等一下');
         if (!name) { const f = $('#nameField'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); $('#aName').focus(); toast('填一下名称'); return; }
         const data = { name, handle: $('#aHandle').value.trim(), domain: cleanDomain($('#aDomain').value), category: cat, identityIds: [...sel], notes: $('#aNotes').value.trim() };
         if (icon) data.icon = icon;   // no key at all when there's no custom icon, for older clients
