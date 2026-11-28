@@ -202,6 +202,70 @@ object Sync {
     }
   }
 
+  // MARK: card pictures on WebDAV (docs/card-backgrounds.md)
+  // AccountAtlas/pics/<id>.bin = nonce(12) || ciphertext || tag(16), AES-GCM with the sync key. Content-addressed, so a
+  // picture is never overwritten and needs no ETag. Gist / Gitee never carry pictures (file size limits).
+  const val DAV_PICS = DAV_DIR + "pics/"
+  private const val PICS_FOR = "atlas.sync.picsFor"
+  private const val PICS_UP = "atlas.sync.picsUp"
+  /** pics/ missing (first picture on this server): MKCOL it once and retry */
+  private fun davPutPic(base: String, user: String, pass: String, id: String, blob: ByteArray, mkdir: Boolean = true) {
+    val rb = Request.Builder().url("$base$DAV_PICS$id.bin").put(blob.toRequestBody("application/octet-stream".toMediaType()))
+    davCall(rb, user, pass).use {
+      if ((it.code == 404 || it.code == 409) && mkdir) {
+        davCall(Request.Builder().url(base + DAV_PICS).method("MKCOL", null), user, pass).use { m -> if (m.code !in 200..299 && m.code != 405) davFail(m.code, base) }
+        return davPutPic(base, user, pass, id, blob, false)
+      }
+      if (it.code !in 200..299) davFail(it.code, base)
+    }
+  }
+  /** null = not on the server (the other device hasn't uploaded it yet; 坚果云 says 409 while pics/ doesn't exist) */
+  private fun davGetPic(base: String, user: String, pass: String, id: String): ByteArray? {
+    davCall(Request.Builder().url("$base$DAV_PICS$id.bin"), user, pass).use {
+      if (it.code == 404 || it.code == 409) return null
+      if (it.code !in 200..299) davFail(it.code, base)
+      return it.body?.bytes()
+    }
+  }
+  /** which pictures this device already put on this server: kept per sync config, so a new server / account / key starts over */
+  private fun picsSig(c: SyncConf) = listOf(c.provider, c.url, c.user, c.salt).joinToString("|")
+  private fun uploadedPics(c: SyncConf): MutableSet<String> {
+    val p = Store.prefs()
+    return if (p.getString(PICS_FOR, null) == picsSig(c)) (p.getStringSet(PICS_UP, null) ?: emptySet()).toMutableSet() else HashSet()
+  }
+  private fun clearUploadedPics() { Store.prefs().edit().remove(PICS_FOR).remove(PICS_UP).apply() }
+  /** After the data file is merged and written: upload own pictures the server doesn't have from us yet, download the
+   *  ones a card points at that aren't here. Never turns the status into an error: whatever fails is tried next run. */
+  private suspend fun syncPics(c: SyncConf, k: ByteArray, d: AtlasData) {
+    if (c.provider != "webdav") return
+    val ids = picIds(d)
+    if (ids.isEmpty()) return
+    // same LAN-only http rule as when sync was turned on
+    val base = runCatching { davBase(c.url ?: "") }.getOrNull() ?: return
+    val user = c.user ?: return
+    val up = uploadedPics(c); var changed = false
+    try {
+      for (id in ids) {
+        if (CardPics.has(id)) {
+          if (id in up) continue
+          val sent = withContext(Dispatchers.IO) {
+            val b = CardPics.bytes(id) ?: return@withContext false
+            davPutPic(base, user, c.token, id, AtlasCrypto.sealBytes(b, k)); true
+          }
+          if (sent) { up += id; changed = true }
+        } else {
+          val blob = withContext(Dispatchers.IO) { davGetPic(base, user, c.token, id) } ?: continue
+          val jpeg = withContext(Dispatchers.Default) { runCatching { AtlasCrypto.openBytes(blob, k) }.getOrNull() } ?: continue
+          // content-addressed: only bytes that are this id are kept; storing it redraws the cards that wear it
+          if (picId(jpeg) == id) CardPics.store(jpeg)
+        }
+      }
+    } catch (_: Exception) {
+      // offline / server refused: stop here, the rest waits for the next run
+    }
+    if (changed) Store.prefs().edit().putString(PICS_FOR, picsSig(c)).putStringSet(PICS_UP, HashSet(up)).apply()
+  }
+
   private fun readRemote(c: SyncConf): Remote =
     if (c.provider == "webdav") davRead(c.url ?: "", c.user ?: "", c.token)
     else Remote(readGist(c.gistId ?: "", c.token, c.provider ?: "github"))
@@ -228,6 +292,7 @@ object Sync {
     try {
       // read-merge-write; on WebDAV a 412 (another device wrote in between) reads again, the 3rd try writes without If-Match
       var tries = 0
+      var synced: AtlasData
       while (true) {
         val r = withContext(Dispatchers.IO) { readRemote(c) }
         val text = r.text
@@ -235,6 +300,7 @@ object Sync {
         // during the 操作演示 the screen shows sandbox data: sync only ever sees (and updates) the real data
         val local = Store.realData()
         val merged = Merge.merge(local, remote)
+        synced = merged
         if (Merge.sig(merged) != Merge.sig(local)) Store.adopt(merged)
         if (text == null || Merge.sig(merged) != Merge.sig(remote)) {
           val content = AtlasCrypto.sealData(merged, k, c.salt)
@@ -244,6 +310,7 @@ object Sync {
         break
       }
       state = "idle"; err = ""; at = nowMS(); conf = conf?.copy(at = at); persistConf()
+      syncPics(c, k, synced)
     } catch (e: Exception) {
       state = "error"
       err = when (e) { is SyncError -> e.message ?: "同步失败"; is AEADBadTagException -> "同步密码不对"; is AtlasCrypto.BadFormat -> e.message!!; else -> "同步失败" }
@@ -301,10 +368,11 @@ object Sync {
       gid = idOf(made?.get("id"))
     }
     conf = SyncConf(prov, token, salt, AtlasCrypto.b64(k), gid, 0.0, base, if (dav) u else null)
+    clearUploadedPics()
     key = k; persistConf(); state = "idle"
     run()
     return found
   }
 
-  fun disable() { conf = null; key = null; state = "off"; err = ""; persistConf() }
+  fun disable() { conf = null; key = null; state = "off"; err = ""; persistConf(); clearUploadedPics() }
 }

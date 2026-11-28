@@ -93,6 +93,18 @@ abstract class CopyIcons : DefaultTask() {
   }
 }
 
+// Official card backgrounds: the repo's /backgrounds folder (shared with web + iOS) → assets/backgrounds/<id>.jpg.
+// Only the pictures are copied (the folder's README.md stays out of the APK).
+abstract class CopyBackgrounds : DefaultTask() {
+  @get:InputDirectory abstract val source: DirectoryProperty
+  @get:OutputDirectory abstract val outputDir: DirectoryProperty
+  @TaskAction fun run() {
+    val out = outputDir.get().asFile.resolve("backgrounds")
+    out.deleteRecursively(); out.mkdirs()
+    source.get().asFile.listFiles { f -> f.name.endsWith(".jpg") }?.forEach { it.copyTo(out.resolve(it.name), true) }
+  }
+}
+
 // Launcher icon: ONE source image, android/icon-src/icon-1024.png (square, full-bleed artwork).
 // Swap that file to change the logo; mipmaps are generated from it at build time.
 abstract class GenLauncherIcons : DefaultTask() {
@@ -149,6 +161,9 @@ abstract class GenLauncherIcons : DefaultTask() {
 val copyIcons = tasks.register<CopyIcons>("copyPresetIcons") {
   source.set(rootProject.layout.projectDirectory.dir("../icons"))
 }
+val copyBackgrounds = tasks.register<CopyBackgrounds>("copyCardBackgrounds") {
+  source.set(rootProject.layout.projectDirectory.dir("../backgrounds"))
+}
 val genLauncher = tasks.register<GenLauncherIcons>("genLauncherIcons") {
   source.set(rootProject.layout.projectDirectory.file("icon-src/icon-1024.png"))
 }
@@ -156,6 +171,7 @@ val genLauncher = tasks.register<GenLauncherIcons>("genLauncherIcons") {
 androidComponents {
   onVariants { v ->
     v.sources.assets?.addGeneratedSourceDirectory(copyIcons, CopyIcons::outputDir)
+    v.sources.assets?.addGeneratedSourceDirectory(copyBackgrounds, CopyBackgrounds::outputDir)
     v.sources.res?.addGeneratedSourceDirectory(genLauncher, GenLauncherIcons::outputDir)
   }
 }
