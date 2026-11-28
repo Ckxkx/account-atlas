@@ -19,6 +19,11 @@ struct IdentityForm: View {
   @State private var addNew = false               // a number / address not in the list yet
   @State private var viaNew = ""
   @State private var colorTouched = false   // the user picked a skin here: stop following the type / provider
+  /// 卡片背景: official id / own picture id ('' = none). An own picture is stored on pick (by content id,
+  /// so nothing is duplicated); the card only points at it after 保存, and an unused file goes on next launch.
+  @State private var bg: String
+  @State private var pic: String
+  @State private var bgItem: PhotosPickerItem? = nil
 
   init(existing: Identity?, type: String, defaultColor: String, presetVia: String? = nil) {
     self.existing = existing
@@ -35,6 +40,8 @@ struct IdentityForm: View {
     _apple = State(initialValue: existing?.apple == true)
     _provider = State(initialValue: p)
     _binds = State(initialValue: existing?.bindIDs ?? (presetVia.map { [$0] } ?? []))
+    _bg = State(initialValue: existing?.bg ?? "")
+    _pic = State(initialValue: existing?.pic ?? "")
   }
 
   var isLogin: Bool { type == "login" }
@@ -73,6 +80,7 @@ struct IdentityForm: View {
                      esim: type == "phone" && esim, provider: isLogin ? provider : nil, apple: !isLogin && apple)
     if isLogin { i.setBinds(binds) }
     i.order = existing?.order
+    i.bg = savedBg; i.pic = pic.isEmpty ? nil : pic
     return i
   }
 
@@ -84,6 +92,7 @@ struct IdentityForm: View {
             .padding(.horizontal, 10).padding(.vertical, 6)
             .animation(Motion.smooth, value: color)
             .animation(Motion.smooth, value: type)
+            .animation(Motion.smooth, value: bg + "|" + pic)
           Picker("类型", selection: $type) {
             Text("邮箱").tag("email")
             Text("手机号").tag("phone")
@@ -166,6 +175,41 @@ struct IdentityForm: View {
         }
         .sensoryFeedback(.selection, trigger: color)
         Section {
+          LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
+            bgTile(on: bg.isEmpty && pic.isEmpty, image: nil, text: "无") { bg = ""; pic = "" }
+            ForEach(OfficialBackgrounds.all) { b in
+              bgTile(on: pic.isEmpty && bg == b.id, image: CardPics.shared.official(b), text: nil) { bg = b.id; pic = "" }
+                .accessibilityLabel(b.name)
+            }
+            // the own picture; its id synced from another device whose file isn't here (yet) keeps a tile of its own
+            if !pic.isEmpty {
+              if let im = CardPics.shared.own(pic) { bgTile(on: true, image: im, text: nil) {}.accessibilityLabel("我的图片") }
+              else { bgTile(on: true, image: nil, text: "其他设备上的图片") {} }
+            }
+            PhotosPicker(selection: $bgItem, matching: .images) {
+              VStack(spacing: 2) {
+                Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
+                Text(!pic.isEmpty && CardPics.shared.own(pic) != nil ? "换一张" : "自己的图片").font(.system(size: 11, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+              }
+              .foregroundStyle(Color.accentColor)
+              .frame(maxWidth: .infinity).aspectRatio(1.586, contentMode: .fit)
+              .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("从相册选择")
+          }.padding(.vertical, 6)
+        } header: { Text("卡片背景") } footer: { Text(bgHint) }
+        .sensoryFeedback(.selection, trigger: bg + "|" + pic)
+        .onChange(of: bgItem) {
+          guard let item = bgItem else { return }
+          bgItem = nil
+          Task {
+            guard let raw = try? await item.loadTransferable(type: Data.self), let jpeg = await CardPics.process(raw) else { store.show("这张图片打不开"); return }
+            guard let id = CardPics.shared.store(jpeg) else { store.show("图片太大，存不下，换一张小一点的"); return }
+            withAnimation(Motion.snappy) { pic = id; bg = "" }
+          }
+        }
+        Section {
           TextField(isLogin ? "实名情况、找回方式" : "运营商、是否实名、找回方式", text: $notes, axis: .vertical).lineLimit(2...6)
         } header: { Text("备注") } footer: { Text("不要在这里填写密码。") }
       }
@@ -190,6 +234,25 @@ struct IdentityForm: View {
         if !colorTouched && isLoginSkin(color) { withAnimation(Motion.snappy) { color = loginDefaultColor(new) } }
       }
     }
+  }
+
+  /// written only when no own picture is picked (at most one of the two is set)
+  var savedBg: String? { pic.isEmpty && !bg.isEmpty ? bg : nil }
+  var bgHint: String {
+    (OfficialBackgrounds.all.isEmpty ? "" : "官方背景会跟着同步；") +
+      (Sync.savedProvider == "webdav" ? "自己选的图片会加密同步到你的 WebDAV。" : "自己选的图片只保存在这台设备上。同步方式改成 WebDAV 后，图片也能同步到其他设备。")
+  }
+  /// a card-shaped tile of the 卡片背景 grid
+  func bgTile(on: Bool, image: UIImage?, text: String?, _ tap: @escaping () -> Void) -> some View {
+    let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+    return Button { withAnimation(Motion.snappy) { tap() } } label: {
+      Color.primary.opacity(0.07)
+        .overlay { if let image { Image(uiImage: image).resizable().scaledToFill() } }
+        .overlay { if let text { Text(text).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).multilineTextAlignment(.center).minimumScaleFactor(0.7).padding(4) } }
+        .aspectRatio(1.586, contentMode: .fit)
+        .clipShape(shape)
+        .overlay(shape.stroke(Color.primary, lineWidth: on ? 2.5 : 0).padding(-3))
+    }.buttonStyle(.plain)
   }
 
   var fieldTitle: String {
@@ -237,6 +300,7 @@ struct IdentityForm: View {
           s.identities[k].apple = ap ? true : nil
           s.identities[k].provider = prov
           s.identities[k].demo = nil   // edited by the user: a sample card becomes theirs
+          s.identities[k].bg = savedBg; s.identities[k].pic = pic.isEmpty ? nil : pic
           if isL { s.identities[k].setBinds(bound) }
         }
       }
@@ -245,6 +309,7 @@ struct IdentityForm: View {
       var i = Identity(type: type, value: v, label: label.trimmingCharacters(in: .whitespaces), color: color, notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
                        esim: type == "phone" && esim, provider: prov, apple: ap)
       if isL { i.setBinds(bound) }
+      i.bg = savedBg; i.pic = pic.isEmpty ? nil : pic
       store.mutate("已添加") { s in
         s.identities.append(i)
       }

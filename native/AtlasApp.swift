@@ -28,6 +28,9 @@ struct AtlasApp: App {
           LockWindow.sync()   // 2.6 应用锁: locked from the first frame when it is on
           let s = sync
           store.onSaved = { [weak s] in s?.schedule() }
+          // 卡片背景: own pictures no card points at any more go now, at launch (not on delete, so 撤销 keeps them)
+          let keep = Set(store.realData.identities.compactMap(\.pic))
+          Task.detached(priority: .background) { CardPics.prune(keep: keep) }
           Task { await sync.run() }
           // 检查更新: once a day at most; the alert waits for the lock screen / 操作演示 (RootView)
           DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Updater.shared.maybeCheck() }

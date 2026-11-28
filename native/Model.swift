@@ -72,10 +72,14 @@ struct Identity: Codable, Identifiable, Hashable {
   var vias: [String]? = nil
   /// 2.5: part of the sample data (「清除示例数据」 removes exactly these). Written only when true.
   var demo: Bool? = nil
+  /// 卡片背景 (docs/card-backgrounds.md): id of an official background shipped with the app. Written only when set.
+  var bg: String? = nil
+  /// 卡片背景: the user's own picture by content id (first 32 hex of SHA-256 of its JPEG). At most one of bg / pic.
+  var pic: String? = nil
   /// fields from newer clients, written back untouched
   var extra: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "type", "value", "label", "color", "notes", "updatedAt", "order", "esim", "provider", "via", "apple", "vias", "demo"]
+  static let knownKeys: Set<String> = ["id", "type", "value", "label", "color", "notes", "updatedAt", "order", "esim", "provider", "via", "apple", "vias", "demo", "bg", "pic"]
 
   init(id: String = newID(), type: String, value: String, label: String = "", color: String, notes: String = "", esim: Bool = false, provider: String? = nil, via: String? = nil, apple: Bool = false) {
     self.id = id; self.type = type; self.value = value; self.label = label; self.color = color; self.notes = notes
@@ -103,6 +107,10 @@ struct Identity: Codable, Identifiable, Hashable {
     let vs = (try? c.decode([String].self, forKey: AnyKey("vias")))?.filter { !$0.isEmpty }
     vias = (vs?.isEmpty ?? true) ? nil : vs
     demo = (try? c.decode(Bool.self, forKey: AnyKey("demo"))) == true ? true : nil
+    let b = try? c.decode(String.self, forKey: AnyKey("bg"))
+    bg = (b?.isEmpty ?? true) ? nil : b
+    let pc = try? c.decode(String.self, forKey: AnyKey("pic"))
+    pic = (pc?.isEmpty ?? true) ? nil : pc
     extra = unknownFields(d, known: Identity.knownKeys)
   }
   func encode(to e: Encoder) throws {
@@ -122,6 +130,8 @@ struct Identity: Codable, Identifiable, Hashable {
     if let via, !via.isEmpty { try c.encode(via, forKey: AnyKey("via")) }
     if let vias, vias.count > 1 { try c.encode(vias, forKey: AnyKey("vias")) }
     if demo == true { try c.encode(true, forKey: AnyKey("demo")) }
+    if let bg, !bg.isEmpty { try c.encode(bg, forKey: AnyKey("bg")) }
+    if let pic, !pic.isEmpty { try c.encode(pic, forKey: AnyKey("pic")) }
   }
   /// 2.5: every email / phone id this 微信 / QQ is bound to, via first (union of via and vias, no repeats)
   var bindIDs: [String] {
@@ -224,6 +234,7 @@ func dupCount24(_ d: AtlasData) -> Int { dupGroups24(d).reduce(0) { $0 + $1.coun
       if o.bindIDs.contains(where: { $0 != keep.id && !keep.bindIDs.contains($0) }) { keep.setBinds(keep.bindIDs + o.bindIDs) }
       if keep.demo == true && o.demo != true { keep.demo = nil }   // merged with a real one: real
       if keep.order == nil { keep.order = o.order }
+      if keep.bg == nil && keep.pic == nil { keep.bg = o.bg; keep.pic = o.pic }   // the kept card wears the other's picture if it had none
       for (k, v) in o.extra where keep.extra[k] == nil { keep.extra[k] = v }
       d.identities[kk] = keep
     }

@@ -421,9 +421,17 @@ struct WalletCard: View {
     let i = identity
     let accs = store.accounts(of: i.id)
     let shape = CardShape(sim: i.isPhone)
+    // 卡片背景: a picture (own, if its file is on this device, else official) replaces the colour face and the poster
+    let pic = CardPics.shared.image(for: i)
     ZStack(alignment: .topLeading) {
-      skinGradient(i.color)
-      poster(accs.sorted { $0.createdAt > $1.createdAt })
+      if let pic {
+        // Color.clear takes the card's size; the picture fills it without growing the stack
+        Color.clear.overlay { Image(uiImage: pic).resizable().scaledToFill() }.clipped()
+        CardScrim()
+      } else {
+        skinGradient(i.color)
+        poster(accs.sorted { $0.createdAt > $1.createdAt })
+      }
       // soft light from the top-left, like a printed card
       RadialGradient(colors: [.white.opacity(0.32), .clear], center: UnitPoint(x: 0.12, y: 0), startRadius: 0, endRadius: 260)
         .blendMode(.softLight)
@@ -452,7 +460,8 @@ struct WalletCard: View {
         }.padding(.top, 8)
       }
       .foregroundStyle(.white)
-      .shadow(color: .black.opacity(0.18), radius: 1, y: 0.5)
+      // on a picture the text needs a softer, wider shadow to stay readable on any colours
+      .shadow(color: .black.opacity(pic == nil ? 0.18 : 0.35), radius: pic == nil ? 1 : 4, y: pic == nil ? 0.5 : 1)
       .padding(18)
     }
     .aspectRatio(1.586, contentMode: .fit)

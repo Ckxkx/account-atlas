@@ -5,10 +5,10 @@ name: Build iOS IPA
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['ios/**', 'native/**', 'icons/**', '.github/workflows/ios.yml']
+    paths: ['ios/**', 'native/**', 'icons/**', 'backgrounds/**', '.github/workflows/ios.yml']
   push:
     branches: [main, dev]
-    paths: ['ios/**', 'native/**', 'icons/**', '.github/workflows/ios.yml']
+    paths: ['ios/**', 'native/**', 'icons/**', 'backgrounds/**', '.github/workflows/ios.yml']
   workflow_call:
     inputs:
       version:
@@ -41,7 +41,7 @@ jobs:
           mkdir -p "$APP/www" build
           xcrun -sdk iphoneos swiftc -parse-as-library -O -swift-version 5 -target arm64-apple-ios17.0 -sdk "$SDK" native/*.swift -o "$APP/Atlas" 2>&1 | tee build/swiftc.log
           test -f "$APP/Atlas"
-          rmdir "$APP/www"; cp -R icons "$APP/icons"; cp -R native/lproj/*.lproj "$APP/"; for f in "$APP"/*.lproj/InfoPlist.strings; do plutil -convert binary1 "$f"; done
+          rmdir "$APP/www"; cp -R icons "$APP/icons"; cp -R backgrounds "$APP/backgrounds"; rm -f "$APP/backgrounds/README.md"; cp -R native/lproj/*.lproj "$APP/"; for f in "$APP"/*.lproj/InfoPlist.strings; do plutil -convert binary1 "$f"; done
           BUILD=$(( $(git rev-list --count HEAD) + 1000 ))   # same build number as the Android versionCode
           sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" native/Info.plist > "$APP/Info.plist"
           xcrun actool ios/Assets.xcassets --compile "$APP" --platform iphoneos --minimum-deployment-target 17.0 \
@@ -82,7 +82,7 @@ jobs:
           APP=sim/Atlas.app
           mkdir -p "$APP" shots
           xcrun -sdk iphonesimulator swiftc -parse-as-library -Onone -swift-version 5 -target arm64-apple-ios17.0-simulator -sdk "$SDK" native/*.swift -o "$APP/Atlas"
-          cp -R icons "$APP/icons"; cp -R native/lproj/*.lproj "$APP/"
+          cp -R icons "$APP/icons"; cp -R backgrounds "$APP/backgrounds"; rm -f "$APP/backgrounds/README.md"; cp -R native/lproj/*.lproj "$APP/"
           sed -e "s/__VERSION__/2.0/" -e "s/__BUILD__/1/" native/Info.plist > "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleSupportedPlatforms" "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c "Add :CFBundleSupportedPlatforms array" -c "Add :CFBundleSupportedPlatforms:0 string iPhoneSimulator" "$APP/Info.plist"

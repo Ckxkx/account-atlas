@@ -2,6 +2,7 @@ import Foundation
 import CryptoKit
 import CommonCrypto
 import SwiftUI
+import UIKit
 
 // Same encrypted file as the web app: PBKDF2-SHA256 (310k) -> AES-GCM, stored in a private gist (Gitee or GitHub)
 // or, apps only, on a WebDAV server (坚果云 etc.) as <server>/AccountAtlas/atlas.enc.json.
@@ -47,6 +48,12 @@ final class Sync: ObservableObject {
       return h.contains("jianguoyun") ? "坚果云 WebDAV" : "WebDAV · " + h
     default: return "GitHub 私有 Gist"
     }
+  }
+
+  /// the saved sync provider without a Sync instance (the identity form's 卡片背景 hint); nil = sync off
+  static var savedProvider: String? {
+    guard let s = UserDefaults.standard.string(forKey: "atlas.sync"), let d = s.data(using: .utf8), let c = try? JSONDecoder().decode(SyncConf.self, from: d) else { return nil }
+    return c.provider ?? "github"
   }
 
   init() {
@@ -161,13 +168,13 @@ final class Sync: ObservableObject {
     if u.scheme?.lowercased() == "http" && !davLocalHost(host) { throw SyncError.msg("外网服务器请用 https://（http 只能用于局域网地址，如 192.168.x.x 或 nas.local）") }
     return s
   }
-  private func dav(_ url: String, method: String = "GET", body: Data? = nil, user: String, pass: String, ifMatch: String? = nil) async throws -> (Data, HTTPURLResponse) {
+  private func dav(_ url: String, method: String = "GET", body: Data? = nil, user: String, pass: String, ifMatch: String? = nil, type: String = "application/json; charset=utf-8") async throws -> (Data, HTTPURLResponse) {
     guard let u = URL(string: url) else { throw SyncError.msg("服务器地址格式不对") }
     var r = URLRequest(url: u)
     r.httpMethod = method; r.cachePolicy = .reloadIgnoringLocalCacheData; r.timeoutInterval = 20
     r.setValue("Basic " + Data((user + ":" + pass).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
     r.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-    if let body { r.httpBody = body; r.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type") }
+    if let body { r.httpBody = body; r.setValue(type, forHTTPHeaderField: "Content-Type") }
     // weak ETags (W/"…") never match If-Match, so only strong ones are sent back
     if let ifMatch, !ifMatch.hasPrefix("W/") { r.setValue(ifMatch, forHTTPHeaderField: "If-Match") }
     do {
@@ -297,6 +304,8 @@ final class Sync: ObservableObject {
         break
       }
       state = "idle"; err = ""; at = nowMS(); conf?.at = at; persistConf()
+      // 卡片背景: own pictures ride along on WebDAV only (a gist can't hold them); never an error of the sync
+      if c.provider == "webdav" { await syncPics(c, key: k) }
     } catch {
       state = "error"; err = (error as? SyncError)?.errorDescription ?? (error is CryptoKitError ? "同步密码不对" : "同步失败")
     }
@@ -359,11 +368,62 @@ final class Sync: ObservableObject {
     let keyData = k.withUnsafeBytes { Data($0) }
     conf = SyncConf(provider: prov, token: token, salt: salt, key: keyData.base64EncodedString(), gistId: gid, at: 0, url: isDav ? base : nil, user: isDav ? u : nil)
     key = k; persistConf(); state = "idle"
+    UserDefaults.standard.removeObject(forKey: Sync.PICS_UP)   // a new sync config: every picture is uploaded to it again
     await run()
     return foundRemote
   }
 
   func disable() {
     conf = nil; key = nil; state = "off"; err = ""; persistConf()
+    UserDefaults.standard.removeObject(forKey: Sync.PICS_UP)
+  }
+
+  // MARK: 卡片背景 pictures (WebDAV only, docs/card-backgrounds.md)
+  // <server>/AccountAtlas/pics/<id>.bin = nonce(12) || ciphertext || tag(16), AES-GCM with the data file's key.
+  // Content-addressed: a picture is never overwritten, so each id is uploaded once per server (the "uploaded" set).
+  static let PICS_UP = "atlas.picsUp"
+  /// the uploaded set belongs to one sync config; another server, account or password starts it over
+  private func picsUpKey(_ c: SyncConf) -> String { [c.url ?? "", c.user ?? "", c.salt].joined(separator: "\n") }
+  private func picsUploaded(_ c: SyncConf) -> Set<String> {
+    guard let o = UserDefaults.standard.dictionary(forKey: Sync.PICS_UP), o["for"] as? String == picsUpKey(c) else { return [] }
+    return Set(o["ids"] as? [String] ?? [])
+  }
+  private func savePicsUploaded(_ ids: Set<String>, _ c: SyncConf) {
+    UserDefaults.standard.set(["for": picsUpKey(c), "ids": Array(ids)] as [String: Any], forKey: Sync.PICS_UP)
+  }
+  private func syncPics(_ c: SyncConf, key k: SymmetricKey) async {
+    guard let store else { return }
+    let base = c.url ?? "", user = c.user ?? "", pass = c.token
+    let dir = base + Sync.DAV_DIR + "pics/"
+    let wanted = Set(store.realData.identities.compactMap(\.pic)).filter(CardPics.validID)
+    var up = picsUploaded(c)
+    var madeDir = false
+    for id in wanted.sorted() {
+      // any failure (network, server, a bad file) skips this picture only; the next sync tries again
+      do {
+        if CardPics.exists(id) {
+          if up.contains(id) { continue }
+          let plain = try Data(contentsOf: CardPics.file(id))
+          guard let body = try AES.GCM.seal(plain, using: k).combined else { continue }   // 12-byte nonce || ct || tag
+          var h = try await dav(dir + id + ".bin", method: "PUT", body: body, user: user, pass: pass, type: "application/octet-stream").1
+          // pics/ missing: create it once (AccountAtlas/ too, in case it went) and retry
+          if (h.statusCode == 404 || h.statusCode == 409) && !madeDir {
+            madeDir = true
+            _ = try? await dav(base + Sync.DAV_DIR, method: "MKCOL", user: user, pass: pass)
+            _ = try await dav(dir, method: "MKCOL", user: user, pass: pass)
+            h = try await dav(dir + id + ".bin", method: "PUT", body: body, user: user, pass: pass, type: "application/octet-stream").1
+          }
+          if (200..<300).contains(h.statusCode) { up.insert(id); savePicsUploaded(up, c) }
+        } else {
+          let (data, h) = try await dav(dir + id + ".bin", user: user, pass: pass)
+          // 404 (409 on 坚果云 while pics/ doesn't exist): the other device hasn't uploaded it yet
+          guard (200..<300).contains(h.statusCode), data.count > 28 else { continue }
+          let plain = try AES.GCM.open(try AES.GCM.SealedBox(combined: data), using: k)
+          guard UIImage(data: plain) != nil, CardPics.shared.store(plain) != nil else { continue }
+          // store() bumped CardPics.rev, so every card wearing it draws it now. It came from this server: no upload.
+          up.insert(CardPics.id(of: plain)); savePicsUploaded(up, c)
+        }
+      } catch { continue }
+    }
   }
 }
