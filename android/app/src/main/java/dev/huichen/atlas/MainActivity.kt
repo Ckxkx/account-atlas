@@ -96,6 +96,8 @@ class MainActivity : FragmentActivity() {
     // No forced refresh-rate mode: the system's adaptive rate (60/90/120 Hz) is left alone, which saves
     // battery and avoids mode-switch hitches on some ROMs. Smoothness comes from the animations instead.
     Store.init(applicationContext)
+    // own card pictures: which are here, and the ones no card points at any more are deleted (only at launch, so 撤销 works)
+    CardPics.init(applicationContext, picIds(Store.realData()))
     AppLock.init(applicationContext)
     AppLock.applyRecents(this)
     Updater.init(applicationContext)

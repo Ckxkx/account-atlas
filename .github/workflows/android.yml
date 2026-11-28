@@ -5,10 +5,10 @@ name: Build Android APK
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['android/**', 'icons/**', '.github/workflows/android.yml']
+    paths: ['android/**', 'icons/**', 'backgrounds/**', '.github/workflows/android.yml']
   push:
     branches: [main, dev]
-    paths: ['android/**', 'icons/**', '.github/workflows/android.yml']
+    paths: ['android/**', 'icons/**', 'backgrounds/**', '.github/workflows/android.yml']
   workflow_call:
     inputs:
       version:

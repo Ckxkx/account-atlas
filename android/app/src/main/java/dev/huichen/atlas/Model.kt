@@ -57,6 +57,12 @@ data class Identity(
   val vias: List<String>? = null,
   /** 2.5: part of the sample data (「清除示例数据」 removes exactly these). Written only when true. */
   val demo: Boolean? = null,
+  /** Card background (docs/card-backgrounds.md): id of an official picture that ships with the app (OfficialBackgrounds).
+   *  Written only when set; at most one of bg / pic is set. Builds before this drop the key when they rewrite a card. */
+  val bg: String? = null,
+  /** The user's own picture: first 32 hex of SHA-256 of its JPEG (CardPics). The picture itself stays on the device
+   *  (WebDAV carries it encrypted); a card whose picture isn't here shows bg / the colour. Written only when set. */
+  val pic: String? = null,
 ) {
   /** 2.5: every email / phone id this 微信 / QQ is bound to, via first (union of via and vias, no repeats) */
   val bindIds: List<String> get() {
@@ -148,6 +154,7 @@ object Migrate24 {
         if (o.bindIds.any { it != keep.id && it !in keep.bindIds }) keep = keep.withBinds(keep.bindIds + o.bindIds)
         if (keep.order == null && o.order != null) keep = keep.copy(order = o.order)
         if (keep.demo == true && o.demo != true) keep = keep.copy(demo = null)   // merged with a real one: real
+        if (keep.bg == null && keep.pic == null && (o.bg != null || o.pic != null)) keep = keep.copy(bg = o.bg, pic = o.pic)   // the background goes along too
       }
       byId[keep.id] = keep
     }
@@ -243,6 +250,17 @@ fun idValueError(kind: String, value: String): String? {
   }
 }
 
+// MARK: card backgrounds (docs/card-backgrounds.md) — mirrors app.js picId
+
+/** An own picture's id: the first 32 lowercase hex chars of SHA-256 of its stored JPEG bytes. Same picture, same id,
+ *  on every device, so two cards share one file and a synced id finds its file on the server. */
+fun picId(jpeg: ByteArray): String =
+  java.security.MessageDigest.getInstance("SHA-256").digest(jpeg).joinToString("") { "%02x".format(it) }.take(32)
+/** only ids that look like picId output are ever used as file names (a synced value could be anything) */
+fun validPicId(id: String?): Boolean = id != null && id.length == 32 && id.all { it in '0'..'9' || it in 'a'..'f' }
+/** every own picture the cards point at */
+fun picIds(d: AtlasData): Set<String> = d.identities.mapNotNull { it.pic?.takeIf(::validPicId) }.toSet()
+
 /** Identity kinds in wallet order. */
 val KINDS = listOf("email", "phone", "login")
 fun kindRank(t: String) = KINDS.indexOf(t).let { if (it < 0) KINDS.size else it }
@@ -325,6 +343,8 @@ fun decodeAtlas(text: String): AtlasData {
     if (x.via != null && x.via!!.isBlank()) x = x.copy(via = null)
     if (x.vias != null && x.vias!!.none { it.isNotBlank() }) x = x.copy(vias = null)
     if (x.demo == false) x = x.copy(demo = null)
+    if (x.bg != null && x.bg!!.isBlank()) x = x.copy(bg = null)
+    if (x.pic != null && x.pic!!.isBlank()) x = x.copy(pic = null)
     x
   }, accounts = d.accounts.map { a ->
     var x = a

@@ -17,7 +17,12 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -248,11 +253,29 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String, prese
   var notes by remember { mutableStateOf(existing?.notes ?: "") }
   var esim by remember { mutableStateOf(existing?.esim == true) }
   var apple by remember { mutableStateOf(existing?.apple == true) }
+  // card background: bg = official id ("" none); pic = an own picture that is on this device ("" none);
+  // picKeep = the card's picture lives on another device (not here yet): kept as is unless the user picks something else
+  var bg by remember { mutableStateOf(existing?.bg.orEmpty()) }
+  var pic by remember { mutableStateOf(existing?.pic?.takeIf { CardPics.has(it) }.orEmpty()) }
+  var picKeep by remember { mutableStateOf(existing?.pic?.takeIf { !CardPics.has(it) }.orEmpty()) }
   val hap = haptics()
+  val scope = rememberCoroutineScope()
+  val ctx = androidx.compose.ui.platform.LocalContext.current
+  // the picture is processed and stored (by content id) right away so the preview can show it; only 保存 points the
+  // card at it, and a picture nobody points at is deleted at the next launch
+  val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    if (uri != null) scope.launch {
+      val id = CardPics.fromUri(ctx, uri)
+      if (id == null) Store.show("这张图片打不开") else { pic = id; bg = ""; picKeep = ""; hap(TICK) }
+    }
+  }
   val login = type == "login"
   val esimOut: Boolean? = if (type == "phone" && esim) true else null
   val appleOut: Boolean? = if (!login && apple) true else null
   val providerOut = if (login) provider else null
+  // at most one of the two: an own picture (here or on another device) wins over an official one
+  val picOut = pic.ifEmpty { picKeep }.ifEmpty { null }
+  val bgOut = if (picOut == null) bg.ifEmpty { null } else null
   val bindsOut = if (login) binds else emptyList()
   val sample = when {
     login && provider == "qq" -> "10001"
@@ -260,7 +283,7 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String, prese
     type == "email" -> "name@example.com"
     else -> "+86 138 0000 0000"
   }
-  val preview = Identity(existing?.id ?: "_new", type, value.ifEmpty { sample }, label, color, notes, order = existing?.order, esim = esimOut, provider = providerOut, apple = appleOut).withBinds(bindsOut)
+  val preview = Identity(existing?.id ?: "_new", type, value.ifEmpty { sample }, label, color, notes, order = existing?.order, esim = esimOut, provider = providerOut, apple = appleOut, bg = bgOut, pic = picOut).withBinds(bindsOut)
   val dup = Store.existing(type, providerOut, value, existing?.id)
   val viaNewErr = if (login && addNew && viaNew.isNotBlank()) idValueError(if (viaNew.contains('@')) "email" else "phone", viaNew) else null
   val err = if (value.isBlank()) null else idValueError(if (login) provider else type, value)
@@ -280,14 +303,14 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String, prese
     if (existing != null) {
       Store.mutate("已保存") { s -> s.copy(identities = s.identities.map {
         // edited by the user: a sample card becomes theirs
-        if (it.id == existing.id) it.copy(type = type, value = v, label = label.trim(), color = color, notes = notes.trim(), esim = esimOut, apple = appleOut, provider = providerOut, demo = null)
+        if (it.id == existing.id) it.copy(type = type, value = v, label = label.trim(), color = color, notes = notes.trim(), esim = esimOut, apple = appleOut, provider = providerOut, demo = null, bg = bgOut, pic = picOut)
           .let { x -> if (login) x.withBinds(bound) else x }
         // a card that stops being an email / phone can no longer be what a login is bound to
         else if (type == "login" && existing.id in it.bindIds) it.withBinds(it.bindIds - existing.id) else it
       }) }
       Store.setKind(type, existing.id)
     } else {
-      val i = Identity(newID(), type, v, label.trim(), color, notes.trim(), esim = esimOut, provider = providerOut, apple = appleOut).withBinds(if (login) bound else emptyList())
+      val i = Identity(newID(), type, v, label.trim(), color, notes.trim(), esim = esimOut, provider = providerOut, apple = appleOut, bg = bgOut, pic = picOut).withBinds(if (login) bound else emptyList())
       Store.mutate("已添加") { s -> s.copy(identities = s.identities + i) }
       Store.setKind(type, i.id)
     }
@@ -384,10 +407,52 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String, prese
             }
           }
         }
+        FormGroup("卡片背景", (if (OfficialBackgrounds.all.isNotEmpty()) "官方背景会跟着同步；" else "") +
+          if (Sync.on && Sync.provider == "webdav") "自己选的图片会加密同步到你的 WebDAV。"
+          else "自己选的图片只保存在这台设备上。同步方式改成 WebDAV 后，图片也能同步到其他设备。") {
+          val tiles = buildList {
+            add(BgChoice(bg.isEmpty() && pic.isEmpty() && picKeep.isEmpty(), null, "无") { hap(TICK); bg = ""; pic = ""; picKeep = "" })
+            if (picKeep.isNotEmpty()) add(BgChoice(true, null, "其他设备上的图片") {})
+            OfficialBackgrounds.all.forEach { b -> add(BgChoice(pic.isEmpty() && picKeep.isEmpty() && bg == b.id, "bg:${b.id}", null, b.name) { hap(TICK); bg = b.id; pic = ""; picKeep = "" }) }
+            if (pic.isNotEmpty()) add(BgChoice(true, "pic:$pic", null, "我的图片") {})
+            add(BgChoice(false, null, if (pic.isNotEmpty()) "换一张" else "自己的图片", "从相册选择", add = true) {
+              photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+          }
+          Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            tiles.chunked(4).forEach { row ->
+              Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { BgTile(Modifier.weight(1f), it) }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+              }
+            }
+          }
+        }
         FormGroup("备注", "不要在这里填写密码。") {
           Field(notes, { notes = it }, if (login) "实名、绑定的银行卡、找回方式" else "运营商、是否实名、找回方式", lines = 4)
         }
       }
+    }
+  }
+}
+
+/** One choice in 「卡片背景」: a small card-shaped tile showing the picture (key), or a word on the field colour. */
+private class BgChoice(val on: Boolean, val key: String?, val text: String?, val desc: String? = null, val add: Boolean = false, val onClick: () -> Unit)
+
+@Composable
+private fun BgTile(modifier: Modifier, c: BgChoice) {
+  val on = c.on; val key = c.key; val text = c.text; val desc = c.desc; val add = c.add
+  val shape = CardShape(false)
+  val img by androidx.compose.runtime.produceState(key?.let { CardPics.cached(it) }, key) {
+    value = key?.let { CardPics.cached(it) }
+    if (key != null && value == null) value = CardPics.load(key)
+  }
+  Box(modifier.aspectRatio(1.586f).press(0.94f, onClick = c.onClick)
+    .border(if (on) 2.5.dp else 0.dp, if (on) pal.primary else Color.Transparent, RoundedCornerShape(9.dp)).padding(3.dp)
+    .clip(shape).background(pal.glass).semantics { if (desc != null) contentDescription = desc }, contentAlignment = Alignment.Center) {
+    img?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+    if (text != null) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+      if (add) Icon(Icons.Filled.Add, null, Modifier.size(16.dp), tint = pal.accent)
+      T(text, 11f, FontWeight.SemiBold, if (add) pal.accent else pal.secondary, lines = 2, align = androidx.compose.ui.text.style.TextAlign.Center)
     }
   }
 }

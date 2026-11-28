@@ -73,6 +73,22 @@ object AtlasCrypto {
     return c.doFinal(ct)
   }
 
+  /** Card pictures on WebDAV (pics/<id>.bin): raw nonce(12) || ciphertext || tag(16), same key as the data file.
+   *  Binary, not the JSON envelope: a picture is ~100 KB and base64 would add a third. */
+  fun sealBytes(plain: ByteArray, key: ByteArray): ByteArray {
+    val iv = randomBytes(12)
+    val c = Cipher.getInstance("AES/GCM/NoPadding")
+    c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+    return iv + c.doFinal(plain)
+  }
+  /** Throws BadFormat when too short, AEADBadTagException when the key doesn't open it. */
+  fun openBytes(blob: ByteArray, key: ByteArray): ByteArray {
+    if (blob.size <= 12 + 16) throw BadFormat()
+    val c = Cipher.getInstance("AES/GCM/NoPadding")
+    c.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, blob, 0, 12))
+    return c.doFinal(blob, 12, blob.size - 12)
+  }
+
   fun sealData(d: AtlasData, key: ByteArray, saltB64: String) = seal(encodeAtlas(d).toByteArray(Charsets.UTF_8), key, saltB64)
   fun openData(text: String, key: ByteArray): AtlasData = decodeAtlas(String(open(text, key), Charsets.UTF_8))
 }

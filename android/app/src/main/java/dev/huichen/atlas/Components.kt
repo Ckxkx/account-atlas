@@ -326,11 +326,30 @@ fun WalletCard(i: Identity, modifier: Modifier = Modifier, shadow: Boolean = tru
   val shape = CardShape(i.isPhone)
   val glow = hex(i.color)
   val poster = remember(accs) { accs.sortedByDescending { it.createdAt }.map { brandColor(it.name, it.domain) } }
+  // a card background (docs/card-backgrounds.md) replaces the colour face and the poster; decoded off the main thread
+  val bgKey = CardPics.keyFor(i)
+  val bg by androidx.compose.runtime.produceState(bgKey?.let { CardPics.cached(it) }, bgKey) {
+    value = bgKey?.let { CardPics.cached(it) }
+    if (bgKey != null && value == null) value = CardPics.load(bgKey)
+  }
   Box(
     modifier.fillMaxWidth().aspectRatio(1.586f)
       .then(if (shadow) Modifier.shadow(22.dp, shape, ambientColor = glow, spotColor = glow) else Modifier)
       .clip(shape)
       .drawBehindCompat {
+        val img = bg
+        if (img != null) {
+          // fill the card (center-crop: own pictures are already 1.586:1, official ones may be a little off); the clip
+          // above gives it the SIM cut. The scrim keeps the white label / count (top) and value / note (bottom) readable.
+          val r = size.width / size.height
+          var sw = img.width.toFloat(); var sh = sw / r
+          if (sh > img.height) { sh = img.height.toFloat(); sw = sh * r }
+          drawImage(img, androidx.compose.ui.unit.IntOffset(((img.width - sw) / 2).toInt(), ((img.height - sh) / 2).toInt()),
+            androidx.compose.ui.unit.IntSize(sw.toInt(), sh.toInt()), dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt() + 1, size.height.toInt() + 1),
+            filterQuality = androidx.compose.ui.graphics.FilterQuality.Medium)
+          drawRect(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.38f), 0.38f to Color.Transparent, 0.48f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.55f)))
+          return@drawBehindCompat
+        }
         drawRect(skinBrush(i.color, size))
         // soft mosaic of the brand colours of what this identity unlocks
         if (poster.isNotEmpty()) {
