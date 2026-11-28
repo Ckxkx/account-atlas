@@ -18,10 +18,12 @@ client knows that id; else the colour. Unknown / missing never errors.
 
 ## Official backgrounds
 
-One registry per client, same ids, same order, same names:
-- web: `BGS` in app.js, files `backgrounds/<id>.jpg`
-- iOS: `OfficialBackgrounds.all` (native/Backgrounds.swift), files bundled as `backgrounds/<id>.jpg`
-- Android: `OfficialBackgrounds.all` (Backgrounds.kt), files `android/app/src/main/assets/backgrounds/<id>.jpg`
+The pictures live once, in the repo root folder `backgrounds/<id>.jpg` (the web serves it; ios.yml copies it
+into the app bundle as `backgrounds/`, like `icons/`; Android's Gradle build adds it as an assets dir so it is
+`assets/backgrounds/<id>.jpg`). One registry per client, same ids, same order, same names:
+- web: `BGS` in app.js
+- iOS: `OfficialBackgrounds.all` (native/Backgrounds.swift)
+- Android: `OfficialBackgrounds.all` (Backgrounds.kt)
 
 Empty for now; the pictures come later. With an empty registry the picker only shows 「无」 and 「自己的图片」.
 
