@@ -1949,57 +1949,51 @@
   // ---------- relationship map: identities on the left, apps on the right, threads between ----------
   const Graph = (() => {
     let sel = null, running = false, drawn = false, built = '', pre = 0, members = new Map();
-    const ROW = 54;
+    // the same geometry as the iOS / Android map (MapView.swift, MapScreen.kt): cards stacked from the top in
+    // their groups (邮箱, 手机号, 微信 / QQ) with a label above each, app tiles stacked on the right, threads between
+    const CARD = 64, CGAP = 12, APP = 46, AGAP = 8, GROUP = 30, TOP = 22, IN = 16;
     // one node per distinct email / phone (and 微信 / QQ): duplicates that weren't merged share it
     const nodeAccs = ids => state.accounts.filter(a => a.identityIds.some(x => ids.includes(x))).sort((a, b) => zh(a.name, b.name));
     function layout() {
       const TR = t => KINDS.indexOf(t);
-      const all = state.identities.filter(i => TR(i.type) >= 0).sort((p, q) => TR(p.type) - TR(q.type));
+      // a stable sort keeps the order within a group the way the wallet has it
+      const all = state.identities.filter(i => TR(i.type) >= 0).map((i, k) => [i, k]).sort((p, q) => TR(p[0].type) - TR(q[0].type) || p[1] - q[1]).map(x => x[0]);
       const byKey = new Map(), ids = [], at = new Map();
       for (const i of all) { const k = idKey(i) || i.id; if (!byKey.has(k)) { byKey.set(k, [i]); ids.push(i); } else byKey.get(k).push(i); }
       members = new Map(ids.map(i => [i.id, byKey.get(idKey(i) || i.id).map(x => x.id)]));
       ids.forEach((i, k) => members.get(i.id).forEach(x => at.set(x, k)));
       const idx = id => at.has(id) ? at.get(id) : -1;
       const first = a => { const ks = a.identityIds.map(idx).filter(k => k >= 0); return ks.length ? Math.min(...ks) : 1e3; };
-      const apps = state.accounts.slice().sort((a, b) => first(a) - first(b) || b.identityIds.length - a.identityIds.length || zh(a.name, b.name));
-      const ay = {}; apps.forEach((a, k) => ay[a.id] = k * ROW + ROW / 2);
-      const H = Math.max(apps.length * ROW, ids.length * 78, 120);
-      // each card sits at the middle of its apps, then nudge apart so cards never overlap
-      let pos = ids.map(i => { const ys = nodeAccs(members.get(i.id)).map(a => ay[a.id]); return { i, ids: members.get(i.id), y: ys.length ? ys.reduce((s, v) => s + v, 0) / ys.length : H }; });
-      // emails first, then phone numbers, then login cards, with a small label above each group
-      pos.sort((p, q) => TR(p.i.type) - TR(q.i.type) || p.y - q.y);
-      const GAP = 78, half = 33, LBL = 30;
-      const brk = new Set(pos.map((p, k) => k && p.i.type !== pos[k - 1].i.type ? k : -1).filter(k => k > 0));
-      const minY = []; pos.forEach((p, k) => minY[k] = k ? minY[k - 1] + GAP + (brk.has(k) ? LBL : 0) : half + LBL);
-      for (let k = 0; k < pos.length; k++) pos[k].y = Math.max(pos[k].y, minY[k]);
-      const over = pos.length ? pos[pos.length - 1].y - (H - half) : 0;
-      if (over > 0) for (let k = pos.length - 1; k >= 0; k--) { pos[k].y = Math.min(pos[k].y, k === pos.length - 1 ? H - half : pos[k + 1].y - GAP - (brk.has(k + 1) ? LBL : 0)); pos[k].y = Math.max(pos[k].y, minY[k]); }
-      // the group label can push cards past the app column, so grow the box to fit them
-      const H2 = Math.max(H, pos.length ? pos[pos.length - 1].y + half : 0);
-      return { apps, ay, pos, H: H2, brk };
+      // apps follow the first card they belong to, so threads cross as little as possible
+      const apps = state.accounts.slice().sort((a, b) => first(a) - first(b) || zh(a.name, b.name));
+      const ay = {}; apps.forEach((a, k) => ay[a.id] = TOP + k * (APP + AGAP));
+      let gaps = 0; const brk = new Set();
+      const pos = ids.map((i, k) => { if (k && i.type !== ids[k - 1].type) { gaps += GROUP; brk.add(k); } return { i, ids: members.get(i.id), y: TOP + k * (CARD + CGAP) + gaps }; });
+      const H = Math.max(pos.length ? pos[pos.length - 1].y + CARD : 0, apps.length ? ay[apps[apps.length - 1].id] + APP : 0, 120) + 10;
+      return { apps, ay, pos, H, brk };
     }
     function render() {
       const box = $('#mapBox'); if (!box) return;
       const n = state.accounts.length, multi = state.accounts.filter(a => a.identityIds.length > 1).length;
       $('#graphSummary').textContent = n ? `${state.identities.length} 个身份，${n} 个网站与 App` + (multi ? `，${multi} 个绑了不止一个` : '') : '';
-      if (!state.identities.length || !n) { sel = null; box.classList.remove('focus'); box.innerHTML = `<div class="empty"><h3>还没有可以连线的</h3><p>添加一个邮箱或手机号，再给它记几个网站，这里就会连起来。</p><button class="btn-filled" data-new="${state.identities.length ? 'account' : 'identity'}">${state.identities.length ? '添加网站或 App' : '添加邮箱或手机号'}</button></div>`; return; }
+      if (!state.identities.length || !n) { sel = null; box.classList.remove('focus'); box.style.height = ''; box.innerHTML = `<div class="empty"><h3>还没有可以连线的</h3><p>添加一个邮箱或手机号，再给它记几个网站，这里就会连起来。</p><button class="btn-filled" data-new="${state.identities.length ? 'account' : 'identity'}">${state.identities.length ? '添加网站或 App' : '添加邮箱或手机号'}</button></div>`; return; }
       const { apps, ay, pos, H, brk } = layout();
       // the focus never outlives its node: a delete (from this map's detail sheet or anywhere else) used to keep
       // it on the gone id, so every card and thread stayed dimmed until a reload. A duplicate moves to its node.
       if (sel && !members.has(sel)) sel = [...members].find(([, g]) => g.includes(sel))?.[0] || null;
-      const W = box.clientWidth || 350, L = Math.min(150, Math.round(W * .38)), R = L + Math.max(56, Math.round(W * .17));
+      const W = box.clientWidth || 360, L = Math.round(Math.min(160, W * .42)), AW = Math.round(Math.min(W * .4, 280)), R = W - IN - AW;
       const paths = [];
       for (const p of pos) for (const a of nodeAccs(p.ids)) {
-        const y1 = p.y, y2 = ay[a.id], mx = (L + R) / 2;
-        paths.push(`<path data-i="${p.i.id}" data-a="${a.id}" style="--c:${p.i.color}" d="M${L} ${y1.toFixed(1)}C${mx} ${y1.toFixed(1)} ${mx} ${y2.toFixed(1)} ${R - 6} ${y2.toFixed(1)}"/>`);
+        const y1 = p.y + CARD / 2, y2 = ay[a.id] + APP / 2, x1 = IN + L, mx = (x1 + R) / 2;
+        paths.push(`<path data-i="${p.i.id}" data-a="${a.id}" style="--c:${p.i.color}" d="M${x1} ${y1.toFixed(1)}C${mx} ${y1.toFixed(1)} ${mx} ${y2.toFixed(1)} ${R} ${y2.toFixed(1)}"/>`);
       }
       box.style.height = H + 'px';
       box.innerHTML = `<svg class="threads" viewBox="0 0 ${W} ${H}" style="width:${W}px;height:${H}px" aria-hidden="true">${paths.join('')}</svg>
-        ${pos.map((p, k) => (k === 0 || brk.has(k)) ? `<span class="mgroup" style="top:${p.y - 31 - 24}px;width:${L}px">${p.i.type === 'phone' ? ICON.phone + '手机号' : p.i.type === 'login' ? ICON.wechat + '微信 / QQ' : ICON.email + '邮箱'}</span>` : '').join('')}
+        ${pos.map((p, k) => (k === 0 || brk.has(k)) ? `<span class="mgroup" style="top:${k ? p.y - 22 : 0}px">${p.i.type === 'phone' ? '手机号' : p.i.type === 'login' ? '微信 / QQ' : '邮箱'}</span>` : '').join('')}
         ${pos.map(p => { const c = nodeAccs(p.ids).length, ap = p.ids.some(x => idById(x)?.apple === true), bt = p.i.type === 'login' ? bindTag(p.i) : '';
           // bindings (微信 → 手机号) are not threads: a small tag on the node says which number, the detail says the rest
-          return `<button class="mcard" data-map-identity="${p.i.id}" style="top:${p.y - 31}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${idGlyph(p.i)}${ap ? `<em class="mtag apple" aria-label="Apple ID">${ICON.apple}</em>` : ''}${bt ? `<em class="mtag">${esc(bt)}</em>` : ''}<b>${c}</b></span><span class="mv">${esc(ttl(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
-        ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}${handle(a)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
+          return `<button class="mcard${p.i.type === 'phone' ? ' sim' : ''}" data-map-identity="${p.i.id}" style="top:${p.y}px;left:${IN}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${idGlyph(p.i)}<b>${c}</b>${ap ? `<em class="mtag apple" aria-label="Apple ID">${ICON.apple}</em>` : ''}${bt ? `<em class="mtag">${esc(bt)}</em>` : ''}</span><span class="mv">${esc(ttl(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
+        ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id]}px;left:${R}px;width:${AW}px">${favIcon(a)}<span class="mn">${esc(a.name)}${handle(a)}</span></button>`).join('')}`;
       built = dataVer + ':' + W;
       apply(); if (running) draw();
     }
@@ -2031,13 +2025,13 @@
       start() {
         running = true; drawn = false; sel = null;
         const box = $('#mapBox');
-        if (box && built && built === dataVer + ':' + (box.clientWidth || 350)) { apply(); draw(); } else render();
+        if (box && built && built === dataVer + ':' + (box.clientWidth || 360)) { apply(); draw(); } else render();
       },
       stop() { running = false; },
       // build the map while the browser is idle and the tab is hidden, so the first visit only plays the draw-in
       prebuild() {
         clearTimeout(pre); const idle = window.requestIdleCallback || (f => setTimeout(f, 300));
-        pre = setTimeout(() => idle(() => { const box = $('#mapBox'); if (!running && box && built !== dataVer + ':' + (box.clientWidth || 350)) render(); }, { timeout: 2000 }), 400);
+        pre = setTimeout(() => idle(() => { const box = $('#mapBox'); if (!running && box && built !== dataVer + ':' + (box.clientWidth || 360)) render(); }, { timeout: 2000 }), 400);
       },
       rebuild() { if (running) render(); },
       resize() { if (running) { clearTimeout(rz); rz = setTimeout(render, 120); } },
