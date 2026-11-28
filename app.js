@@ -476,6 +476,32 @@
   const snap = () => { undoSnap = JSON.stringify(state); };
   const undoToast = msg => toast(msg, { label: '撤销', fn: () => { state = JSON.parse(undoSnap); save(); render(); if (sheetCtx?.kind === 'cats') catSheet(sheetCtx.back); } });
 
+  // ---------- card backgrounds ----------
+  // A card can wear a picture instead of its colour (docs/card-backgrounds.md). identity.bg = an official
+  // picture (ships with the app), identity.pic = the user's own picture by content id. Both ids sync; the own
+  // picture itself stays in this browser (atlas.pic.<id>) — the web never syncs pictures (the apps do on WebDAV).
+  const BGS = [];   // { id, name, src } — the official set; ids are never reused
+  const PIC_KEY = id => 'atlas.pic.' + id;
+  const picUrl = id => { try { return id && localStorage.getItem(PIC_KEY(id)) || ''; } catch { return ''; } };
+  const officialBg = id => BGS.find(b => b.id === id)?.src || '';
+  // what a card shows: _bg is the form's preview ('' = no picture), then the own picture if it is here, then the official one
+  const bgSrc = i => i._bg !== undefined ? i._bg : picUrl(i.pic) || officialBg(i.bg);
+  const picId = async url => [...new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(atob(url.split(',')[1]), c => c.charCodeAt(0))))].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 32);
+  // any image → a center-cropped card-shaped JPEG (credit-card ratio), small enough for localStorage
+  async function makeBg(blob) {
+    let img;
+    try { img = await createImageBitmap(blob); }
+    catch { img = await new Promise((ok, no) => { const u = URL.createObjectURL(blob), im = new Image(); im.onload = () => { URL.revokeObjectURL(u); ok(im); }; im.onerror = () => { URL.revokeObjectURL(u); no(); }; im.src = u; }); }
+    const w = img.width, h = img.height; if (!w || !h) throw 0;
+    const R = 1.586, W = 900, H = Math.round(W / R);
+    let sw = w, sh = w / R; if (sh > h) { sh = h; sw = h * R; }
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+    g.drawImage(img, (w - sw) / 2, (h - sh) / 2, sw, sh, 0, 0, W, H);
+    img.close?.();
+    return c.toDataURL('image/jpeg', 0.82);
+  }
+
   // ---------- wallet card ----------
   function walletCard(i, extra = '') {
     const accs = accountsOf(i.id), n = accs.length;
@@ -487,8 +513,9 @@
     const nb = lg ? bindsOf(i).length : 0;
     const note = lg ? (via ? `绑定 ${ttl(via)}${nb > 1 ? ` 等 ${nb} 个` : ''}` : i.notes || LOGIN[provOf(i)].name)
       : [i.apple === true ? 'Apple ID' : '', sim ? [car && !(i.notes || '').includes(car.slice(2)) ? car : '', i.notes].filter(Boolean).join(' · ') || (i.apple === true ? '' : '手机号') : i.notes || (i.apple === true ? '' : '邮箱')].filter(Boolean).join(' · ');
-    return `<button class="wcard ${sim ? 'sim' : ''}${lg ? ' login lg-' + provOf(i) : ''}" ${extra} data-identity="${i.id}" style="--c:${i.color};--g:${skin(i.color)}">
-      ${poster(accs.slice().sort((a, b) => b.createdAt - a.createdAt), 9)}
+    const bg = bgSrc(i);
+    return `<button class="wcard ${sim ? 'sim' : ''}${lg ? ' login lg-' + provOf(i) : ''}${bg ? ' has-bg' : ''}" ${extra} data-identity="${i.id}" style="--c:${i.color};--g:${skin(i.color)}">
+      ${bg ? `<img class="wc-bg" src="${esc(bg)}" alt="" decoding="async">` : poster(accs.slice().sort((a, b) => b.createdAt - a.createdAt), 9)}
       <span class="sheen"></span>
       <span class="wc-top"><span class="wc-kind">${kind}</span>
         <span class="wc-count"><b>${n}</b><small>个网站与 App</small></span></span>
@@ -897,10 +924,17 @@
     let binds = existing ? bindsOf(i).map(v => v.id) : presetVia && idById(presetVia) ? [presetVia] : [], addNew = false;
     // a colour the user picked stays; otherwise a login card wears its provider's colour
     let touched = !!existing && !(i.type === 'login' && i.color === LOGIN[provider].color);
+    // card background: bg = official id ('' none); pic = this device's own picture ('' none)
+    let bg = existing?.bg || '', pic = existing ? picUrl(existing.pic) : '', picKeep = existing?.pic && !pic ? existing.pic : '';
     const PH = { email: ['地址', 'name@example.com', 'email'], phone: ['号码', '+86 138 0000 0000', 'tel'] };
     const ph = () => type === 'login' ? [LOGIN[provider].field, LOGIN[provider].ph, 'text'] : PH[type];
     const palette = () => { const p = type === 'login' ? [LOGIN.wechat.color, LOGIN.qq.color, ...COLORS] : [...COLORS]; if (!p.includes(color)) p.unshift(color); return p; };
     const colorsHtml = () => palette().map(c => `<button class="color ${c === color ? 'active' : ''}" style="--c:${c};--g:${skin(c)}" data-c="${c}" aria-label="${SKINS[c] ? SKINS[c][0] : c}"><span>${SKINS[c] ? SKINS[c][0] : ''}</span></button>`).join('');
+    const bgsHtml = () => `<button class="bgpick ${!bg && !pic && !picKeep ? 'active' : ''}" data-bg=""><span>无</span></button>` +
+      (picKeep ? `<button class="bgpick active" data-bg="pic"><span>其他设备上的图片</span></button>` : '') +
+      BGS.map(b => `<button class="bgpick ${!pic && bg === b.id ? 'active' : ''}" data-bg="${b.id}" style="background-image:url('${b.src}')" aria-label="${esc(b.name)}"></button>`).join('') +
+      (pic ? `<button class="bgpick active" data-bg="pic" style="background-image:url('${pic}')" aria-label="我的图片"></button>` : '') +
+      `<label class="bgpick add" aria-label="从相册选择">${ICON.plus}<span>${pic ? '换一张' : '自己的图片'}</span><input type="file" accept="image/*" id="fBgFile" hidden></label>`;
     const viaHtml = () => { const opts = state.identities.filter(x => (x.type === 'email' || x.type === 'phone') && x.id !== existing?.id);
       return `<button class="check-cell ${binds.length || addNew ? '' : 'on'}" data-via=""><i style="background:var(--tertiary)"></i><span class="cell-main"><span class="cell-title">不绑定</span></span>${ICON.tick}</button>` +
         opts.map(x => `<button class="check-cell ${binds.includes(x.id) ? 'on' : ''}" data-via="${x.id}" style="--c:${x.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(ttl(x))}${appleTag(x)}</span><span class="cell-sub">${esc(typeName(x))}${x.label ? ' · ' + esc(display(x)) : ''}</span></span>${ICON.tick}</button>`).join('') +
@@ -931,13 +965,16 @@
         </div>
         <div class="sec-title">卡面</div>
         <div class="group"><div class="colors" id="colors">${colorsHtml()}</div></div>
+        <div class="sec-title">卡片背景</div>
+        <div class="group"><div class="bgpicks" id="bgPicks">${bgsHtml()}</div></div>
+        <p class="hint">${BGS.length ? '官方背景会跟着同步；' : ''}自己选的图片只保存在这个浏览器里，网页版不同步图片。</p>
         <div class="sec-title">备注</div>
         <div class="group"><div class="field stack"><textarea id="fNotes" placeholder="运营商、是否实名、找回方式">${esc(i.notes || '')}</textarea></div></div>
         <p class="hint">不要在这里填写密码。</p>
       </div>`, { kind: 'form' });
     setTimeout(() => {
       const preview = () => {
-        const tmp = { id: existing?.id || '_new', type, value: $('#fValue').value.trim() || ph()[1].split(' 或')[0], label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim(), ...(type === 'phone' && esim ? { esim: true } : {}), ...(type !== 'login' && apple ? { apple: true } : {}), ...(type === 'login' ? setBinds({ id: existing?.id || '_new', provider }, binds) : {}) };
+        const tmp = { _bg: pic || officialBg(bg), id: existing?.id || '_new', type, value: $('#fValue').value.trim() || ph()[1].split(' 或')[0], label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim(), ...(type === 'phone' && esim ? { esim: true } : {}), ...(type !== 'login' && apple ? { apple: true } : {}), ...(type === 'login' ? setBinds({ id: existing?.id || '_new', provider }, binds) : {}) };
         const html = walletCard(tmp, 'tabindex="-1" data-static data-reveal');
         const box = $('#preview'); box.innerHTML = html; fixStack(box);
       };
@@ -952,6 +989,15 @@
         preview();
       };
       preview(); wireColors();
+      const wireBgs = () => {
+        $$('#bgPicks [data-bg]').forEach(b => b.onclick = () => { const v = b.dataset.bg; if (v !== 'pic') { bg = v; pic = ''; picKeep = ''; } $('#bgPicks').innerHTML = bgsHtml(); wireBgs(); preview(); });
+        $('#fBgFile').onchange = async e => {
+          const f = e.target.files?.[0]; if (!f) return;
+          try { pic = await makeBg(f); bg = ''; picKeep = ''; } catch { toast('这张图片打不开'); return; }
+          $('#bgPicks').innerHTML = bgsHtml(); wireBgs(); preview();
+        };
+      };
+      wireBgs();
       ['#fValue', '#fLabel', '#fNotes'].forEach(s => $(s).addEventListener('input', preview));
       $$('#typeSeg button').forEach(b => b.onclick = () => { type = b.dataset.v; repaint(); });
       $$('#provPills button').forEach(b => b.onclick = () => { provider = b.dataset.p; repaint(); });
@@ -962,7 +1008,7 @@
       };
       $('#fEsim').onchange = e => { esim = e.target.checked; preview(); };
       $('#fApple').onchange = e => { apple = e.target.checked; preview(); };
-      $('#saveIdentity').onclick = () => {
+      $('#saveIdentity').onclick = async () => {
         const value = $('#fValue').value.trim();
         const err = idValueError(type === 'login' ? provider : type, value);
         if (err) {
@@ -988,15 +1034,22 @@
         if (type === 'phone' && esim) data.esim = true;
         if (type !== 'login' && apple) data.apple = true;
         if (type === 'login') data.provider = provider;
+        if (bg && !pic) data.bg = bg;
+        // the own picture: stored here by content id; a card whose picture lives on another device keeps its id
+        let picOk = true;
+        if (pic) { try { data.pic = await picId(pic); if (!picUrl(data.pic)) localStorage.setItem(PIC_KEY(data.pic), pic); } catch { picOk = false; delete data.pic; } }
+        else if (picKeep) data.pic = picKeep;
         let id;
         if (existing) {
           Object.assign(existing, data);
           if (!data.esim) delete existing.esim; if (!data.apple) delete existing.apple; if (!data.provider) delete existing.provider;
+          // a picture of this device's own replaces the official one here; the synced id goes so other devices show the colour
+          if (!data.bg) delete existing.bg; if (!data.pic) delete existing.pic;
           if (type === 'login') setBinds(existing, bind);
           delete existing.demo;   // edited by the user: a sample card becomes theirs
           id = existing.id;
         } else { id = uid(); state.identities.push(type === 'login' ? setBinds({ id, ...data }, bind) : { id, ...data }); }
-        setKind(type, id); save(); render(); showIdentity(id); toast(existing ? '已保存' : '已添加');
+        setKind(type, id); save(); render(); showIdentity(id); toast(!picOk ? '图片太大，存不下，换一张小一点的' : existing ? '已保存' : '已添加');
       };
       if (!existing) $('#fValue').focus();
     }, 0);
@@ -2428,6 +2481,8 @@
     if (!localStorage.getItem('atlas.demoAsked') && !localStorage.getItem('atlas.tourDone')) { localStorage.setItem('atlas.demoAsked', '1'); setTimeout(() => Tour.start(true), 900); }
   }
   if (adoptLegacyDemo()) save();
+  // pictures of cards deleted on an earlier visit (kept until then so 撤销 could bring them back)
+  try { const live = new Set(state.identities.map(i => i.pic).filter(Boolean)); Object.keys(localStorage).filter(k => k.startsWith('atlas.pic.') && !live.has(k.slice(10))).forEach(k => localStorage.removeItem(k)); } catch {}
   // 2.4: Apple login cards become the email / phone they are (ids kept, silent, lossless). A copy of the
   // data from before is kept once in atlas.v1.pre24, the way the apps keep atlas.prev.json.
   if (state.identities.some(i => i.type === 'login' && i.provider === 'apple') || dupCount24(state)) {

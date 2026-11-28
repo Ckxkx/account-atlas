@@ -862,3 +862,16 @@ html[data-theme=light] .tour-a .tour-go{color:#fff}
 .is-t b{font-size:16px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .is-t small{font-size:12px;color:var(--secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .is-msg{padding:14px 16px;font-size:14px;color:var(--secondary);text-align:center}
+
+/* ---------- card backgrounds ---------- */
+.wcard .wc-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2;pointer-events:none;user-select:none}
+/* a picture under white text: darken the top and bottom where the text sits */
+.wcard.has-bg::before{background:linear-gradient(180deg,rgba(0,0,0,.38) 0%,rgba(0,0,0,0) 38%,rgba(0,0,0,0) 48%,rgba(0,0,0,.55) 100%)}
+.wcard.has-bg .wc-kind,.wcard.has-bg .wc-count,.wcard.has-bg .wc-note{text-shadow:0 1px 6px rgba(0,0,0,.35)}
+.bgpicks{display:grid;grid-template-columns:repeat(4,1fr);gap:12px 10px;padding:16px}
+.bgpick{aspect-ratio:1.586;border-radius:9px;background:var(--fill) center/cover no-repeat;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2px;
+  font-size:11.5px;font-weight:600;color:var(--secondary);cursor:pointer;transition:transform .35s var(--bounce),box-shadow .2s;position:relative;overflow:hidden}
+.bgpick:active{transform:scale(.94)}
+.bgpick.active{box-shadow:0 0 0 2px var(--group-bg,#2c2c2e),0 0 0 4px var(--tint)}
+.bgpick.add svg{width:18px;height:18px;stroke-width:2}
+.bgpick.add{color:var(--tint)}
