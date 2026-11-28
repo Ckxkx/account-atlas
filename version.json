@@ -1,0 +1,13 @@
+{
+  "version": "2.5",
+  "notes": [
+    "分类可以自定义：添加、改名、删除、拖动排序，新增「生活」分类",
+    "编辑 App 时可以从 App Store 搜索换图标",
+    "iOS / 安卓支持 WebDAV 同步（坚果云、NAS、Nextcloud 等）",
+    "安卓加入液态玻璃效果，弹出页更流畅",
+    "修复 iOS 切页和切换主题时的闪烁"
+  ],
+  "url": "https://wwbsj.lanzoup.com/b01i61dn1a",
+  "password": "0874",
+  "github": "https://github.com/Ckxkx/account-atlas/releases/latest"
+}
